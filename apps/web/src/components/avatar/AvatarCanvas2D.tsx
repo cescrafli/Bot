@@ -15,26 +15,21 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   isSpeaking,
   lookAt,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
   const [isBlinking, setIsBlinking] = useState(false);
 
-  // Reference gambar sumber
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  // Fisika Animasi Partial Terpisah (Live2D Style Puppet Rig)
+  const [rig, setRig] = useState({
+    breath: 0,
+    headTilt: 0,
+    hairLeftAngle: 0,
+    hairRightAngle: 0,
+    armLeftAngle: 0,
+    armRightAngle: 0,
+  });
 
-  // Muat gambar celyn_perfect.png
-  useEffect(() => {
-    const img = new Image();
-    img.src = "/celyn_perfect.png";
-    img.onload = () => {
-      imageRef.current = img;
-      setImageLoaded(true);
-    };
-  }, []);
-
-  // Mouse gaze tracking
+  // Track kursor mouse untuk pandangan mata
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!containerRef.current) return;
@@ -48,6 +43,55 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
+  // Loop Fisika Mandiri Tiap Bagian Tubuh (Partial Motion Engine)
+  useEffect(() => {
+    let animId: number;
+    let startTime = performance.now();
+
+    const loop = (now: number) => {
+      const t = (now - startTime) / 1000;
+
+      // 1. Napas Dada Organik (hanya dada mengembang, bingkai luar tetap 100% diam)
+      const breath = Math.sin(t * 1.6);
+
+      // 2. Kemiringan Kepala Halus (menoleh ke kursor atau miring saat berpikir)
+      let headTilt = (mousePos.x - 0.5) * 3.5;
+      if (emotion === "thinking") {
+        headTilt += 5.0; // Kepala miring ke samping saat berpikir
+      } else if (emotion === "happy") {
+        headTilt -= 2.0;
+      }
+
+      // 3. Ayunan Rambut Depan Kiri & Kanan (Fisika Inersia & Angin Lembut)
+      // Rambut mengayun independen dari akar kulit kepala
+      const hairLeftAngle = Math.sin(t * 2.3) * 3.8 + headTilt * 0.4;
+      const hairRightAngle = Math.sin(t * 2.1 + 1.2) * 3.8 + headTilt * 0.4;
+
+      // 4. Ayunan Tangan & Pergelangan (Tangan bergerak sendiri dari sendi siku/bahu)
+      let armLeftAngle = Math.sin(t * 1.6 - 0.4) * 2.5;
+      let armRightAngle = Math.sin(t * 1.6 + 0.4) * -2.5;
+
+      // Gestur tangan saat senang / menyapa
+      if (emotion === "happy") {
+        armLeftAngle += -4.0;
+      }
+
+      setRig({
+        breath,
+        headTilt,
+        hairLeftAngle,
+        hairRightAngle,
+        armLeftAngle,
+        armRightAngle,
+      });
+
+      animId = requestAnimationFrame(loop);
+    };
+
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [mousePos, emotion]);
+
   // Siklus Kedipan Alami (acak tiap 3-5 detik)
   useEffect(() => {
     let blinkTimeout: number;
@@ -59,7 +103,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         setTimeout(() => {
           setIsBlinking(false);
           scheduleBlink();
-        }, 160); // Durasi kedipan ~160ms
+        }, 150); // Kedip ~150ms
       }, delay);
     };
 
@@ -74,6 +118,10 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     }
     return mousePos;
   }, [lookAt, mousePos]);
+
+  // Offset pergerakan pupil mata (0..1 -> -5px s/d +5px)
+  const pupilOffsetX = (gazeTarget.x - 0.5) * 6;
+  const pupilOffsetY = (gazeTarget.y - 0.5) * 4;
 
   // Konfigurasi Emosi
   const emotionConfig = {
@@ -123,238 +171,24 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   const EmotionIcon = emotionConfig.icon;
   const mouthScale = Math.min(1.0, Math.max(0, mouthOpen * 1.8));
 
-  // LOOP RENDERING DEFORMASI CANVAS (Live2D-Style 2D Mesh Animation)
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !imageLoaded || !imageRef.current) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const img = imageRef.current;
-    const cw = canvas.width;  // 768
-    const ch = canvas.height; // 1024
-
-    let animId: number;
-    let startTime = performance.now();
-
-    const render = (now: number) => {
-      const t = (now - startTime) / 1000;
-
-      ctx.clearRect(0, 0, cw, ch);
-
-      // --- FISIKA INTERNAL ---
-      // 1. Pernapasan internal dada (tanpa menggoyang kanvas/bingkai!)
-      const breath = Math.sin(t * 1.8);
-      // 2. Ombak angin rambut depan kiri & kanan
-      const hairWindL = Math.sin(t * 2.6);
-      const hairWindR = Math.sin(t * 2.3 + 1.2);
-      // 3. Ayunan tangan & pergelangan tangan kiri (gelang) dan kanan (jam)
-      const armSwingL = Math.sin(t * 1.8 - 0.4);
-      const armSwingR = Math.sin(t * 1.8 + 0.4);
-
-      // Kemiringan kepala halus (berputar pada leher x=384, y=400)
-      let headAngle = (gazeTarget.x - 0.5) * 0.05;
-      if (emotion === "thinking") {
-        headAngle += 0.08;
-      } else if (emotion === "happy") {
-        headAngle -= 0.03;
-      }
-
-      // ==========================================
-      // A. GAMBAR TUBUH DASAR & DADA BERNAPAS
-      // ==========================================
-      // Slicing horizontal dari y=0 s/d y=1024
-      const sliceH = 8;
-      for (let y = 0; y < ch; y += sliceH) {
-        let drawX = 0;
-        let drawW = cw;
-
-        // Dada dan tulang rusuk (y=440 s/d y=840) mengembang-mengempis perlahan
-        if (y >= 440 && y <= 840) {
-          const factor = Math.sin(((y - 440) / 400) * Math.PI); // Puncak di tengah dada
-          const expand = breath * 7 * factor;
-          drawX = -expand / 2;
-          drawW = cw + expand;
-        }
-
-        ctx.drawImage(img, 0, y, cw, sliceH, drawX, y, drawW, sliceH);
-      }
-
-      // ==========================================
-      // B. DEFORMASI AYUNAN TANGAN KIRI (GELANG)
-      // x: 120..220, y: 550..1010
-      // ==========================================
-      for (let y = 550; y < 1010; y += 6) {
-        const progress = (y - 550) / 460; // 0 di siku, 1 di pergelangan tangan
-        const offsetL = armSwingL * 7 * Math.pow(progress, 1.4);
-        ctx.drawImage(img, 120, y, 100, 6, 120 + offsetL, y, 100, 6);
-      }
-
-      // ==========================================
-      // C. DEFORMASI AYUNAN TANGAN KANAN (JAM TANGAN)
-      // x: 550..650, y: 550..1010
-      // ==========================================
-      for (let y = 550; y < 1010; y += 6) {
-        const progress = (y - 550) / 460;
-        const offsetR = armSwingR * -7 * Math.pow(progress, 1.4);
-        ctx.drawImage(img, 550, y, 100, 6, 550 + offsetR, y, 100, 6);
-      }
-
-      // ==========================================
-      // D. DEFORMASI RAMBUT DEPAN SISI KIRI
-      // x: 230..360, y: 220..680
-      // ==========================================
-      for (let y = 220; y < 680; y += 4) {
-        const progress = (y - 220) / 460; // 0 di akar kepala, 1 di ujung bawah
-        const dxL = Math.sin(t * 2.8 + y * 0.015) * 8.5 * Math.pow(progress, 1.3);
-        ctx.drawImage(img, 230, y, 130, 4, 230 + dxL, y, 130, 4);
-      }
-
-      // ==========================================
-      // E. DEFORMASI RAMBUT DEPAN SISI KANAN
-      // x: 410..540, y: 220..680
-      // ==========================================
-      for (let y = 220; y < 680; y += 4) {
-        const progress = (y - 220) / 460;
-        const dxR = Math.sin(t * 2.5 + 1.2 + y * 0.015) * 8.5 * Math.pow(progress, 1.3);
-        ctx.drawImage(img, 410, y, 130, 4, 410 + dxR, y, 130, 4);
-      }
-
-      // ==========================================
-      // F. DETAIL WAJAH: MATA, KEDIPAN & MULUT
-      // ==========================================
-      const eyeL = { x: 336, y: 252 };
-      const eyeR = { x: 432, y: 252 };
-      const pupilX = (gazeTarget.x - 0.5) * 7;
-      const pupilY = (gazeTarget.y - 0.5) * 5;
-
-      if (isBlinking) {
-        // --- KELOPAK MATA TERTUTUP (KEDIPAN ALAMI) ---
-        // Tutup area soket mata kiri dengan warna kulit alami dan lengkungan bulu mata
-        ctx.save();
-        ctx.fillStyle = "#edd5c8";
-        ctx.beginPath();
-        ctx.ellipse(eyeL.x, eyeL.y + 2, 20, 11, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = "#382017";
-        ctx.lineWidth = 3.2;
-        ctx.beginPath();
-        ctx.arc(eyeL.x, eyeL.y + 3, 16, Math.PI * 0.15, Math.PI * 0.85);
-        ctx.stroke();
-
-        // Bulu mata lentik kiri
-        ctx.beginPath();
-        ctx.moveTo(eyeL.x + 13, eyeL.y + 6);
-        ctx.lineTo(eyeL.x + 18, eyeL.y + 3);
-        ctx.stroke();
-
-        // Soket mata kanan
-        ctx.beginPath();
-        ctx.ellipse(eyeR.x, eyeR.y + 2, 20, 11, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = "#382017";
-        ctx.lineWidth = 3.2;
-        ctx.beginPath();
-        ctx.arc(eyeR.x, eyeR.y + 3, 16, Math.PI * 0.15, Math.PI * 0.85);
-        ctx.stroke();
-
-        // Bulu mata lentik kanan
-        ctx.beginPath();
-        ctx.moveTo(eyeR.x - 13, eyeR.y + 6);
-        ctx.lineTo(eyeR.x - 18, eyeR.y + 3);
-        ctx.stroke();
-        ctx.restore();
-      } else {
-        // --- MATA TERBUKA: KILAU & PUPIL MENGIKUTI KURSOR ---
-        ctx.save();
-        // Pupil mata kiri
-        ctx.fillStyle = "#1e120d";
-        ctx.beginPath();
-        ctx.ellipse(eyeL.x + pupilX, eyeL.y + pupilY, 6, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // Pantulan cahaya mata kiri
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.beginPath();
-        ctx.arc(eyeL.x + pupilX - 2, eyeL.y + pupilY - 3, 2, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Pupil mata kanan
-        ctx.fillStyle = "#1e120d";
-        ctx.beginPath();
-        ctx.ellipse(eyeR.x + pupilX, eyeR.y + pupilY, 6, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // Pantulan cahaya mata kanan
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.beginPath();
-        ctx.arc(eyeR.x + pupilX - 2, eyeR.y + pupilY - 3, 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // ==========================================
-      // G. MULUT DINAMIS (LIP-SYNC SUARA CELYN)
-      // ==========================================
-      if (isSpeaking && mouthScale > 0.05) {
-        ctx.save();
-        const mouthX = 384;
-        const mouthY = 338;
-        const mW = 16 + mouthScale * 14;
-        const mH = 5 + mouthScale * 18;
-
-        // Rongga mulut
-        ctx.fillStyle = "#691f1f";
-        ctx.beginPath();
-        ctx.ellipse(mouthX, mouthY, mW, mH, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#401313";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // Gigi atas
-        if (mouthScale > 0.2) {
-          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-          ctx.beginPath();
-          ctx.rect(mouthX - mW * 0.65, mouthY - mH + 1, mW * 1.3, mH * 0.45);
-          ctx.fill();
-        }
-
-        // Lidah
-        if (mouthScale > 0.35) {
-          ctx.fillStyle = "#f472b6";
-          ctx.beginPath();
-          ctx.ellipse(mouthX, mouthY + mH * 0.5, mW * 0.6, mH * 0.4, 0, 0, Math.PI);
-          ctx.fill();
-        }
-        ctx.restore();
-      }
-
-      animId = requestAnimationFrame(render);
-    };
-
-    animId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animId);
-  }, [imageLoaded, isBlinking, isSpeaking, mouthScale, gazeTarget, emotion]);
-
   return (
     <div
       ref={containerRef}
       className="relative flex flex-col items-center justify-center w-full h-full select-none overflow-hidden"
     >
-      {/* Halo Gelombang Suara (tetap halus di latar) */}
+      {/* Halo gelombang suara saat Celyn berbicara */}
       {isSpeaking && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
           <div
             className="w-[480px] h-[480px] rounded-full border border-rose-500/25 animate-ping"
             style={{
-              animationDuration: "2.5s",
+              animationDuration: "2.4s",
               transform: `scale(${1 + mouthScale * 0.25})`,
             }}
           />
           <div
             className="absolute w-[620px] h-[620px] rounded-full border border-pink-500/15 animate-pulse"
-            style={{ animationDuration: "3.5s" }}
+            style={{ animationDuration: "3.2s" }}
           />
         </div>
       )}
@@ -380,14 +214,196 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         </span>
       </div>
 
-      {/* STAGE KANVAS CELYN (BINGKAI 100% KOKOH & DIAM DI TEMPAT!) */}
+      {/* BINGKAI STAGE UTAMA (100% DIAM DAN KOKOH DI LAYAR - TANPA GOYANGAN BINGKAI!) */}
       <div className="relative z-10 w-full max-w-[440px] h-[580px] flex items-end justify-center pointer-events-none">
-        <canvas
-          ref={canvasRef}
-          width={768}
-          height={1024}
-          className="w-full h-full object-contain filter drop-shadow-2xl"
-        />
+        
+        {/* ================================================================= */}
+        {/* LAYER 1: TUBUH DASAR & DADA BERNAPAS (Torso & Blouse) */}
+        {/* Hanya dada dan bahu bernapas naik-turun halus dari poros pinggang */}
+        {/* ================================================================= */}
+        <div
+          className="absolute inset-0 w-full h-full flex items-end justify-center"
+          style={{
+            transformOrigin: "50% 95%",
+            transform: `scaleY(${1 + rig.breath * 0.012}) scaleX(${1 - rig.breath * 0.006})`,
+            transition: "transform 0.05s linear",
+          }}
+        >
+          <img
+            src="/celyn_torso_clean.png"
+            alt="Celyn Body"
+            className="w-full h-full object-contain filter drop-shadow-2xl"
+          />
+        </div>
+
+        {/* ================================================================= */}
+        {/* LAYER 2: TANGAN KIRI BERGERAK (Dengan 2 Gelang di Pergelangan) */}
+        {/* Berputar mandiri di sendi siku/bahu kiri (poros 24% 65%) */}
+        {/* ================================================================= */}
+        <div
+          className="absolute inset-0 w-full h-full flex items-end justify-center"
+          style={{
+            transformOrigin: "24% 65%",
+            transform: `rotate(${rig.armLeftAngle}deg)`,
+            transition: "transform 0.05s linear",
+          }}
+        >
+          <img
+            src="/celyn_hand_l_clean.png"
+            alt="Left Hand"
+            className="w-full h-full object-contain"
+          />
+        </div>
+
+        {/* ================================================================= */}
+        {/* LAYER 3: TANGAN KANAN BERGERAK (Dengan Jam Tangan Abu-Abu) */}
+        {/* Berputar mandiri di sendi siku/bahu kanan (poros 76% 65%) */}
+        {/* ================================================================= */}
+        <div
+          className="absolute inset-0 w-full h-full flex items-end justify-center"
+          style={{
+            transformOrigin: "76% 65%",
+            transform: `rotate(${rig.armRightAngle}deg)`,
+            transition: "transform 0.05s linear",
+          }}
+        >
+          <img
+            src="/celyn_hand_r_clean.png"
+            alt="Right Hand"
+            className="w-full h-full object-contain"
+          />
+        </div>
+
+        {/* ================================================================= */}
+        {/* LAYER 4: RAMBUT DEPAN KIRI BERKIBAR (Mengayun Bebas di Atas Dada) */}
+        {/* Berputar mandiri dari pangkal kulit kepala kiri (poros 39% 23%) */}
+        {/* ================================================================= */}
+        <div
+          className="absolute inset-0 w-full h-full flex items-end justify-center"
+          style={{
+            transformOrigin: "39% 23%",
+            transform: `rotate(${rig.hairLeftAngle}deg) skewX(${rig.hairLeftAngle * 0.4}deg)`,
+            transition: "transform 0.05s linear",
+          }}
+        >
+          <img
+            src="/celyn_hair_l_clean.png"
+            alt="Hair Strand Left"
+            className="w-full h-full object-contain filter drop-shadow-sm"
+          />
+        </div>
+
+        {/* ================================================================= */}
+        {/* LAYER 5: RAMBUT DEPAN KANAN BERKIBAR (Mengayun Bebas di Atas Dada) */}
+        {/* Berputar mandiri dari pangkal kulit kepala kanan (poros 61% 23%) */}
+        {/* ================================================================= */}
+        <div
+          className="absolute inset-0 w-full h-full flex items-end justify-center"
+          style={{
+            transformOrigin: "61% 23%",
+            transform: `rotate(${rig.hairRightAngle}deg) skewX(${rig.hairRightAngle * 0.4}deg)`,
+            transition: "transform 0.05s linear",
+          }}
+        >
+          <img
+            src="/celyn_hair_r_clean.png"
+            alt="Hair Strand Right"
+            className="w-full h-full object-contain filter drop-shadow-sm"
+          />
+        </div>
+
+        {/* ================================================================= */}
+        {/* LAYER 6: KEPALA & KEDIPAN MATA ALAMI */}
+        {/* Menoleh halus pada sendi leher (poros 50% 39%) */}
+        {/* ================================================================= */}
+        <div
+          className="absolute inset-0 w-full h-full flex items-end justify-center"
+          style={{
+            transformOrigin: "50% 39%",
+            transform: `rotate(${rig.headTilt}deg)`,
+            transition: "transform 0.08s ease-out",
+          }}
+        >
+          {/* Soket Mata & Animasi Kedip */}
+          <div
+            className="absolute z-20 flex justify-between items-center"
+            style={{
+              top: "23.4%",
+              width: "106px",
+              height: "22px",
+              padding: "0 8px",
+            }}
+          >
+            {/* Mata Kiri */}
+            <div className="relative w-8 h-4 flex items-center justify-center overflow-hidden">
+              {isBlinking ? (
+                // Kelopak mata menutup alami dengan garis bulu mata halus
+                <div className="w-full h-1.5 rounded-full bg-[#3a2217] shadow-sm border-b border-[#25150f] animate-in fade-in duration-75" />
+              ) : (
+                // Pupil mata terbuka melirik kursor
+                <div
+                  className="w-3.5 h-3.5 rounded-full bg-[#1e120d] shadow-inner transition-transform duration-75 flex items-center justify-center"
+                  style={{
+                    transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                  }}
+                >
+                  <div className="w-1 h-1 rounded-full bg-white/95 self-start ml-0.5 mt-0.5" />
+                </div>
+              )}
+            </div>
+
+            {/* Mata Kanan */}
+            <div className="relative w-8 h-4 flex items-center justify-center overflow-hidden">
+              {isBlinking ? (
+                // Kelopak mata menutup alami
+                <div className="w-full h-1.5 rounded-full bg-[#3a2217] shadow-sm border-b border-[#25150f] animate-in fade-in duration-75" />
+              ) : (
+                // Pupil mata terbuka melirik kursor
+                <div
+                  className="w-3.5 h-3.5 rounded-full bg-[#1e120d] shadow-inner transition-transform duration-75 flex items-center justify-center"
+                  style={{
+                    transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                  }}
+                >
+                  <div className="w-1 h-1 rounded-full bg-white/95 self-start ml-0.5 mt-0.5" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ================================================================= */}
+          {/* LAYER 7: MULUT BERBICARA (LIP-SYNC SUARA CELYN) */}
+          {/* ================================================================= */}
+          {isSpeaking && mouthScale > 0.05 && (
+            <div
+              className="absolute z-25 flex flex-col items-center justify-between overflow-hidden shadow-inner transition-all duration-75"
+              style={{
+                top: "30.4%",
+                width: `${Math.round(26 + mouthScale * 14)}px`,
+                height: `${Math.round(8 + mouthScale * 20)}px`,
+                backgroundColor: "#6e2121",
+                borderRadius:
+                  mouthScale > 0.45
+                    ? "45% 45% 50% 50% / 30% 30% 70% 70%"
+                    : "50% 50% 40% 40% / 30% 30% 70% 70%",
+                border: "1.5px solid #4a1515",
+                boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
+              }}
+            >
+              {/* Gigi Atas */}
+              <div
+                className="w-3/4 h-2 bg-white/95 rounded-b-sm mt-0.5 transition-opacity duration-75"
+                style={{ opacity: mouthScale > 0.22 ? 1 : 0 }}
+              />
+
+              {/* Lidah */}
+              <div
+                className="w-2/3 h-2.5 bg-rose-400 rounded-t-full mb-0.5 transition-all duration-75"
+                style={{ opacity: mouthScale > 0.35 ? 0.95 : 0 }}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Indikator Reticle LookAt jika sedang fokus pada elemen layar */}
