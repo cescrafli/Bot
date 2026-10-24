@@ -1,0 +1,69 @@
+:root {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0b0f19;
+  color: #f1f5f9;
+  overflow: hidden;
+  user-select: none;
+  min-height: 100vh;
+}
+
+/* Background mesh */
+.bg-mesh {
+  background: radial-gradient(circle at 50% 20%, rgba(244, 63, 94, 0.12), transparent 45%),
+              radial-gradient(circle at 80% 80%, rgba(56, 189, 248, 0.08), transparent 40%),
+              radial-gradient(circle at 20% 80%, rgba(168, 85, 247, 0.08), transparent 40%),
+              #070a12;
+}
+
+/* Glassmorphism panels */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+}
+
+.glass-pill {
+  background: rgba(30, 41, 59, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Avatar animations */
+@keyframes breathing {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.008);
+  }
+}
+
+.avatar-breathe {
+  animation: breathing 4.5s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 9999px;
+}
