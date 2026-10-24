@@ -193,14 +193,14 @@ export function App() {
           <AvatarCanvas2D
             emotion={live.emotion}
             mouthOpen={audioEngine.volume}
-            isSpeaking={audioEngine.isPlaying}
+            isSpeaking={audioEngine.isPlaying || live.status === "speaking"}
             lookAt={live.lookAt}
           />
         ) : (
           <AvatarVRM3D
             emotion={live.emotion}
             mouthOpen={audioEngine.volume}
-            isSpeaking={audioEngine.isPlaying}
+            isSpeaking={audioEngine.isPlaying || live.status === "speaking"}
             lookAt={live.lookAt}
           />
         )}

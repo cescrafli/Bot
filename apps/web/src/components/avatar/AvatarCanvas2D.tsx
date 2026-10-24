@@ -18,8 +18,9 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
   const [isBlinking, setIsBlinking] = useState(false);
+  const [tick, setTick] = useState(0);
 
-  // Fisika Pernapasan & Kemiringan Kepala Alami
+  // Fisika Pernapasan & Waktu Bicara
   const [breath, setBreath] = useState(0);
 
   // Mouse gaze tracking
@@ -36,15 +37,15 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Loop Pernapasan Halus (60 FPS - Halus & Organik)
+  // Animation Loop (60 FPS: Menggerakkan Napas dan Siklus Bicara Suku Kata)
   useEffect(() => {
     let animId: number;
     const startTime = performance.now();
 
     const loop = (now: number) => {
       const t = (now - startTime) / 1000;
-      // Ritme napas dada halus (periode ~3.8 detik)
       setBreath(Math.sin(t * 1.65));
+      setTick(now);
       animId = requestAnimationFrame(loop);
     };
 
@@ -57,13 +58,13 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     let blinkTimeout: number;
 
     const scheduleBlink = () => {
-      const delay = Math.random() * 2800 + 2200;
+      const delay = Math.random() * 2600 + 2200;
       blinkTimeout = window.setTimeout(() => {
         setIsBlinking(true);
         setTimeout(() => {
           setIsBlinking(false);
           scheduleBlink();
-        }, 150); // Durasi kedipan ~150ms
+        }, 150);
       }, delay);
     };
 
@@ -79,17 +80,27 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return mousePos;
   }, [lookAt, mousePos]);
 
-  // Offset pergerakan pupil mata (0..1 -> -5px s/d +5px)
+  // Offset pergerakan pupil mata (-5px s/d +5px)
   const pupilOffsetX = (gazeTarget.x - 0.5) * 6;
   const pupilOffsetY = (gazeTarget.y - 0.5) * 4;
 
-  // Kemiringan Kepala Halus saat berpikir atau melihat kursor
+  // Kemiringan Kepala Halus
   let headTilt = (gazeTarget.x - 0.5) * 2.8;
   if (emotion === "thinking") {
-    headTilt += 4.5; // Kepala miring saat sedang menganalisis
+    headTilt += 4.5;
   } else if (emotion === "happy") {
     headTilt -= 1.8;
   }
+
+  // =========================================================================
+  // LOGIKA LIP-SYNC MULUT DINAMIS
+  // Saat isSpeaking aktif: gunakan volume audio riil, ATAU ritme suku kata bicara 3.5Hz
+  // Ini menjamin 100% mulut Celyn PASTI bergerak membuka-menutup saat bersuara!
+  // =========================================================================
+  const speechCadence = (Math.sin(tick / 95) * 0.45 + 0.55); // 0.1 s/d 1.0 gelombang ritmis bicara
+  const dynamicMouthAmount = isSpeaking
+    ? Math.max(mouthOpen * 2.8, speechCadence * 0.85)
+    : 0;
 
   // Konfigurasi Emosi
   const emotionConfig = {
@@ -137,7 +148,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   };
 
   const EmotionIcon = emotionConfig.icon;
-  const mouthScale = Math.min(1.0, Math.max(0, mouthOpen * 1.8));
 
   return (
     <div
@@ -148,10 +158,10 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       {isSpeaking && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
           <div
-            className="w-[480px] h-[480px] rounded-full border border-rose-500/25 animate-ping"
+            className="w-[480px] h-[480px] rounded-full border border-rose-500/30 animate-ping"
             style={{
-              animationDuration: "2.4s",
-              transform: `scale(${1 + mouthScale * 0.25})`,
+              animationDuration: "2.2s",
+              transform: `scale(${1 + dynamicMouthAmount * 0.25})`,
             }}
           />
           <div
@@ -166,8 +176,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         className="absolute w-[440px] h-[440px] rounded-full blur-3xl transition-all duration-700 pointer-events-none"
         style={{
           background: emotionConfig.glowColor,
-          transform: isSpeaking ? `scale(${1.15 + mouthScale * 0.2})` : "scale(1)",
-          opacity: isSpeaking ? 0.85 : 0.45,
+          transform: isSpeaking ? `scale(${1.15 + dynamicMouthAmount * 0.2})` : "scale(1)",
+          opacity: isSpeaking ? 0.9 : 0.45,
         }}
       />
 
@@ -185,7 +195,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       {/* STAGE UTAMA AVATAR CELYN */}
       <div className="relative z-10 w-full max-w-[440px] h-[580px] flex items-end justify-center pointer-events-none">
         
-        {/* GAMBAR KARAKTER CELYN UTUH & BERSIH (Tanpa garis robek/seam glitch) */}
+        {/* GAMBAR KARAKTER CELYN UTUH & BERSIH */}
         <div
           className="relative w-full h-full flex items-end justify-center"
           style={{
@@ -200,7 +210,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             className="w-full h-full object-contain filter drop-shadow-2xl"
           />
 
-          {/* LAYER KEPALA, MATA & MULUT (Condong halus mengikuti kursor/emosi) */}
+          {/* LAYER KEPALA, MATA & MULUT (Condong halus pada sendi leher) */}
           <div
             className="absolute inset-0 w-full h-full"
             style={{
@@ -209,84 +219,96 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               transition: "transform 0.08s ease-out",
             }}
           >
-            {/* ANIMASI KEDIPAN MATA ALAMI */}
+            {/* ============================================================= */}
+            {/* MATA KIRI (Presisi Koordinat: X=42.7%, Y=24.9%) */}
+            {/* ============================================================= */}
             <div
-              className="absolute z-20 flex justify-between items-center"
+              className="absolute z-20"
               style={{
-                top: "23.4%",
-                left: "50%",
-                transform: "translateX(-50%)",
-                width: "106px",
-                height: "22px",
-                padding: "0 8px",
+                left: "42.7%",
+                top: "24.9%",
+                transform: "translate(-50%, -50%)",
+                width: "28px",
+                height: "16px",
               }}
             >
-              {/* Mata Kiri */}
-              <div className="relative w-8 h-4 flex items-center justify-center overflow-hidden">
-                {isBlinking ? (
-                  // Kelopak mata menutup halus dengan lengkungan bulu mata alami
-                  <div className="w-full h-2 rounded-full bg-[#382017] shadow-sm border-b border-[#231510] animate-in fade-in duration-75" />
-                ) : (
-                  // Pupil mata melirik kursor
-                  <div
-                    className="w-3.5 h-3.5 rounded-full bg-[#1e120d] shadow-inner transition-transform duration-75 flex items-center justify-center"
-                    style={{
-                      transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
-                    }}
-                  >
-                    <div className="w-1 h-1 rounded-full bg-white/95 self-start ml-0.5 mt-0.5" />
-                  </div>
-                )}
-              </div>
-
-              {/* Mata Kanan */}
-              <div className="relative w-8 h-4 flex items-center justify-center overflow-hidden">
-                {isBlinking ? (
-                  // Kelopak mata menutup halus
-                  <div className="w-full h-2 rounded-full bg-[#382017] shadow-sm border-b border-[#231510] animate-in fade-in duration-75" />
-                ) : (
-                  // Pupil mata melirik kursor
-                  <div
-                    className="w-3.5 h-3.5 rounded-full bg-[#1e120d] shadow-inner transition-transform duration-75 flex items-center justify-center"
-                    style={{
-                      transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
-                    }}
-                  >
-                    <div className="w-1 h-1 rounded-full bg-white/95 self-start ml-0.5 mt-0.5" />
-                  </div>
-                )}
-              </div>
+              {isBlinking ? (
+                // Kelopak mata kiri menutup
+                <div className="w-full h-1.5 mt-1.5 rounded-full bg-[#341d14] shadow-sm border-b border-[#20100a] animate-in fade-in duration-75" />
+              ) : (
+                // Pupil mata kiri melirik kursor
+                <div
+                  className="w-4 h-4 mx-auto rounded-full bg-[#180e0a] shadow-inner transition-transform duration-75 flex items-center justify-center relative overflow-hidden"
+                  style={{
+                    transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                  }}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-white/95 absolute top-0.5 left-0.5" />
+                </div>
+              )}
             </div>
 
-            {/* ANIMASI MULUT BERBICARA (LIP-SYNC SUARA CELYN) */}
-            {isSpeaking && mouthScale > 0.05 && (
+            {/* ============================================================= */}
+            {/* MATA KANAN (Presisi Koordinat: X=59.4%, Y=24.3%) */}
+            {/* ============================================================= */}
+            <div
+              className="absolute z-20"
+              style={{
+                left: "59.4%",
+                top: "24.3%",
+                transform: "translate(-50%, -50%)",
+                width: "28px",
+                height: "16px",
+              }}
+            >
+              {isBlinking ? (
+                // Kelopak mata kanan menutup
+                <div className="w-full h-1.5 mt-1.5 rounded-full bg-[#341d14] shadow-sm border-b border-[#20100a] animate-in fade-in duration-75" />
+              ) : (
+                // Pupil mata kanan melirik kursor
+                <div
+                  className="w-4 h-4 mx-auto rounded-full bg-[#180e0a] shadow-inner transition-transform duration-75 flex items-center justify-center relative overflow-hidden"
+                  style={{
+                    transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                  }}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-white/95 absolute top-0.5 left-0.5" />
+                </div>
+              )}
+            </div>
+
+            {/* ============================================================= */}
+            {/* MULUT BERBICARA / LIP-SYNC (Presisi Koordinat: X=51.0%, Y=33.2%) */}
+            {/* Bergerak membuka-menutup dinamis saat isSpeaking aktif */}
+            {/* ============================================================= */}
+            {isSpeaking && dynamicMouthAmount > 0.08 && (
               <div
-                className="absolute z-25 flex flex-col items-center justify-between overflow-hidden shadow-inner transition-all duration-75"
+                className="absolute z-25 flex flex-col items-center justify-between overflow-hidden shadow-md transition-all duration-75"
                 style={{
-                  top: "30.4%",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: `${Math.round(26 + mouthScale * 14)}px`,
-                  height: `${Math.round(8 + mouthScale * 20)}px`,
-                  backgroundColor: "#6e2121",
+                  left: "51.0%",
+                  top: "33.2%",
+                  transform: "translate(-50%, -50%)",
+                  width: `${Math.round(26 + dynamicMouthAmount * 16)}px`,
+                  height: `${Math.round(8 + dynamicMouthAmount * 20)}px`,
+                  backgroundColor: "#541515",
                   borderRadius:
-                    mouthScale > 0.45
-                      ? "45% 45% 50% 50% / 30% 30% 70% 70%"
+                    dynamicMouthAmount > 0.4
+                      ? "45% 45% 55% 55% / 30% 30% 70% 70%"
                       : "50% 50% 40% 40% / 30% 30% 70% 70%",
-                  border: "1.5px solid #4a1515",
+                  border: "1.5px solid #3d0e0e",
                   boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
                 }}
               >
                 {/* Gigi Atas */}
                 <div
                   className="w-3/4 h-2 bg-white/95 rounded-b-sm mt-0.5 transition-opacity duration-75"
-                  style={{ opacity: mouthScale > 0.22 ? 1 : 0 }}
+                  style={{ opacity: dynamicMouthAmount > 0.2 ? 1 : 0 }}
                 />
 
                 {/* Lidah */}
                 <div
                   className="w-2/3 h-2.5 bg-rose-400 rounded-t-full mb-0.5 transition-all duration-75"
-                  style={{ opacity: mouthScale > 0.35 ? 0.95 : 0 }}
+                  style={{ opacity: dynamicMouthAmount > 0.35 ? 0.95 : 0 }}
                 />
               </div>
             )}
