@@ -5,9 +5,23 @@ interface UseScreenCaptureOptions {
   fps?: number; // default 1 FPS
 }
 
+export interface ScreenCaptureStats {
+  framesCaptured: number;
+  framesSent: number;
+  framesSkipped: number;
+  savingsPercentage: number;
+}
+
 export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) {
   const [isSharing, setIsSharing] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<ScreenCaptureStats>({
+    framesCaptured: 0,
+    framesSent: 0,
+    framesSkipped: 0,
+    savingsPercentage: 0,
+  });
 
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -15,9 +29,16 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
 
   // Canvas untuk deteksi perubahan cepat (32x32 thumbnail)
   const diffCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Canvas untuk render frame beresolusi tinggi (maks 1024px)
+  // Canvas untuk render frame beresolusi optimal (maks 1024px)
   const sendCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const prevThumbRef = useRef<Uint8ClampedArray | null>(null);
+
+  // Counters ref untuk menghindari re-render berlebihan di loop 1 FPS
+  const countersRef = useRef({
+    captured: 0,
+    sent: 0,
+    skipped: 0,
+  });
 
   const stopScreenShare = useCallback(() => {
     if (intervalRef.current) {
@@ -34,11 +55,16 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
     }
     prevThumbRef.current = null;
     setIsSharing(false);
+    setIsPaused(false);
   }, []);
 
   const captureFrame = useCallback(() => {
+    if (isPaused) return;
+
     const video = videoRef.current;
     if (!video || video.readyState < 2) return;
+
+    countersRef.current.captured++;
 
     if (!diffCanvasRef.current) {
       diffCanvasRef.current = document.createElement("canvas");
@@ -64,18 +90,37 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
           Math.abs(currThumb[i] - prevThumbRef.current[i]) +
           Math.abs(currThumb[i + 1] - prevThumbRef.current[i + 1]) +
           Math.abs(currThumb[i + 2] - prevThumbRef.current[i + 2]);
-        if (delta > 40) diffPixels++;
+        if (delta > 35) diffPixels++;
       }
     }
 
-    // Hanya kirim jika frame pertama atau perbedaan > 2% dari total 1024 piksel
-    const hasChanged = !prevThumbRef.current || diffPixels > 20;
+    // Hanya kirim jika frame pertama atau perbedaan > 2.5% dari thumbnail (25 px)
+    const hasChanged = !prevThumbRef.current || diffPixels > 25;
 
     if (!hasChanged) {
-      return; // Layar statis: simpan token & bandwidth!
+      countersRef.current.skipped++;
+      const total = countersRef.current.captured;
+      const savings = total > 0 ? Math.round((countersRef.current.skipped / total) * 100) : 0;
+      setStats({
+        framesCaptured: countersRef.current.captured,
+        framesSent: countersRef.current.sent,
+        framesSkipped: countersRef.current.skipped,
+        savingsPercentage: savings,
+      });
+      return; // Layar statis: simpan bandwidth dan token!
     }
 
+    countersRef.current.sent++;
     prevThumbRef.current = new Uint8ClampedArray(currThumb);
+
+    const total = countersRef.current.captured;
+    const savings = total > 0 ? Math.round((countersRef.current.skipped / total) * 100) : 0;
+    setStats({
+      framesCaptured: countersRef.current.captured,
+      framesSent: countersRef.current.sent,
+      framesSkipped: countersRef.current.skipped,
+      savingsPercentage: savings,
+    });
 
     // 2. Skala ke maks 1024px untuk dikirim ke Gemini
     const maxDim = 1024;
@@ -92,17 +137,19 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
 
     sendCtx.drawImage(video, 0, 0, sendCanvas.width, sendCanvas.height);
 
-    // Ambil format JPEG kualitas 0.65
+    // Format JPEG kualitas 0.65 optimal
     const dataUrl = sendCanvas.toDataURL("image/jpeg", 0.65);
     const b64 = dataUrl.split(",")[1];
     if (b64) {
       onFrame(b64);
     }
-  }, [onFrame]);
+  }, [isPaused, onFrame]);
 
   const startScreenShare = useCallback(async () => {
     try {
       setError(null);
+      countersRef.current = { captured: 0, sent: 0, skipped: 0 };
+
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           displaySurface: "browser",
@@ -128,11 +175,12 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
       }
 
       setIsSharing(true);
+      setIsPaused(false);
 
-      // Tangkap frame langsung sekali saat mulai
-      setTimeout(captureFrame, 200);
+      // Tangkap frame pertama setelah video siap
+      setTimeout(captureFrame, 250);
 
-      // Mulai timer reguler (1 FPS)
+      // Mulai timer 1 FPS
       intervalRef.current = window.setInterval(captureFrame, 1000 / fps);
     } catch (err: any) {
       console.warn("Screen share dibatalkan atau ditolak:", err);
@@ -143,6 +191,10 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
     }
   }, [fps, captureFrame, stopScreenShare]);
 
+  const togglePause = useCallback(() => {
+    setIsPaused((prev) => !prev);
+  }, []);
+
   useEffect(() => {
     return () => {
       stopScreenShare();
@@ -151,9 +203,12 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
 
   return {
     isSharing,
+    isPaused,
     error,
+    stats,
     startScreenShare,
     stopScreenShare,
+    togglePause,
     videoElement: videoRef.current,
   };
 }

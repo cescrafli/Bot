@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { EmotionType, LookAtTarget } from "@celyn/shared";
-import { Sparkles, HelpCircle, Smile, AlertCircle } from "lucide-react";
+import { Sparkles, HelpCircle, Smile, AlertCircle, Heart } from "lucide-react";
 
 interface AvatarCanvas2DProps {
   emotion: EmotionType;
-  mouthOpen: number; // 0.0 - 1.0
+  mouthOpen: number; // 0.0 - 1.0 (RMS amplitude)
   isSpeaking: boolean;
   lookAt: LookAtTarget | null;
 }
@@ -16,20 +16,35 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   lookAt,
 }) => {
   const [isBlinking, setIsBlinking] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Siklus Kedipan Mata Alami (acak tiap 3-5 detik)
+  // Track pergerakan mouse kursor untuk eye-tracking alami saat tidak ada point_at_screen
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const normX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const normY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      setMousePos({ x: normX, y: normY });
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
+
+  // Siklus Kedipan Mata Alami (acak tiap 3-5.5 detik)
   useEffect(() => {
     let blinkTimeout: number;
 
     const scheduleBlink = () => {
-      const delay = Math.random() * 3000 + 2500;
+      const delay = Math.random() * 2800 + 2600;
       blinkTimeout = window.setTimeout(() => {
         setIsBlinking(true);
         setTimeout(() => {
           setIsBlinking(false);
           scheduleBlink();
-        }, 160); // Durasi kedipan ~160ms
+        }, 150); // Durasi kedipan ~150ms
       }, delay);
     };
 
@@ -37,81 +52,120 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => clearTimeout(blinkTimeout);
   }, []);
 
-  // Hitung sudut kemiringan kepala (tilt) berdasarkan emosi atau lookAt
-  let headTilt = 0;
+  // Tentukan arah tatapan mata (prioritaskan lookAt dari AI jika aktif, atau kursor mouse)
+  const gazeTarget = useMemo(() => {
+    if (lookAt) {
+      return { x: lookAt.x, y: lookAt.y };
+    }
+    return mousePos;
+  }, [lookAt, mousePos]);
+
+  // Offset pergerakan pupil mata (-4px s/d +4px)
+  const pupilOffsetX = (gazeTarget.x - 0.5) * 6;
+  const pupilOffsetY = (gazeTarget.y - 0.5) * 5;
+
+  // Sudut kemiringan kepala (tilt)
+  let headTilt = (gazeTarget.x - 0.5) * 3;
   if (emotion === "thinking") {
-    headTilt = 4.5; // Kepala miring saat berpikir
-  } else if (lookAt) {
-    headTilt = (lookAt.x - 0.5) * 6; // Menoleh ke arah elemen layar
+    headTilt = 5.2; // Kepala miring saat sedang menganalisis
+  } else if (emotion === "happy") {
+    headTilt = -2.0;
   }
 
-  // Aura warna dinamis sesuai emosi
+  // Konfigurasi visual emosi
   const emotionConfig = {
     happy: {
-      color: "from-rose-500/20 via-pink-500/10 to-transparent",
-      badge: "Senang 😊",
+      label: "Senang",
       icon: Smile,
-      glow: "rgba(244, 63, 94, 0.35)",
+      glowColor: "rgba(244, 63, 94, 0.4)",
+      borderColor: "border-rose-500/40",
+      textColor: "text-rose-300",
     },
     thinking: {
-      color: "from-amber-500/20 via-yellow-500/10 to-transparent",
-      badge: "Menganalisis 🧐",
+      label: "Menganalisis",
       icon: HelpCircle,
-      glow: "rgba(245, 158, 11, 0.35)",
+      glowColor: "rgba(245, 158, 11, 0.4)",
+      borderColor: "border-amber-500/40",
+      textColor: "text-amber-300",
     },
     surprised: {
-      color: "from-cyan-500/20 via-sky-500/10 to-transparent",
-      badge: "Terkejut! 😲",
+      label: "Terkesan!",
       icon: AlertCircle,
-      glow: "rgba(6, 182, 212, 0.35)",
+      glowColor: "rgba(6, 182, 212, 0.4)",
+      borderColor: "border-cyan-500/40",
+      textColor: "text-cyan-300",
     },
     neutral: {
-      color: "from-indigo-500/15 via-purple-500/5 to-transparent",
-      badge: "Siaga 💬",
+      label: "Siaga",
       icon: Sparkles,
-      glow: "rgba(99, 102, 241, 0.25)",
+      glowColor: "rgba(99, 102, 241, 0.3)",
+      borderColor: "border-indigo-500/40",
+      textColor: "text-indigo-300",
     },
     sad: {
-      color: "from-blue-500/15 via-slate-500/5 to-transparent",
-      badge: "Prihatin 🥺",
-      icon: Sparkles,
-      glow: "rgba(59, 130, 246, 0.25)",
+      label: "Empati",
+      icon: Heart,
+      glowColor: "rgba(59, 130, 246, 0.3)",
+      borderColor: "border-blue-500/40",
+      textColor: "text-blue-300",
     },
   }[emotion] || {
-    color: "from-rose-500/20 via-pink-500/10 to-transparent",
-    badge: "Aktif",
+    label: "Aktif",
     icon: Sparkles,
-    glow: "rgba(244, 63, 94, 0.25)",
+    glowColor: "rgba(244, 63, 94, 0.3)",
+    borderColor: "border-rose-500/40",
+    textColor: "text-rose-300",
   };
 
   const EmotionIcon = emotionConfig.icon;
 
-  // Nilai bukaan mulut dengan batasan aman
-  const mouthScale = Math.min(1.4, Math.max(0.1, mouthOpen * 1.5));
+  // Nilai pembukaan mulut yang telah diamplifikasi & dihaluskan
+  const mouthScale = Math.min(1.0, Math.max(0, mouthOpen * 1.8));
 
   return (
     <div
       ref={containerRef}
       className="relative flex flex-col items-center justify-center w-full h-full select-none overflow-hidden"
     >
-      {/* Background Aura Glow di belakang Celyn */}
+      {/* Gelombang Audio Halo Rings di belakang avatar saat berbicara */}
+      {isSpeaking && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+          <div
+            className="w-[450px] h-[450px] rounded-full border border-rose-500/30 animate-ping"
+            style={{
+              animationDuration: "2.2s",
+              transform: `scale(${1 + mouthScale * 0.3})`,
+            }}
+          />
+          <div
+            className="absolute w-[580px] h-[580px] rounded-full border border-pink-500/15 animate-pulse"
+            style={{ animationDuration: "3s" }}
+          />
+        </div>
+      )}
+
+      {/* Aura Cahaya Halus di Belakang Celyn */}
       <div
-        className="absolute w-[420px] h-[420px] rounded-full blur-3xl transition-all duration-700 pointer-events-none"
+        className="absolute w-[440px] h-[440px] rounded-full blur-3xl transition-all duration-700 pointer-events-none"
         style={{
-          background: emotionConfig.glow,
-          transform: isSpeaking ? "scale(1.2)" : "scale(1)",
-          opacity: isSpeaking ? 0.8 : 0.45,
+          background: emotionConfig.glowColor,
+          transform: isSpeaking ? `scale(${1.15 + mouthScale * 0.25})` : "scale(1)",
+          opacity: isSpeaking ? 0.85 : 0.45,
         }}
       />
 
-      {/* Badge Status Emosi Celyn */}
-      <div className="absolute top-6 z-20 flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-pill border border-white/10 shadow-lg text-xs font-medium text-slate-200">
-        <EmotionIcon className="w-4 h-4 text-rose-400 animate-pulse" />
+      {/* Badge Status Emosi */}
+      <div
+        className={`absolute top-6 z-20 flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-pill border ${emotionConfig.borderColor} shadow-xl text-xs font-medium text-slate-200 transition-colors duration-300`}
+      >
+        <EmotionIcon className={`w-4 h-4 ${emotionConfig.textColor} animate-pulse`} />
         <span>Celyn:</span>
-        <span className="text-white font-semibold">{emotionConfig.badge}</span>
+        <span className={`font-semibold ${emotionConfig.textColor}`}>
+          {emotionConfig.label}
+        </span>
       </div>
 
-      {/* Container Karakter Avatar */}
+      {/* Container Karakter Celyn */}
       <div
         className="relative z-10 w-full max-w-[460px] h-[580px] flex items-end justify-center transition-transform duration-300 avatar-breathe"
         style={{
@@ -125,76 +179,96 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           className="w-full h-full object-contain filter drop-shadow-2xl pointer-events-none"
         />
 
-        {/* Dynamic Eye Blink Overlay (Terletak tepat di koordinat mata Celyn) */}
-        {isBlinking && (
-          <div
-            className="absolute z-20 pointer-events-none transition-opacity duration-75"
-            style={{
-              top: "22.5%",
-              width: "115px",
-              height: "24px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "0 10px",
-            }}
-          >
-            {/* Kelopak mata kiri */}
-            <div
-              className="w-8 h-2 rounded-full"
-              style={{
-                backgroundColor: "#52372d",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
-              }}
-            />
-            {/* Kelopak mata kanan */}
-            <div
-              className="w-8 h-2 rounded-full"
-              style={{
-                backgroundColor: "#52372d",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
-              }}
-            />
+        {/* Dynamic Eye Tracking / Blink Layer */}
+        <div
+          className="absolute z-20 pointer-events-none flex justify-between items-center transition-all duration-150"
+          style={{
+            top: "23.4%",
+            width: "106px",
+            height: "22px",
+            padding: "0 8px",
+          }}
+        >
+          {/* Mata Kiri */}
+          <div className="relative w-8 h-4 flex items-center justify-center overflow-hidden">
+            {isBlinking ? (
+              <div className="w-full h-2 rounded-full bg-[#4a3025] shadow-sm animate-in fade-in" />
+            ) : (
+              <div
+                className="w-3.5 h-3.5 rounded-full bg-[#2c1d18] shadow-inner transition-transform duration-75 flex items-center justify-center"
+                style={{
+                  transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                }}
+              >
+                {/* Pantulan cahaya mata */}
+                <div className="w-1 h-1 rounded-full bg-white/80 self-start ml-0.5 mt-0.5" />
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Dynamic Mouth Lip-Sync Overlay (Terletak di koordinat bibir Celyn) */}
-        {isSpeaking && mouthOpen > 0.08 && (
+          {/* Mata Kanan */}
+          <div className="relative w-8 h-4 flex items-center justify-center overflow-hidden">
+            {isBlinking ? (
+              <div className="w-full h-2 rounded-full bg-[#4a3025] shadow-sm animate-in fade-in" />
+            ) : (
+              <div
+                className="w-3.5 h-3.5 rounded-full bg-[#2c1d18] shadow-inner transition-transform duration-75 flex items-center justify-center"
+                style={{
+                  transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                }}
+              >
+                {/* Pantulan cahaya mata */}
+                <div className="w-1 h-1 rounded-full bg-white/80 self-start ml-0.5 mt-0.5" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Dynamic Responsive Lip-Sync Mouth */}
+        {isSpeaking && mouthScale > 0.06 && (
           <div
-            className="absolute z-20 pointer-events-none transition-all duration-75"
+            className="absolute z-20 pointer-events-none transition-all duration-75 flex flex-col items-center justify-between overflow-hidden shadow-inner"
             style={{
-              top: "30.4%",
-              width: "36px",
-              height: `${Math.round(8 + mouthScale * 18)}px`,
-              backgroundColor: "#7f2b2b",
-              borderRadius: "50% 50% 45% 45% / 30% 30% 70% 70%",
-              border: "1.5px solid #5a1e1e",
+              top: "30.3%",
+              width: `${Math.round(26 + mouthScale * 14)}px`,
+              height: `${Math.round(8 + mouthScale * 22)}px`,
+              backgroundColor: "#732424",
+              borderRadius:
+                mouthScale > 0.5
+                  ? "45% 45% 50% 50% / 30% 30% 70% 70%"
+                  : "50% 50% 40% 40% / 30% 30% 70% 70%",
+              border: "1.5px solid #521919",
               boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              overflow: "hidden",
             }}
           >
-            {/* Gigi atas */}
+            {/* Gigi Atas (muncul saat bukaan mulut cukup) */}
             <div
-              className="w-5 h-1.5 bg-white/90 rounded-b-sm mb-auto mt-0.5"
-              style={{ opacity: mouthScale > 0.4 ? 1 : 0 }}
+              className="w-3/4 h-2 bg-white/95 rounded-b-sm mt-0.5 transition-opacity duration-75"
+              style={{ opacity: mouthScale > 0.25 ? 1 : 0 }}
             />
-            {/* Lidah / rongga mulut */}
+
+            {/* Lidah / rongga mulut bawah */}
             <div
-              className="w-4 h-2 bg-rose-400 rounded-t-full mt-auto"
-              style={{ opacity: mouthScale > 0.3 ? 0.9 : 0 }}
+              className="w-2/3 h-2.5 bg-rose-400 rounded-t-full mb-0.5 transition-all duration-75"
+              style={{ opacity: mouthScale > 0.35 ? 0.95 : 0 }}
             />
           </div>
         )}
       </div>
 
-      {/* Indikator Titik Fokus Layar (LookAt Marker) jika aktif */}
+      {/* Indikator Reticle LookAt jika sedang fokus pada elemen layar */}
       {lookAt && (
-        <div className="absolute bottom-4 left-6 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-cyan-500/40 text-xs text-cyan-300 shadow-md">
-          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-          <span>Fokus Layar: {lookAt.description || `X: ${Math.round(lookAt.x * 100)}%, Y: ${Math.round(lookAt.y * 100)}%`}</span>
+        <div className="absolute bottom-5 left-6 z-20 flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900/90 border border-cyan-500/50 text-xs text-cyan-300 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-left-3">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500" />
+          </span>
+          <span className="font-medium">
+            Fokus Layar:{" "}
+            <span className="text-white">
+              {lookAt.description || `X: ${Math.round(lookAt.x * 100)}%, Y: ${Math.round(lookAt.y * 100)}%`}
+            </span>
+          </span>
         </div>
       )}
     </div>
