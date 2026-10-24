@@ -95,12 +95,18 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [rigConfig.breathSpeed]);
 
-  // Siklus Kedipan Alami Mata (130ms, acak tiap 3-5 detik)
+  // Preload closed-eye frame agar kedipan pertama instan tanpa jeda
+  useEffect(() => {
+    const img = new Image();
+    img.src = "/celyn_closed_face.png";
+  }, []);
+
+  // Siklus Kedipan Alami Mata (130ms, acak tiap 2.5 - 4.5 detik)
   useEffect(() => {
     let blinkTimeout: number;
 
     const scheduleBlink = () => {
-      const delay = Math.random() * 2600 + 2200;
+      const delay = Math.random() * 2000 + 2500;
       blinkTimeout = window.setTimeout(() => {
         setIsBlinking(true);
         setTimeout(() => {
@@ -278,102 +284,51 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           }}
         >
           {/* ============================================================= */}
-          {/* GAMBAR UTUH CELYN BERSIH & PRESISI (Tubuh, Tangan & Rambut Asli) */}
+          {/* GAMBAR UTUH CELYN: KEDIPAN MATA TEKSTUR ASLI 100% MULUS */}
+          {/* Normal: Mata Terbuka Asli (/celyn_clean_cutout.png) */}
+          {/* Kedip (130ms): Mata Merem Alami (/celyn_closed_face.png) */}
+          {/* Bebas tambalan CSS kotak, bebas double eye / 4 mata! */}
           {/* ============================================================= */}
           <img
-            src="/celyn_clean_cutout.png"
+            src={isBlinking ? "/celyn_closed_face.png" : "/celyn_clean_cutout.png"}
             alt="Celyn Avatar"
-            className="w-full h-full object-contain filter drop-shadow-2xl relative z-10"
+            className="w-full h-full object-contain filter drop-shadow-2xl relative z-10 select-none pointer-events-none"
+            draggable={false}
           />
 
           {/* ============================================================= */}
-          {/* LAPISAN KEPALA, MATA & MULUT (Condong di Sendi Leher 50% 39%) */}
+          {/* LAPISAN MULUT LIP-SYNC HALUS (Presisi Terkunci pada Bibir) */}
+          {/* Saat diam: 100% bibir asli gambar Celyn yang tersenyum manis */}
+          {/* Saat bersuara: membuka-menutup proporsional (2px s/d 6px saja) */}
           {/* ============================================================= */}
-          <div
-            className="absolute inset-0 w-full h-full z-30 pointer-events-none"
-            style={{
-              transformOrigin: "50% 39%", // Poros leher
-              transform: `rotate(${headTilt}deg)`,
-              transition: "transform 0.08s ease-out",
-            }}
-          >
-            {/* ============================================================= */}
-            {/* KEDIPAN MATA ALAMI (Berdasarkan Gambar Asli, Bebas Double Eye!) */}
-            {/* Saat mata terbuka: 100% menggunakan mata asli gambar Celyn */}
-            {/* Saat berkedip (130ms): kelopak mata menutup halus sesuai warna kulit */}
-            {/* ============================================================= */}
-            {isBlinking && (
-              <>
-                {/* Kelopak Mata Kiri Menutup */}
-                <div
-                  className="absolute z-20 pointer-events-none transition-all duration-75"
-                  style={{
-                    left: "42.7%",
-                    top: "24.9%",
-                    transform: "translate(-50%, -50%)",
-                    width: "28px",
-                    height: "13px",
-                    backgroundColor: "#eabbab",
-                    borderRadius: "50% 50% 40% 40% / 30% 30% 70% 70%",
-                    boxShadow: "inset 0 -2px 3px rgba(155, 90, 75, 0.45)",
-                  }}
-                >
-                  <div className="absolute bottom-0.5 left-1.5 right-1.5 h-[2px] rounded-full bg-[#2a1714] shadow-sm" />
-                </div>
-
-                {/* Kelopak Mata Kanan Menutup */}
-                <div
-                  className="absolute z-20 pointer-events-none transition-all duration-75"
-                  style={{
-                    left: "59.4%",
-                    top: "24.3%",
-                    transform: "translate(-50%, -50%)",
-                    width: "28px",
-                    height: "13px",
-                    backgroundColor: "#eabbab",
-                    borderRadius: "50% 50% 40% 40% / 30% 30% 70% 70%",
-                    boxShadow: "inset 0 -2px 3px rgba(155, 90, 75, 0.45)",
-                  }}
-                >
-                  <div className="absolute bottom-0.5 left-1.5 right-1.5 h-[2px] rounded-full bg-[#2a1714] shadow-sm" />
-                </div>
-              </>
-            )}
-
-            {/* ============================================================= */}
-            {/* MULUT BERBICARA / LIP-SYNC HALUS (Sesuai Proporsi Bibir Asli) */}
-            {/* Saat diam: 100% bibir asli gambar Celyn yang tersenyum manis */}
-            {/* Saat bersuara: bibir membuka-menutup proporsional (2px s/d 7px saja!) */}
-            {/* ============================================================= */}
-            {isSpeaking && dynamicMouthAmount > 0.08 && (
+          {isSpeaking && dynamicMouthAmount > 0.08 && (
+            <div
+              className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm transition-all duration-75 pointer-events-none"
+              style={{
+                left: "52.1%",
+                top: "33.1%",
+                transform: "translate(-50%, -50%)",
+                width: `${Math.round(24 + dynamicMouthAmount * 6)}px`,
+                height: `${Math.round(2 + dynamicMouthAmount * 5)}px`,
+                backgroundColor: "#4d161d",
+                borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
+                border: "1px solid #8e3e48",
+                boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)",
+              }}
+            >
+              {/* Gigi Atas Halus */}
               <div
-                className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm transition-all duration-75 pointer-events-none"
-                style={{
-                  left: "52.1%",
-                  top: "33.3%",
-                  transform: "translate(-50%, -50%)",
-                  width: `${Math.round(26 + dynamicMouthAmount * 6)}px`,
-                  height: `${Math.round(2 + dynamicMouthAmount * 6)}px`,
-                  backgroundColor: "#541b22",
-                  borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
-                  border: "1px solid #994752",
-                  boxShadow: "inset 0 1px 3px rgba(0,0,0,0.5)",
-                }}
-              >
-                {/* Gigi Atas Halus */}
-                <div
-                  className="w-3/4 h-[1.5px] bg-[#fffbfb] rounded-b-sm mt-0.2 transition-opacity duration-75"
-                  style={{ opacity: dynamicMouthAmount > 0.35 ? 0.95 : 0 }}
-                />
+                className="w-3/4 h-[1.5px] bg-[#fffbfb] rounded-b-sm mt-0.2 transition-opacity duration-75"
+                style={{ opacity: dynamicMouthAmount > 0.35 ? 0.95 : 0 }}
+              />
 
-                {/* Lidah Halus */}
-                <div
-                  className="w-2/3 h-1.5 bg-[#d96e7e] rounded-t-full mb-0.2 transition-all duration-75"
-                  style={{ opacity: dynamicMouthAmount > 0.4 ? 0.9 : 0 }}
-                />
-              </div>
-            )}
-          </div>
+              {/* Lidah Halus */}
+              <div
+                className="w-2/3 h-1.5 bg-[#d96e7e] rounded-t-full mb-0.2 transition-all duration-75"
+                style={{ opacity: dynamicMouthAmount > 0.4 ? 0.9 : 0 }}
+              />
+            </div>
+          )}
 
           {/* ============================================================= */}
           {/* PENANDA TITIK POROS VISUAL (Hanya muncul saat showPivots aktif) */}
