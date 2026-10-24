@@ -79,7 +79,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Animation Loop (60 FPS: Menggerakkan Napas, Lengan, Rambut, dan Suku Kata Bicara)
+  // Animation Loop (60 FPS: Menggerakkan Napas, Gestur, dan Siklus Bicara Suku Kata)
   useEffect(() => {
     let animId: number;
     const startTime = performance.now();
@@ -95,7 +95,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [rigConfig.breathSpeed]);
 
-  // Siklus Kedipan Alami Mata (acak tiap 3-5 detik)
+  // Siklus Kedipan Alami Mata (130ms, acak tiap 3-5 detik)
   useEffect(() => {
     let blinkTimeout: number;
 
@@ -106,7 +106,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         setTimeout(() => {
           setIsBlinking(false);
           scheduleBlink();
-        }, 150);
+        }, 130);
       }, delay);
     };
 
@@ -122,12 +122,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return mousePos;
   }, [lookAt, mousePos]);
 
-  // Offset pergerakan pupil mata (-5px s/d +5px)
-  const pupilOffsetX = (gazeTarget.x - 0.5) * 6;
-  const pupilOffsetY = (gazeTarget.y - 0.5) * 4;
-
-  // Kemiringan Kepala Halus
-  let headTilt = (gazeTarget.x - 0.5) * 2.8;
+  // Kemiringan Kepala Halus (mengikuti tatapan kursor mouse)
+  let headTilt = (gazeTarget.x - 0.5) * 3.2;
   if (emotion === "thinking") {
     headTilt += 4.5;
   } else if (emotion === "happy") {
@@ -135,9 +131,9 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   }
 
   // =========================================================================
-  // LOGIKA LIP-SYNC MULUT DINAMIS
-  // Saat isSpeaking aktif: padukan volume audio riil dengan ritme suku kata bicara (3.5Hz)
-  // Menjamin 100% mulut Celyn PASTI membuka-menutup natural saat bersuara!
+  // LOGIKA LIP-SYNC MULUT DINAMIS & HALUS (Sesuai Proporsi Bibir Asli)
+  // Saat diam: 100% bibir asli gambar Celyn yang tersenyum manis
+  // Saat bersuara: bibir membuka-menutup natural proporsional (2px s/d 7px saja)
   // =========================================================================
   const speechCadence = Math.sin(tick / 85) * 0.45 + 0.55; // 0.10 s/d 1.0 gelombang suku kata
   const dynamicMouthAmount = isSpeaking
@@ -145,24 +141,19 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     : 0;
 
   // =========================================================================
-  // KINEMATIKA PROSEDURAL 2D RIGGING (Lengan, Rambut, Napas Tubuh)
+  // KINEMATIKA PROSEDURAL 2D RIGGING (Napas Tubuh, Tangan & Gestur Hidup)
   // =========================================================================
   const tSec = tick / 1000;
 
-  // 1. Ayunan Lengan (dengan dorongan gestur bukaan sudut saat berbicara)
-  const armSwayBase = Math.sin(tSec * rigConfig.breathSpeed - 0.4);
-  const speechGesture = isSpeaking ? dynamicMouthAmount * 1.5 : 0;
-  const armRotL = armSwayBase * rigConfig.armMaxRot + speechGesture;
-  const armRotR = -armSwayBase * rigConfig.armMaxRot - speechGesture;
-
-  // 2. Ayunan Rambut (dengan efek inersia saat kepala menoleh)
-  const hairSwayBase = Math.sin(tSec * (rigConfig.breathSpeed * 1.15) - 0.8);
-  const hairRotL = hairSwayBase * rigConfig.hairMaxRot + headTilt * 0.25;
-  const hairRotR = -hairSwayBase * rigConfig.hairMaxRot + headTilt * 0.25;
-
-  // 3. Napas tubuh (translasi vertikal halus + peregangan mikro)
+  // 1. Fisika Napas (Translasi & Kompresi-Peregangan Volume Tubuh)
   const breathY = breath * -rigConfig.breathIntensity;
-  const breathScaleY = 1 + breath * 0.007;
+  const breathScaleY = 1 + breath * 0.009;
+  const breathScaleX = 1 - breath * 0.004; // Volume preservation
+
+  // 2. Kemiringan & Gestur Badan Saat Berbicara (Living Conversational Motion)
+  const bodyTilt = isSpeaking
+    ? Math.sin(tSec * 2.6) * 0.8 + (gazeTarget.x - 0.5) * 1.5
+    : (gazeTarget.x - 0.5) * 1.0;
 
   // Konfigurasi Emosi
   const emotionConfig = {
@@ -277,17 +268,17 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       {/* STAGE UTAMA AVATAR CELYN */}
       <div className="relative z-10 w-full max-w-[440px] h-[580px] flex items-end justify-center pointer-events-none">
         
-        {/* KONTAINER UTAMA DENGAN GERAK NAPAS (Poros di panggul) */}
+        {/* KONTAINER UTAMA DENGAN GERAK NAPAS & GESTUR BADAN/TANGAN (Poros di panggul) */}
         <div
           className="relative w-full h-full flex items-end justify-center"
           style={{
             transformOrigin: "50% 90%", // Poros pinggang
-            transform: `translateY(${breathY}px) scaleY(${breathScaleY}) rotate(${isSpeaking ? Math.sin(tSec * 3.5) * 0.5 : 0}deg)`,
+            transform: `translateY(${breathY}px) scaleY(${breathScaleY}) scaleX(${breathScaleX}) rotate(${bodyTilt}deg)`,
             transition: "transform 0.05s linear",
           }}
         >
           {/* ============================================================= */}
-          {/* GAMBAR UTUH CELYN BERSIH & PRESISI (Tanpa Robekan Limb) */}
+          {/* GAMBAR UTUH CELYN BERSIH & PRESISI (Tubuh, Tangan & Rambut Asli) */}
           {/* ============================================================= */}
           <img
             src="/celyn_clean_cutout.png"
@@ -306,91 +297,82 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               transition: "transform 0.08s ease-out",
             }}
           >
-            {/* MATA KIRI (Presisi Koordinat: X=42.7%, Y=24.9%) */}
-            <div
-              className="absolute z-20"
-              style={{
-                left: "42.7%",
-                top: "24.9%",
-                transform: "translate(-50%, -50%)",
-                width: "28px",
-                height: "16px",
-              }}
-            >
-              {isBlinking ? (
-                <div className="w-full h-1.5 mt-1.5 rounded-full bg-[#341d14] shadow-sm border-b border-[#20100a] animate-in fade-in duration-75" />
-              ) : (
+            {/* ============================================================= */}
+            {/* KEDIPAN MATA ALAMI (Berdasarkan Gambar Asli, Bebas Double Eye!) */}
+            {/* Saat mata terbuka: 100% menggunakan mata asli gambar Celyn */}
+            {/* Saat berkedip (130ms): kelopak mata menutup halus sesuai warna kulit */}
+            {/* ============================================================= */}
+            {isBlinking && (
+              <>
+                {/* Kelopak Mata Kiri Menutup */}
                 <div
-                  className="w-4 h-4 mx-auto rounded-full bg-[#180e0a] shadow-inner transition-transform duration-75 flex items-center justify-center relative overflow-hidden"
+                  className="absolute z-20 pointer-events-none transition-all duration-75"
                   style={{
-                    transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                    left: "42.7%",
+                    top: "24.9%",
+                    transform: "translate(-50%, -50%)",
+                    width: "28px",
+                    height: "13px",
+                    backgroundColor: "#eabbab",
+                    borderRadius: "50% 50% 40% 40% / 30% 30% 70% 70%",
+                    boxShadow: "inset 0 -2px 3px rgba(155, 90, 75, 0.45)",
                   }}
                 >
-                  <div className="w-1.5 h-1.5 rounded-full bg-white/95 absolute top-0.5 left-0.5" />
+                  <div className="absolute bottom-0.5 left-1.5 right-1.5 h-[2px] rounded-full bg-[#2a1714] shadow-sm" />
                 </div>
-              )}
-            </div>
 
-            {/* MATA KANAN (Presisi Koordinat: X=59.4%, Y=24.3%) */}
-            <div
-              className="absolute z-20"
-              style={{
-                left: "59.4%",
-                top: "24.3%",
-                transform: "translate(-50%, -50%)",
-                width: "28px",
-                height: "16px",
-              }}
-            >
-              {isBlinking ? (
-                <div className="w-full h-1.5 mt-1.5 rounded-full bg-[#341d14] shadow-sm border-b border-[#20100a] animate-in fade-in duration-75" />
-              ) : (
+                {/* Kelopak Mata Kanan Menutup */}
                 <div
-                  className="w-4 h-4 mx-auto rounded-full bg-[#180e0a] shadow-inner transition-transform duration-75 flex items-center justify-center relative overflow-hidden"
+                  className="absolute z-20 pointer-events-none transition-all duration-75"
                   style={{
-                    transform: `translate(${pupilOffsetX}px, ${pupilOffsetY}px)`,
+                    left: "59.4%",
+                    top: "24.3%",
+                    transform: "translate(-50%, -50%)",
+                    width: "28px",
+                    height: "13px",
+                    backgroundColor: "#eabbab",
+                    borderRadius: "50% 50% 40% 40% / 30% 30% 70% 70%",
+                    boxShadow: "inset 0 -2px 3px rgba(155, 90, 75, 0.45)",
                   }}
                 >
-                  <div className="w-1.5 h-1.5 rounded-full bg-white/95 absolute top-0.5 left-0.5" />
+                  <div className="absolute bottom-0.5 left-1.5 right-1.5 h-[2px] rounded-full bg-[#2a1714] shadow-sm" />
                 </div>
-              )}
-            </div>
+              </>
+            )}
 
-            {/* MULUT BERBICARA / LIP-SYNC (Presisi Koordinat: X=52.1%, Y=33.3%) */}
-            {isSpeaking && dynamicMouthAmount > 0.05 ? (
+            {/* ============================================================= */}
+            {/* MULUT BERBICARA / LIP-SYNC HALUS (Sesuai Proporsi Bibir Asli) */}
+            {/* Saat diam: 100% bibir asli gambar Celyn yang tersenyum manis */}
+            {/* Saat bersuara: bibir membuka-menutup proporsional (2px s/d 7px saja!) */}
+            {/* ============================================================= */}
+            {isSpeaking && dynamicMouthAmount > 0.08 && (
               <div
-                className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-lg transition-all duration-75 pointer-events-none"
+                className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm transition-all duration-75 pointer-events-none"
                 style={{
                   left: "52.1%",
                   top: "33.3%",
                   transform: "translate(-50%, -50%)",
-                  width: `${Math.round(28 + dynamicMouthAmount * 16)}px`,
-                  height: `${Math.round(6 + dynamicMouthAmount * 22)}px`,
-                  backgroundColor: "#4c1318",
-                  borderRadius:
-                    dynamicMouthAmount > 0.4
-                      ? "46% 46% 54% 54% / 32% 32% 68% 68%"
-                      : "50% 50% 45% 45% / 28% 28% 72% 72%",
-                  border: "1.5px solid #a8585f",
-                  boxShadow: "inset 0 2px 5px rgba(0,0,0,0.65)",
+                  width: `${Math.round(26 + dynamicMouthAmount * 6)}px`,
+                  height: `${Math.round(2 + dynamicMouthAmount * 6)}px`,
+                  backgroundColor: "#541b22",
+                  borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
+                  border: "1px solid #994752",
+                  boxShadow: "inset 0 1px 3px rgba(0,0,0,0.5)",
                 }}
               >
-                {/* Gigi Atas Bersih */}
+                {/* Gigi Atas Halus */}
                 <div
-                  className="w-4/5 h-2 bg-[#fffdfd] rounded-b-sm mt-0.5 shadow-sm transition-opacity duration-75"
-                  style={{ opacity: dynamicMouthAmount > 0.15 ? 1 : 0 }}
+                  className="w-3/4 h-[1.5px] bg-[#fffbfb] rounded-b-sm mt-0.2 transition-opacity duration-75"
+                  style={{ opacity: dynamicMouthAmount > 0.35 ? 0.95 : 0 }}
                 />
 
-                {/* Lidah Merah Muda Anime */}
+                {/* Lidah Halus */}
                 <div
-                  className="w-3/4 h-3 bg-[#e87a8e] rounded-t-full mb-0.5 shadow-inner transition-all duration-75"
-                  style={{
-                    opacity: dynamicMouthAmount > 0.3 ? 0.95 : 0,
-                    transform: `scale(${0.8 + dynamicMouthAmount * 0.2})`,
-                  }}
+                  className="w-2/3 h-1.5 bg-[#d96e7e] rounded-t-full mb-0.2 transition-all duration-75"
+                  style={{ opacity: dynamicMouthAmount > 0.4 ? 0.9 : 0 }}
                 />
               </div>
-            ) : null}
+            )}
           </div>
 
           {/* ============================================================= */}
