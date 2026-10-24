@@ -17,6 +17,13 @@ export function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
+  // Hook Audio Capture & Playback
+  const audioEngine = useAudioEngine({
+    onAudioChunk: (b64PCM16k) => {
+      live.sendAudio(b64PCM16k);
+    },
+  });
+
   // Hook Gemini Live WebSocket
   const live = useGeminiLive({
     onAudioReceived: (b64Audio) => {
@@ -27,21 +34,10 @@ export function App() {
     },
   });
 
-  // Hook Audio Capture & Playback
-  const audioEngine = useAudioEngine({
-    onAudioChunk: (b64PCM16k) => {
-      if (live.isConnected) {
-        live.sendAudio(b64PCM16k);
-      }
-    },
-  });
-
   // Hook Screen Capture dengan Change Detection hemat token
   const screenCapture = useScreenCapture({
     onFrame: (b64JPEG) => {
-      if (live.isConnected) {
-        live.sendScreen(b64JPEG);
-      }
+      live.sendScreen(b64JPEG);
     },
   });
 

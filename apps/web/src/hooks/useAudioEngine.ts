@@ -13,9 +13,16 @@ export function useAudioEngine({
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0);
 
+  // Selalu simpan referensi callback terbaru agar tidak terjebak closure usang
+  const onAudioChunkRef = useRef(onAudioChunk);
+  useEffect(() => {
+    onAudioChunkRef.current = onAudioChunk;
+  }, [onAudioChunk]);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const silentGainRef = useRef<GainNode | null>(null);
 
   // Playback queue & analyser
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
@@ -56,9 +63,8 @@ export function useAudioEngine({
           sum += norm * norm;
         }
         const rms = Math.sqrt(sum / dataArray.length);
-        // Normalisasi dan amplifikasi untuk respons bibir yang nyata
         const normalized = Math.min(1, rms * 4.5);
-        setVolume((prev) => prev * 0.4 + normalized * 0.6); // Smoothing
+        setVolume((prev) => prev * 0.4 + normalized * 0.6);
         onVolumeChange?.(normalized);
       }
       animFrameRef.current = requestAnimationFrame(updateVolume);
@@ -107,7 +113,7 @@ export function useAudioEngine({
     return buffer;
   };
 
-  // Mainkan audio chunk yang datang dari Gemini secara berurutan tanpa jeda
+  // Mainkan audio chunk yang datang dari Gemini
   const playAudioChunk = useCallback(
     (b64PCM24k: string) => {
       try {
@@ -117,7 +123,6 @@ export function useAudioEngine({
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
 
-        // Hubungkan ke Analyser (untuk lip-sync) lalu ke speaker
         if (analyserRef.current) {
           source.connect(analyserRef.current);
         } else {
@@ -147,15 +152,13 @@ export function useAudioEngine({
     [getOrCreateAudioContext]
   );
 
-  // Hentikan seketika pemutaran suara saat pengguna menginterupsi (Barge-in)
+  // Hentikan seketika saat barge-in
   const stopPlayback = useCallback(() => {
     for (const source of activeSourcesRef.current) {
       try {
         source.stop();
         source.disconnect();
-      } catch {
-        // Abaikan jika sudah selesai
-      }
+      } catch {}
     }
     activeSourcesRef.current = [];
     if (audioCtxRef.current) {
@@ -188,18 +191,25 @@ export function useAudioEngine({
       workletNode.port.onmessage = (e) => {
         const pcm16k = e.data as Int16Array;
         const b64 = int16ToBase64(pcm16k);
-        onAudioChunk(b64);
+        onAudioChunkRef.current?.(b64);
       };
 
       micSource.connect(workletNode);
-      // Catatan: jangan connect workletNode ke ctx.destination agar tidak terdengar suara sendiri (feedback loop)
+
+      // Hubungkan workletNode ke destination dengan gain 0 agar browser tidak men-suspend audio thread
+      const silentGain = ctx.createGain();
+      silentGain.gain.value = 0;
+      workletNode.connect(silentGain);
+      silentGain.connect(ctx.destination);
+      silentGainRef.current = silentGain;
 
       setIsMicActive(true);
+      console.log("🎤 Mikrofon aktif dan terhubung ke AudioWorklet");
     } catch (err) {
       console.error("Gagal mengaktifkan mikrofon:", err);
       throw err;
     }
-  }, [getOrCreateAudioContext, onAudioChunk]);
+  }, [getOrCreateAudioContext]);
 
   // Hentikan mikrofon
   const stopMic = useCallback(() => {
@@ -210,6 +220,10 @@ export function useAudioEngine({
     if (workletNodeRef.current) {
       workletNodeRef.current.disconnect();
       workletNodeRef.current = null;
+    }
+    if (silentGainRef.current) {
+      silentGainRef.current.disconnect();
+      silentGainRef.current = null;
     }
     setIsMicActive(false);
   }, []);

@@ -12,7 +12,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 export const config = {
   port: parseInt(process.env.PORT || "3001", 10),
   geminiApiKey: process.env.GEMINI_API_KEY || "",
-  geminiModel: process.env.GEMINI_MODEL || "gemini-2.0-flash-exp",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",
   geminiVoice: process.env.GEMINI_VOICE || "Aoede",
 };
 

@@ -29,9 +29,10 @@ async function testGeminiVisionPoC() {
 
   const prompt = "Deskripsikan secara detail karakter apa yang ada dalam gambar ini, ciri-ciri fisiknya, pakaian, dan ekspresinya dalam Bahasa Indonesia yang ramah.";
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-  console.log("📡 Mengirim permintaan ke Gemini API (gemini-2.0-flash)...");
+  console.log(`📡 Mengirim permintaan ke Gemini API (${model})...`);
 
   try {
     const response = await fetch(endpoint, {
