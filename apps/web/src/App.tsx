@@ -9,13 +9,14 @@ import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
-import { Bot, Activity, Wifi, Shield } from "lucide-react";
+import { Bot, Activity, Wifi, Shield, Send } from "lucide-react";
 
 export function App() {
   const [avatarMode, setAvatarMode] = useState<"2d" | "3d">("2d");
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [inputText, setInputText] = useState("");
 
   // Hook Audio Capture & Playback
   const audioEngine = useAudioEngine({
@@ -218,11 +219,40 @@ export function App() {
       </main>
 
       {/* Bottom Floating Area: Subtitles & Control Bar */}
-      <footer className="relative z-30 pb-7 pt-2 flex flex-col items-center gap-3.5 px-4">
+      <footer className="relative z-30 pb-7 pt-2 flex flex-col items-center gap-3.5 px-4 w-full">
         <SubtitleOverlay
           transcripts={live.transcripts}
           statusMessage={live.statusMessage}
         />
+
+        {/* Quick Text Input Form */}
+        {live.isConnected && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!inputText.trim()) return;
+              live.sendText(inputText.trim());
+              setInputText("");
+            }}
+            className="w-full max-w-md flex items-center gap-2 px-3 py-1.5 rounded-xl glass-panel border border-white/10 shadow-lg animate-in fade-in"
+          >
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Bicara atau ketik pesan (misal: 'Halo Celyn')..."
+              className="flex-1 bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none px-2 py-1"
+            />
+            <button
+              type="submit"
+              disabled={!inputText.trim()}
+              className="p-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 disabled:opacity-40 text-white transition-colors"
+              title="Kirim pesan"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
+        )}
 
         <ControlBar
           isConnected={live.isConnected}
