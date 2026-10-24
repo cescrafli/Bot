@@ -1,29 +1,71 @@
-# Dependencies
+# =========================================================================
+# CELYN AI BOT - GITIGNORE
+# =========================================================================
+
+# 1. Kredensial, Rahasia & Environment Variables (SANGAT KRUSIAL)
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+
+# 2. Dependencies
 node_modules/
 .pnpm-store/
+.yarn/
+.npm/
 
-# Build outputs
+# 3. Hasil Build & Bundle
 dist/
 build/
-.next/
 out/
+.next/
+.turbo/
+.cache/
+.vite/
+*.tsbuildinfo
 
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Logs
+# 4. File Log & Debug
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-*.log
+lerna-debug.log*
 
-# OS & Editor
+# 5. Database Lokal & File Backup
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.tmp
+*.temp
+
+# 6. File Sistem Operasi
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+[Dd]esktop.ini
+
+# 7. Pengaturan IDE & Editor
+.idea/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
-.idea/
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+
+# 8. Testing & Coverage
+coverage/
+.nyc_output/

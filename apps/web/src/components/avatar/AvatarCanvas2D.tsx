@@ -94,12 +94,12 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
 
   // =========================================================================
   // LOGIKA LIP-SYNC MULUT DINAMIS
-  // Saat isSpeaking aktif: gunakan volume audio riil, ATAU ritme suku kata bicara 3.5Hz
-  // Ini menjamin 100% mulut Celyn PASTI bergerak membuka-menutup saat bersuara!
+  // Saat isSpeaking aktif: padukan volume audio riil dengan ritme suku kata bicara (3.5Hz)
+  // Menjamin 100% mulut Celyn PASTI membuka-menutup natural saat bersuara!
   // =========================================================================
-  const speechCadence = (Math.sin(tick / 95) * 0.45 + 0.55); // 0.1 s/d 1.0 gelombang ritmis bicara
+  const speechCadence = Math.sin(tick / 85) * 0.45 + 0.55; // 0.10 s/d 1.0 gelombang suku kata
   const dynamicMouthAmount = isSpeaking
-    ? Math.max(mouthOpen * 2.8, speechCadence * 0.85)
+    ? Math.max(mouthOpen * 2.8, speechCadence * (mouthOpen > 0.01 ? 0.92 : 0.82))
     : 0;
 
   // Konfigurasi Emosi
@@ -278,40 +278,43 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             </div>
 
             {/* ============================================================= */}
-            {/* MULUT BERBICARA / LIP-SYNC (Presisi Koordinat: X=51.0%, Y=33.2%) */}
+            {/* MULUT BERBICARA / LIP-SYNC (Presisi Koordinat: X=52.1%, Y=33.3%) */}
             {/* Bergerak membuka-menutup dinamis saat isSpeaking aktif */}
             {/* ============================================================= */}
-            {isSpeaking && dynamicMouthAmount > 0.08 && (
+            {isSpeaking && dynamicMouthAmount > 0.05 ? (
               <div
-                className="absolute z-25 flex flex-col items-center justify-between overflow-hidden shadow-md transition-all duration-75"
+                className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-lg transition-all duration-75 pointer-events-none"
                 style={{
-                  left: "51.0%",
-                  top: "33.2%",
+                  left: "52.1%",
+                  top: "33.3%",
                   transform: "translate(-50%, -50%)",
-                  width: `${Math.round(26 + dynamicMouthAmount * 16)}px`,
-                  height: `${Math.round(8 + dynamicMouthAmount * 20)}px`,
-                  backgroundColor: "#541515",
+                  width: `${Math.round(28 + dynamicMouthAmount * 16)}px`,
+                  height: `${Math.round(6 + dynamicMouthAmount * 22)}px`,
+                  backgroundColor: "#4c1318",
                   borderRadius:
                     dynamicMouthAmount > 0.4
-                      ? "45% 45% 55% 55% / 30% 30% 70% 70%"
-                      : "50% 50% 40% 40% / 30% 30% 70% 70%",
-                  border: "1.5px solid #3d0e0e",
-                  boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
+                      ? "46% 46% 54% 54% / 32% 32% 68% 68%"
+                      : "50% 50% 45% 45% / 28% 28% 72% 72%",
+                  border: "1.5px solid #a8585f",
+                  boxShadow: "inset 0 2px 5px rgba(0,0,0,0.65)",
                 }}
               >
-                {/* Gigi Atas */}
+                {/* Gigi Atas Bersih */}
                 <div
-                  className="w-3/4 h-2 bg-white/95 rounded-b-sm mt-0.5 transition-opacity duration-75"
-                  style={{ opacity: dynamicMouthAmount > 0.2 ? 1 : 0 }}
+                  className="w-4/5 h-2 bg-[#fffdfd] rounded-b-sm mt-0.5 shadow-sm transition-opacity duration-75"
+                  style={{ opacity: dynamicMouthAmount > 0.15 ? 1 : 0 }}
                 />
 
-                {/* Lidah */}
+                {/* Lidah Merah Muda Anime */}
                 <div
-                  className="w-2/3 h-2.5 bg-rose-400 rounded-t-full mb-0.5 transition-all duration-75"
-                  style={{ opacity: dynamicMouthAmount > 0.35 ? 0.95 : 0 }}
+                  className="w-3/4 h-3 bg-[#e87a8e] rounded-t-full mb-0.5 shadow-inner transition-all duration-75"
+                  style={{
+                    opacity: dynamicMouthAmount > 0.3 ? 0.95 : 0,
+                    transform: `scale(${0.8 + dynamicMouthAmount * 0.2})`,
+                  }}
                 />
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

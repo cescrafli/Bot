@@ -57,14 +57,9 @@ FITUR & TANGGUNG JAWAB:
 3. Bantu pengguna memecahkan masalah coding, menerjemahkan teks di layar, atau mendiskusikan konten visual yang sedang mereka buka.
 
 ATURAN WAJIB PERCAKAPAN:
-- Buat jawaban yang RINGKAS, PADAT, dan LUGAS (1 sampai 3 kalimat pendek) karena suaramu dibacakan langsung. Pengguna tidak suka mendengarkan monolog panjang.
-- Sering-seringlah memanggil tool \`set_expression\` setiap kali ada transisi emosi:
-  * "happy": saat menyapa, memberi selamat, merasa senang, atau bercanda.
-  * "thinking": saat sedang menganalisis tampilan layar atau berpikir sebelum memberi jawaban.
-  * "surprised": jika melihat error yang tidak biasa, hal lucu, atau fakta mengejutkan.
-  * "neutral": saat menjelaskan hal biasa secara tenang.
-  * "sad": jika pengguna mengalami kendala berat atau kamu bersimpati.
-- Panggil tool \`point_at_screen\` dengan perkiraan koordinat x, y (0.0 sampai 1.0) jika pengguna menanyakan lokasi suatu elemen di layar.`,
+- Selalu prioritaskan menjawab LANGSUNG dengan SUARA audio yang ramah, santai, dan ringkas (1 sampai 2 kalimat pendek). Pengguna mengobrol real-time dan ingin respon cepat.
+- Kamu boleh memanggil tool \`set_expression\` (pilihan: happy, thinking, surprised, neutral, sad) paling banyak SATU KALI per giliran jika ada transisi emosi yang cocok, tapi JANGAN PERNAH memanggilnya berulang-ulang tanpa suara.
+- Panggil tool \`point_at_screen\` dengan koordinat x, y (0.0 sampai 1.0) hanya jika pengguna menanyakan lokasi suatu elemen tertentu di layar.`,
               },
             ],
           },
@@ -134,6 +129,30 @@ ATURAN WAJIB PERCAKAPAN:
         message: "Celyn aktif dan siap mendengarkan ucapanmu!",
       });
 
+      // Picu sapaan ramah pembuka Celyn secara otomatis saat pertama kali tersambung
+      setTimeout(async () => {
+        if (this.session && this.isConnected) {
+          try {
+            console.log("👋 [Gemini Live] Mengirim trigger sapaan pembuka Celyn...");
+            await this.session.sendClientContent({
+              turns: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: "Sapa pengguna dengan ramah, hangat, dan ceria dalam 1 kalimat pendek sapaan pembuka (contoh: 'Halo! Aku Celyn, senang bisa mengobrol denganmu! Ada yang bisa kubantu hari ini?').",
+                    },
+                  ],
+                },
+              ],
+              turnComplete: true,
+            });
+          } catch (e) {
+            console.warn("Gagal auto-greeting:", e);
+          }
+        }
+      }, 500);
+
       this.setupSessionDurationLimit();
     } catch (err: any) {
       console.error("Gagal menghubungkan ke Gemini Live API:", err);
@@ -201,6 +220,16 @@ ATURAN WAJIB PERCAKAPAN:
           });
         }
       }
+    }
+
+    // 2.5 Giliran Model Selesai
+    if (data.serverContent?.turnComplete) {
+      console.log("🏁 [Gemini Live] Giliran bicara Celyn selesai.");
+      this.sendToClient({
+        type: "status",
+        status: "listening",
+        message: "Celyn sedang mendengarkan ucapanmu...",
+      });
     }
 
     // 3. Tool Calls

@@ -270,6 +270,7 @@ export function App() {
           }
           onToggleHistory={() => setIsHistoryOpen(true)}
           onToggleHelp={() => setIsHelpOpen(true)}
+          onTriggerTestSpeech={audioEngine.triggerTestSpeech}
         />
       </footer>
 

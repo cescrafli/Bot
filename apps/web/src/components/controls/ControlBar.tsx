@@ -11,6 +11,7 @@ import {
   Radio,
   History,
   HelpCircle,
+  Sparkles,
 } from "lucide-react";
 
 interface ControlBarProps {
@@ -27,6 +28,7 @@ interface ControlBarProps {
   onToggleAvatarMode: () => void;
   onToggleHistory: () => void;
   onToggleHelp: () => void;
+  onTriggerTestSpeech?: () => void;
 }
 
 export const ControlBar: React.FC<ControlBarProps> = ({
@@ -43,6 +45,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onToggleAvatarMode,
   onToggleHistory,
   onToggleHelp,
+  onTriggerTestSpeech,
 }) => {
   return (
     <div className="flex items-center gap-2.5 px-5 py-3 rounded-2xl glass-panel shadow-2xl border border-white/10 max-w-full overflow-x-auto">
@@ -143,6 +146,18 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           </>
         )}
       </button>
+
+      {/* Tombol Tes Suara & Mulut */}
+      {onTriggerTestSpeech && (
+        <button
+          onClick={onTriggerTestSpeech}
+          title="Uji coba gerak mulut dan suara Celyn sekarang"
+          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-semibold border border-rose-500/30 transition-all shrink-0 hover:scale-[1.02]"
+        >
+          <Sparkles className="w-4 h-4 text-rose-400 animate-pulse" />
+          <span>Tes Suara & Mulut</span>
+        </button>
+      )}
 
       {/* Tombol Riwayat Transkrip */}
       <button

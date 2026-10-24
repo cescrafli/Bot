@@ -13,6 +13,11 @@ export function useAudioEngine({
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0);
 
+  const isPlayingRef = useRef(false);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
   // Selalu simpan referensi callback terbaru agar tidak terjebak closure usang
   const onAudioChunkRef = useRef(onAudioChunk);
   useEffect(() => {
@@ -30,17 +35,17 @@ export function useAudioEngine({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Inisialisasi AudioContext (harus dipicu aksi klik pengguna)
+  // Inisialisasi AudioContext (menggunakan sample rate native perangkat keras sistem)
   const getOrCreateAudioContext = useCallback(() => {
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       const AudioCtxClass =
         window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioCtxClass({ sampleRate: 24000 });
+      const ctx = new AudioCtxClass();
       audioCtxRef.current = ctx;
 
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.3;
+      analyser.smoothingTimeConstant = 0.25;
       analyser.connect(ctx.destination);
       analyserRef.current = analyser;
     }
@@ -91,21 +96,25 @@ export function useAudioEngine({
     return btoa(binary);
   };
 
-  // Mengubah Base64 PCM 24kHz ke AudioBuffer untuk diputar
+  // Mengubah Base64 PCM 24kHz (16-bit Little-Endian) ke AudioBuffer untuk diputar
   const base64PcmToAudioBuffer = (
     ctx: AudioContext,
     b64: string,
     sampleRate = 24000
   ): AudioBuffer => {
     const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+    const numSamples = Math.floor(binary.length / 2);
+    if (numSamples === 0) {
+      return ctx.createBuffer(1, 1, sampleRate);
     }
-    const int16 = new Int16Array(bytes.buffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / 32768.0;
+
+    const float32 = new Float32Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      const byte1 = binary.charCodeAt(i * 2);
+      const byte2 = binary.charCodeAt(i * 2 + 1);
+      let val = byte1 | (byte2 << 8);
+      if (val >= 0x8000) val -= 0x10000;
+      float32[i] = val / 32768.0;
     }
 
     const buffer = ctx.createBuffer(1, float32.length, sampleRate);
@@ -118,8 +127,11 @@ export function useAudioEngine({
     (b64PCM24k: string) => {
       try {
         const ctx = getOrCreateAudioContext();
-        const audioBuffer = base64PcmToAudioBuffer(ctx, b64PCM24k, 24000);
+        if (ctx.state === "suspended") {
+          ctx.resume();
+        }
 
+        const audioBuffer = base64PcmToAudioBuffer(ctx, b64PCM24k, 24000);
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
 
@@ -130,12 +142,14 @@ export function useAudioEngine({
         }
 
         const now = ctx.currentTime;
+        // Jaga streaming audio tetap seamless tanpa jeda antar chunk
         const startTime = Math.max(now, nextPlayTimeRef.current);
         source.start(startTime);
         nextPlayTimeRef.current = startTime + audioBuffer.duration;
 
         activeSourcesRef.current.push(source);
         setIsPlaying(true);
+        isPlayingRef.current = true;
 
         source.onended = () => {
           activeSourcesRef.current = activeSourcesRef.current.filter(
@@ -143,6 +157,7 @@ export function useAudioEngine({
           );
           if (activeSourcesRef.current.length === 0) {
             setIsPlaying(false);
+            isPlayingRef.current = false;
           }
         };
       } catch (err) {
@@ -165,6 +180,7 @@ export function useAudioEngine({
       nextPlayTimeRef.current = audioCtxRef.current.currentTime;
     }
     setIsPlaying(false);
+    isPlayingRef.current = false;
     setVolume(0);
   }, []);
 
@@ -190,6 +206,14 @@ export function useAudioEngine({
 
       workletNode.port.onmessage = (e) => {
         const pcm16k = e.data as Int16Array;
+
+        // Proteksi Echo / Half-duplex guard:
+        // Saat Celyn sedang bersuara lewat speaker, jangan teruskan sinyal mic
+        // agar Gemini Live tidak mendengar dirinya sendiri dan memotong kalimatnya.
+        if (isPlayingRef.current) {
+          return;
+        }
+
         const b64 = int16ToBase64(pcm16k);
         onAudioChunkRef.current?.(b64);
       };
@@ -228,6 +252,44 @@ export function useAudioEngine({
     setIsMicActive(false);
   }, []);
 
+  // Fitur Tes Bicara & Lip-Sync Mandiri (Memutar rekaman suara asli Celyn dari Gemini)
+  const triggerTestSpeech = useCallback(async () => {
+    try {
+      const ctx = getOrCreateAudioContext();
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      console.log("🔊 Memutar audio tes Celyn (/celyn_test_greeting.wav)...");
+      const res = await fetch("/celyn_test_greeting.wav");
+      const arrayBuffer = await res.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+
+      if (analyserRef.current) {
+        source.connect(analyserRef.current);
+      } else {
+        source.connect(ctx.destination);
+      }
+
+      source.start();
+      setIsPlaying(true);
+      isPlayingRef.current = true;
+
+      source.onended = () => {
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        console.log("✅ Tes audio Celyn selesai.");
+      };
+    } catch (err) {
+      console.error("Gagal memutar tes audio:", err);
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+    }
+  }, [getOrCreateAudioContext]);
+
   return {
     isMicActive,
     isPlaying,
@@ -236,5 +298,6 @@ export function useAudioEngine({
     stopMic,
     playAudioChunk,
     stopPlayback,
+    triggerTestSpeech,
   };
 }
