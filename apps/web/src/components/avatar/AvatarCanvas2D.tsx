@@ -282,77 +282,21 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           className="relative w-full h-full flex items-end justify-center"
           style={{
             transformOrigin: "50% 90%", // Poros pinggang
-            transform: `translateY(${breathY}px) scaleY(${breathScaleY})`,
+            transform: `translateY(${breathY}px) scaleY(${breathScaleY}) rotate(${isSpeaking ? Math.sin(tSec * 3.5) * 0.5 : 0}deg)`,
             transition: "transform 0.05s linear",
           }}
         >
           {/* ============================================================= */}
-          {/* LAPISAN 1: GAMBAR DASAR TUBUH & TORSO (Z-10) */}
+          {/* GAMBAR UTUH CELYN BERSIH & PRESISI (Tanpa Robekan Limb) */}
           {/* ============================================================= */}
           <img
             src="/celyn_clean_cutout.png"
-            alt="Celyn Base"
+            alt="Celyn Avatar"
             className="w-full h-full object-contain filter drop-shadow-2xl relative z-10"
           />
 
           {/* ============================================================= */}
-          {/* LAPISAN 2: LENGAN KIRI (Z-15) - Gerak Bahu & Gestur */}
-          {/* ============================================================= */}
-          <img
-            src="/celyn_arm_left.png"
-            alt="Celyn Left Arm"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-15"
-            style={{
-              transformOrigin: `${rigConfig.armPivotLX}% ${rigConfig.armPivotLY}%`,
-              transform: `rotate(${armRotL}deg)`,
-              transition: "transform 0.06s ease-out",
-            }}
-          />
-
-          {/* ============================================================= */}
-          {/* LAPISAN 3: LENGAN KANAN (Z-15) - Gerak Bahu & Gestur */}
-          {/* ============================================================= */}
-          <img
-            src="/celyn_arm_right.png"
-            alt="Celyn Right Arm"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-15"
-            style={{
-              transformOrigin: `${rigConfig.armPivotRX}% ${rigConfig.armPivotRY}%`,
-              transform: `rotate(${armRotR}deg)`,
-              transition: "transform 0.06s ease-out",
-            }}
-          />
-
-          {/* ============================================================= */}
-          {/* LAPISAN 4: HELAI RAMBUT KIRI (Z-20) - Inersia & Ayunan Lembut */}
-          {/* ============================================================= */}
-          <img
-            src="/celyn_hair_l_clean.png"
-            alt="Celyn Left Hair"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
-            style={{
-              transformOrigin: `${rigConfig.hairPivotLX}% ${rigConfig.hairPivotLY}%`,
-              transform: `rotate(${hairRotL}deg)`,
-              transition: "transform 0.08s ease-out",
-            }}
-          />
-
-          {/* ============================================================= */}
-          {/* LAPISAN 5: HELAI RAMBUT KANAN (Z-20) - Inersia & Ayunan Lembut */}
-          {/* ============================================================= */}
-          <img
-            src="/celyn_hair_r_clean.png"
-            alt="Celyn Right Hair"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
-            style={{
-              transformOrigin: `${rigConfig.hairPivotRX}% ${rigConfig.hairPivotRY}%`,
-              transform: `rotate(${hairRotR}deg)`,
-              transition: "transform 0.08s ease-out",
-            }}
-          />
-
-          {/* ============================================================= */}
-          {/* LAPISAN 6: KEPALA, MATA & MULUT (Z-30) - Condong di Sendi Leher */}
+          {/* LAPISAN KEPALA, MATA & MULUT (Condong di Sendi Leher 50% 39%) */}
           {/* ============================================================= */}
           <div
             className="absolute inset-0 w-full h-full z-30 pointer-events-none"
@@ -454,37 +398,21 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* ============================================================= */}
           {rigConfig.showPivots && (
             <div className="absolute inset-0 w-full h-full pointer-events-none z-40">
-              {/* Bahu Kiri */}
+              {/* Leher / Kepala */}
               <div
                 className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-rose-500 bg-rose-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: `${rigConfig.armPivotLX}%`, top: `${rigConfig.armPivotLY}%` }}
-                title="Bahu Kiri"
-              >
-                L
-              </div>
-              {/* Bahu Kanan */}
-              <div
-                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-rose-500 bg-rose-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: `${rigConfig.armPivotRX}%`, top: `${rigConfig.armPivotRY}%` }}
-                title="Bahu Kanan"
-              >
-                R
-              </div>
-              {/* Rambut Kiri */}
-              <div
-                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: `${rigConfig.hairPivotLX}%`, top: `${rigConfig.hairPivotLY}%` }}
-                title="Rambut Kiri"
+                style={{ left: "50%", top: "39%" }}
+                title="Poros Leher"
               >
                 H
               </div>
-              {/* Rambut Kanan */}
+              {/* Mulut */}
               <div
                 className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: `${rigConfig.hairPivotRX}%`, top: `${rigConfig.hairPivotRY}%` }}
-                title="Rambut Kanan"
+                style={{ left: "52.1%", top: "33.3%" }}
+                title="Mulut"
               >
-                H
+                M
               </div>
             </div>
           )}
