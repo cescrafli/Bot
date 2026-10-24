@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { EmotionType, LookAtTarget } from "@celyn/shared";
-import { Sparkles, HelpCircle, Smile, AlertCircle, Heart } from "lucide-react";
+import { Sparkles, HelpCircle, Smile, AlertCircle, Heart, Sliders } from "lucide-react";
+import {
+  RigCalibrationPanel,
+  RigConfig,
+  DEFAULT_RIG_CONFIG,
+} from "./RigCalibrationPanel";
 
 interface AvatarCanvas2DProps {
   emotion: EmotionType;
@@ -20,6 +25,43 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   const [isBlinking, setIsBlinking] = useState(false);
   const [tick, setTick] = useState(0);
 
+  // Konfigurasi Rigging (tersimpan di localStorage)
+  const [rigConfig, setRigConfig] = useState<RigConfig>(() => {
+    const saved = localStorage.getItem("celyn_rig_config");
+    if (saved) {
+      try {
+        return { ...DEFAULT_RIG_CONFIG, ...JSON.parse(saved) };
+      } catch {}
+    }
+    return DEFAULT_RIG_CONFIG;
+  });
+
+  const [isRigPanelOpen, setIsRigPanelOpen] = useState(() => {
+    return window.location.search.includes("debugRig=1");
+  });
+
+  const handleRigChange = (newConfig: RigConfig) => {
+    setRigConfig(newConfig);
+    localStorage.setItem("celyn_rig_config", JSON.stringify(newConfig));
+  };
+
+  const handleRigReset = () => {
+    setRigConfig(DEFAULT_RIG_CONFIG);
+    localStorage.removeItem("celyn_rig_config");
+  };
+
+  // Keyboard shortcut Alt+R untuk toggle panel kalibrasi
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.code === "KeyR") {
+        e.preventDefault();
+        setIsRigPanelOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // Fisika Pernapasan & Waktu Bicara
   const [breath, setBreath] = useState(0);
 
@@ -37,21 +79,21 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Animation Loop (60 FPS: Menggerakkan Napas dan Siklus Bicara Suku Kata)
+  // Animation Loop (60 FPS: Menggerakkan Napas, Lengan, Rambut, dan Suku Kata Bicara)
   useEffect(() => {
     let animId: number;
     const startTime = performance.now();
 
     const loop = (now: number) => {
       const t = (now - startTime) / 1000;
-      setBreath(Math.sin(t * 1.65));
+      setBreath(Math.sin(t * rigConfig.breathSpeed));
       setTick(now);
       animId = requestAnimationFrame(loop);
     };
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, []);
+  }, [rigConfig.breathSpeed]);
 
   // Siklus Kedipan Alami Mata (acak tiap 3-5 detik)
   useEffect(() => {
@@ -101,6 +143,26 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   const dynamicMouthAmount = isSpeaking
     ? Math.max(mouthOpen * 2.8, speechCadence * (mouthOpen > 0.01 ? 0.92 : 0.82))
     : 0;
+
+  // =========================================================================
+  // KINEMATIKA PROSEDURAL 2D RIGGING (Lengan, Rambut, Napas Tubuh)
+  // =========================================================================
+  const tSec = tick / 1000;
+
+  // 1. Ayunan Lengan (dengan dorongan gestur bukaan sudut saat berbicara)
+  const armSwayBase = Math.sin(tSec * rigConfig.breathSpeed - 0.4);
+  const speechGesture = isSpeaking ? dynamicMouthAmount * 1.5 : 0;
+  const armRotL = armSwayBase * rigConfig.armMaxRot + speechGesture;
+  const armRotR = -armSwayBase * rigConfig.armMaxRot - speechGesture;
+
+  // 2. Ayunan Rambut (dengan efek inersia saat kepala menoleh)
+  const hairSwayBase = Math.sin(tSec * (rigConfig.breathSpeed * 1.15) - 0.8);
+  const hairRotL = hairSwayBase * rigConfig.hairMaxRot + headTilt * 0.25;
+  const hairRotR = -hairSwayBase * rigConfig.hairMaxRot + headTilt * 0.25;
+
+  // 3. Napas tubuh (translasi vertikal halus + peregangan mikro)
+  const breathY = breath * -rigConfig.breathIntensity;
+  const breathScaleY = 1 + breath * 0.007;
 
   // Konfigurasi Emosi
   const emotionConfig = {
@@ -154,6 +216,26 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       ref={containerRef}
       className="relative flex flex-col items-center justify-center w-full h-full select-none overflow-hidden"
     >
+      {/* Tombol Pintas Kalibrasi Rig (Pojok Kiri Atas) */}
+      <button
+        onClick={() => setIsRigPanelOpen((prev) => !prev)}
+        className="absolute top-6 left-6 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-pill border border-white/10 hover:border-rose-500/40 text-slate-400 hover:text-white text-xs font-medium transition-all shadow-lg hover:scale-105"
+        title="Buka Panel Kalibrasi Rig 2D (Alt+R)"
+      >
+        <Sliders className="w-3.5 h-3.5 text-rose-400" />
+        <span>Kalibrasi Rig</span>
+      </button>
+
+      {/* Panel Kalibrasi Rig Interaktif */}
+      {isRigPanelOpen && (
+        <RigCalibrationPanel
+          config={rigConfig}
+          onChange={handleRigChange}
+          onReset={handleRigReset}
+          onClose={() => setIsRigPanelOpen(false)}
+        />
+      )}
+
       {/* Halo gelombang suara saat Celyn berbicara */}
       {isSpeaking && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
@@ -195,33 +277,92 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       {/* STAGE UTAMA AVATAR CELYN */}
       <div className="relative z-10 w-full max-w-[440px] h-[580px] flex items-end justify-center pointer-events-none">
         
-        {/* GAMBAR KARAKTER CELYN UTUH & BERSIH */}
+        {/* KONTAINER UTAMA DENGAN GERAK NAPAS (Poros di panggul) */}
         <div
           className="relative w-full h-full flex items-end justify-center"
           style={{
-            transformOrigin: "50% 90%", // Poros pernapasan di pinggang
-            transform: `translateY(${breath * -3}px) scaleY(${1 + breath * 0.008})`,
+            transformOrigin: "50% 90%", // Poros pinggang
+            transform: `translateY(${breathY}px) scaleY(${breathScaleY})`,
             transition: "transform 0.05s linear",
           }}
         >
+          {/* ============================================================= */}
+          {/* LAPISAN 1: GAMBAR DASAR TUBUH & TORSO (Z-10) */}
+          {/* ============================================================= */}
           <img
             src="/celyn_clean_cutout.png"
-            alt="Celyn Avatar"
-            className="w-full h-full object-contain filter drop-shadow-2xl"
+            alt="Celyn Base"
+            className="w-full h-full object-contain filter drop-shadow-2xl relative z-10"
           />
 
-          {/* LAYER KEPALA, MATA & MULUT (Condong halus pada sendi leher) */}
+          {/* ============================================================= */}
+          {/* LAPISAN 2: LENGAN KIRI (Z-15) - Gerak Bahu & Gestur */}
+          {/* ============================================================= */}
+          <img
+            src="/celyn_arm_left.png"
+            alt="Celyn Left Arm"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-15"
+            style={{
+              transformOrigin: `${rigConfig.armPivotLX}% ${rigConfig.armPivotLY}%`,
+              transform: `rotate(${armRotL}deg)`,
+              transition: "transform 0.06s ease-out",
+            }}
+          />
+
+          {/* ============================================================= */}
+          {/* LAPISAN 3: LENGAN KANAN (Z-15) - Gerak Bahu & Gestur */}
+          {/* ============================================================= */}
+          <img
+            src="/celyn_arm_right.png"
+            alt="Celyn Right Arm"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-15"
+            style={{
+              transformOrigin: `${rigConfig.armPivotRX}% ${rigConfig.armPivotRY}%`,
+              transform: `rotate(${armRotR}deg)`,
+              transition: "transform 0.06s ease-out",
+            }}
+          />
+
+          {/* ============================================================= */}
+          {/* LAPISAN 4: HELAI RAMBUT KIRI (Z-20) - Inersia & Ayunan Lembut */}
+          {/* ============================================================= */}
+          <img
+            src="/celyn_hair_l_clean.png"
+            alt="Celyn Left Hair"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
+            style={{
+              transformOrigin: `${rigConfig.hairPivotLX}% ${rigConfig.hairPivotLY}%`,
+              transform: `rotate(${hairRotL}deg)`,
+              transition: "transform 0.08s ease-out",
+            }}
+          />
+
+          {/* ============================================================= */}
+          {/* LAPISAN 5: HELAI RAMBUT KANAN (Z-20) - Inersia & Ayunan Lembut */}
+          {/* ============================================================= */}
+          <img
+            src="/celyn_hair_r_clean.png"
+            alt="Celyn Right Hair"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
+            style={{
+              transformOrigin: `${rigConfig.hairPivotRX}% ${rigConfig.hairPivotRY}%`,
+              transform: `rotate(${hairRotR}deg)`,
+              transition: "transform 0.08s ease-out",
+            }}
+          />
+
+          {/* ============================================================= */}
+          {/* LAPISAN 6: KEPALA, MATA & MULUT (Z-30) - Condong di Sendi Leher */}
+          {/* ============================================================= */}
           <div
-            className="absolute inset-0 w-full h-full"
+            className="absolute inset-0 w-full h-full z-30 pointer-events-none"
             style={{
               transformOrigin: "50% 39%", // Poros leher
               transform: `rotate(${headTilt}deg)`,
               transition: "transform 0.08s ease-out",
             }}
           >
-            {/* ============================================================= */}
             {/* MATA KIRI (Presisi Koordinat: X=42.7%, Y=24.9%) */}
-            {/* ============================================================= */}
             <div
               className="absolute z-20"
               style={{
@@ -233,10 +374,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               }}
             >
               {isBlinking ? (
-                // Kelopak mata kiri menutup
                 <div className="w-full h-1.5 mt-1.5 rounded-full bg-[#341d14] shadow-sm border-b border-[#20100a] animate-in fade-in duration-75" />
               ) : (
-                // Pupil mata kiri melirik kursor
                 <div
                   className="w-4 h-4 mx-auto rounded-full bg-[#180e0a] shadow-inner transition-transform duration-75 flex items-center justify-center relative overflow-hidden"
                   style={{
@@ -248,9 +387,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               )}
             </div>
 
-            {/* ============================================================= */}
             {/* MATA KANAN (Presisi Koordinat: X=59.4%, Y=24.3%) */}
-            {/* ============================================================= */}
             <div
               className="absolute z-20"
               style={{
@@ -262,10 +399,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               }}
             >
               {isBlinking ? (
-                // Kelopak mata kanan menutup
                 <div className="w-full h-1.5 mt-1.5 rounded-full bg-[#341d14] shadow-sm border-b border-[#20100a] animate-in fade-in duration-75" />
               ) : (
-                // Pupil mata kanan melirik kursor
                 <div
                   className="w-4 h-4 mx-auto rounded-full bg-[#180e0a] shadow-inner transition-transform duration-75 flex items-center justify-center relative overflow-hidden"
                   style={{
@@ -277,10 +412,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               )}
             </div>
 
-            {/* ============================================================= */}
             {/* MULUT BERBICARA / LIP-SYNC (Presisi Koordinat: X=52.1%, Y=33.3%) */}
-            {/* Bergerak membuka-menutup dinamis saat isSpeaking aktif */}
-            {/* ============================================================= */}
             {isSpeaking && dynamicMouthAmount > 0.05 ? (
               <div
                 className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-lg transition-all duration-75 pointer-events-none"
@@ -316,6 +448,46 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               </div>
             ) : null}
           </div>
+
+          {/* ============================================================= */}
+          {/* PENANDA TITIK POROS VISUAL (Hanya muncul saat showPivots aktif) */}
+          {/* ============================================================= */}
+          {rigConfig.showPivots && (
+            <div className="absolute inset-0 w-full h-full pointer-events-none z-40">
+              {/* Bahu Kiri */}
+              <div
+                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-rose-500 bg-rose-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
+                style={{ left: `${rigConfig.armPivotLX}%`, top: `${rigConfig.armPivotLY}%` }}
+                title="Bahu Kiri"
+              >
+                L
+              </div>
+              {/* Bahu Kanan */}
+              <div
+                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-rose-500 bg-rose-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
+                style={{ left: `${rigConfig.armPivotRX}%`, top: `${rigConfig.armPivotRY}%` }}
+                title="Bahu Kanan"
+              >
+                R
+              </div>
+              {/* Rambut Kiri */}
+              <div
+                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"
+                style={{ left: `${rigConfig.hairPivotLX}%`, top: `${rigConfig.hairPivotLY}%` }}
+                title="Rambut Kiri"
+              >
+                H
+              </div>
+              {/* Rambut Kanan */}
+              <div
+                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"
+                style={{ left: `${rigConfig.hairPivotRX}%`, top: `${rigConfig.hairPivotRY}%` }}
+                title="Rambut Kanan"
+              >
+                H
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
