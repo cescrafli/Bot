@@ -18,15 +18,15 @@ export interface RigConfig {
 }
 
 export const DEFAULT_RIG_CONFIG: RigConfig = {
-  armPivotLX: 26.0,
-  armPivotLY: 45.8,
-  armPivotRX: 74.2,
-  armPivotRY: 45.8,
+  armPivotLX: 28.9,
+  armPivotLY: 45.1,
+  armPivotRX: 71.7,
+  armPivotRY: 44.7,
   hairPivotLX: 38.0,
   hairPivotLY: 23.0,
   hairPivotRX: 62.0,
   hairPivotRY: 23.0,
-  armMaxRot: 2.2,
+  armMaxRot: 3.5,
   hairMaxRot: 3.2,
   breathIntensity: 3.5,
   breathSpeed: 1.6,

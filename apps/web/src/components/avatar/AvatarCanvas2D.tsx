@@ -95,10 +95,17 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [rigConfig.breathSpeed]);
 
-  // Preload closed-eye frame agar kedipan pertama instan tanpa jeda
+  // Preload semua aset tekstur rig agar perpindahan frame instan dan mulus
   useEffect(() => {
-    const img = new Image();
-    img.src = "/celyn_closed_face.png";
+    [
+      "/celyn_torso_rig.png",
+      "/celyn_torso_rig_closed.png",
+      "/celyn_arm_l_clean.png",
+      "/celyn_arm_r_clean.png",
+    ].forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
   }, []);
 
   // Siklus Kedipan Alami Mata (130ms, acak tiap 2.5 - 4.5 detik)
@@ -160,6 +167,25 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   const bodyTilt = isSpeaking
     ? Math.sin(tSec * 2.6) * 0.8 + (gazeTarget.x - 0.5) * 1.5
     : (gazeTarget.x - 0.5) * 1.0;
+
+  // 3. Kinematika Independen Lengan & Tangan Kiri-Kanan (Independent Arm Sway & Gestures)
+  // - Ayunan Napas: saat bernapas (inhale/exhale), lengan bergerak sedikit keluar-masuk
+  const armBreathL = -breath * 0.9;
+  const armBreathR = breath * 0.9;
+
+  // - Ayunan Bicara: gestur tangan bergerak mengayun alami mengikuti suku kata suara
+  const speechArmL = isSpeaking
+    ? Math.sin(tSec * 2.8) * (rigConfig.armMaxRot * 0.85) + (dynamicMouthAmount * 1.5)
+    : 0;
+  const speechArmR = isSpeaking
+    ? -Math.cos(tSec * 2.4 + 0.4) * (rigConfig.armMaxRot * 0.8) - (dynamicMouthAmount * 1.3)
+    : 0;
+
+  // - Inersia Halus Tatapan Kursor (Parallax Reaction)
+  const armGazeOffset = (gazeTarget.x - 0.5) * 1.6;
+
+  const armAngleLeft = Math.max(-6, Math.min(6, armBreathL + speechArmL + armGazeOffset));
+  const armAngleRight = Math.max(-6, Math.min(6, armBreathR + speechArmR + armGazeOffset));
 
   // Konfigurasi Emosi
   const emotionConfig = {
@@ -284,17 +310,54 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           }}
         >
           {/* ============================================================= */}
-          {/* GAMBAR UTUH CELYN: KEDIPAN MATA TEKSTUR ASLI 100% MULUS */}
-          {/* Normal: Mata Terbuka Asli (/celyn_clean_cutout.png) */}
-          {/* Kedip (130ms): Mata Merem Alami (/celyn_closed_face.png) */}
-          {/* Bebas tambalan CSS kotak, bebas double eye / 4 mata! */}
+          {/* LAPISAN TUBUH UTAMA (Kepala, Leher, Badan, Rambut & Pakaian) */}
+          {/* Normal: Mata Terbuka (/celyn_torso_rig.png) */}
+          {/* Kedip (130ms): Mata Merem Alami (/celyn_torso_rig_closed.png) */}
           {/* ============================================================= */}
           <img
-            src={isBlinking ? "/celyn_closed_face.png" : "/celyn_clean_cutout.png"}
-            alt="Celyn Avatar"
+            src={isBlinking ? "/celyn_torso_rig_closed.png" : "/celyn_torso_rig.png"}
+            alt="Celyn Avatar Body"
             className="w-full h-full object-contain filter drop-shadow-2xl relative z-10 select-none pointer-events-none"
             draggable={false}
           />
+
+          {/* ============================================================= */}
+          {/* LENGAN KIRI BERGERAK INDEPENDEN (Poros di Sendi Bahu Kiri) */}
+          {/* ============================================================= */}
+          <div
+            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+            style={{
+              transformOrigin: `${rigConfig.armPivotLX}% ${rigConfig.armPivotLY}%`,
+              transform: `rotate(${armAngleLeft}deg)`,
+              transition: "transform 0.05s linear",
+            }}
+          >
+            <img
+              src="/celyn_arm_l_clean.png"
+              alt="Celyn Left Arm"
+              className="w-full h-full object-contain filter drop-shadow-md select-none pointer-events-none"
+              draggable={false}
+            />
+          </div>
+
+          {/* ============================================================= */}
+          {/* LENGAN KANAN BERGERAK INDEPENDEN (Poros di Sendi Bahu Kanan) */}
+          {/* ============================================================= */}
+          <div
+            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+            style={{
+              transformOrigin: `${rigConfig.armPivotRX}% ${rigConfig.armPivotRY}%`,
+              transform: `rotate(${armAngleRight}deg)`,
+              transition: "transform 0.05s linear",
+            }}
+          >
+            <img
+              src="/celyn_arm_r_clean.png"
+              alt="Celyn Right Arm"
+              className="w-full h-full object-contain filter drop-shadow-md select-none pointer-events-none"
+              draggable={false}
+            />
+          </div>
 
           {/* ============================================================= */}
           {/* LAPISAN MULUT LIP-SYNC HALUS (Presisi Terkunci pada Bibir) */}
@@ -335,18 +398,26 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* ============================================================= */}
           {rigConfig.showPivots && (
             <div className="absolute inset-0 w-full h-full pointer-events-none z-40">
-              {/* Leher / Kepala */}
+              {/* Bahu Kiri */}
               <div
-                className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-rose-500 bg-rose-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: "50%", top: "39%" }}
-                title="Poros Leher"
+                className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-500 bg-emerald-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
+                style={{ left: `${rigConfig.armPivotLX}%`, top: `${rigConfig.armPivotLY}%` }}
+                title="Sendi Bahu Kiri"
               >
-                H
+                AL
+              </div>
+              {/* Bahu Kanan */}
+              <div
+                className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-500 bg-emerald-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
+                style={{ left: `${rigConfig.armPivotRX}%`, top: `${rigConfig.armPivotRY}%` }}
+                title="Sendi Bahu Kanan"
+              >
+                AR
               </div>
               {/* Mulut */}
               <div
                 className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: "52.1%", top: "33.3%" }}
+                style={{ left: "52.1%", top: "33.1%" }}
                 title="Mulut"
               >
                 M
