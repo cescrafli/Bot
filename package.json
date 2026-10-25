@@ -9,7 +9,8 @@
     "apps/*"
   ],
   "dependencies": {
-    "@google/genai": "^2.31.0"
+    "@google/genai": "^2.31.0",
+    "ws": "^8.18.0"
   },
   "scripts": {
     "dev:server": "npm --workspace=apps/server run dev",

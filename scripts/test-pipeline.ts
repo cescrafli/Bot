@@ -2,7 +2,12 @@
  * Unit & Integration Smoke Test Suite untuk Celyn AI BOT
  * Menguji pipeline audio, visual change-detection, tool-calling schema, emosi, dan suara id-ID-GadisNeural.
  */
-import { normalizeEmotion, DEFAULT_VOICE_NAME, CELYN_SYSTEM_PROMPT } from "@celyn/shared";
+import {
+  normalizeEmotion,
+  DEFAULT_VOICE_NAME,
+  CELYN_SYSTEM_PROMPT,
+  extractIndonesianSentences,
+} from "@celyn/shared";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
@@ -136,6 +141,40 @@ async function runTtsTests() {
   assert(
     audioBuf.length > 10000,
     `Sintesis suara Gadis (id-ID-GadisNeural) berhasil (${audioBuf.length} bytes MP3)`
+  );
+
+  // Uji Pemecah Kalimat Bahasa Indonesia Cerdas
+  const test1 = extractIndonesianSentences(
+    "Harganya Rp 15.000 saja. Cukup murah kan? Silakan dibeli!",
+    false
+  );
+  assert(
+    test1.sentences.length === 2 &&
+      test1.sentences[0] === "Harganya Rp 15.000 saja." &&
+      test1.sentences[1] === "Cukup murah kan?",
+    "Pemisah kalimat mempertahankan angka desimal/ribuan 'Rp 15.000' tanpa terpotong"
+  );
+
+  const test2 = extractIndonesianSentences(
+    "Saya membeli buku, pulpen, dll. di toko. Kamu mau titip?",
+    false
+  );
+  assert(
+    test2.sentences.length === 1 &&
+      test2.sentences[0] === "Saya membeli buku, pulpen, dll. di toko.",
+    "Pemisah kalimat mempertahankan singkatan Bahasa Indonesia 'dll.' tanpa terpotong"
+  );
+
+  const test3 = extractIndonesianSentences("Ini kalimat belum selesai", false);
+  assert(
+    test3.sentences.length === 0 && test3.remaining === "Ini kalimat belum selesai",
+    "Buffer belum selesai tidak dipotong saat streaming (forceAll=false)"
+  );
+
+  const test4 = extractIndonesianSentences("Ini kalimat akhir giliran", true);
+  assert(
+    test4.sentences.length === 1 && test4.sentences[0] === "Ini kalimat akhir giliran",
+    "Buffer akhir giliran dipaksa di-flush saat turnComplete (forceAll=true)"
   );
 
   // 6. Ringkasan

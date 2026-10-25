@@ -144,6 +144,19 @@ export function App() {
     handleToggleScreenShare,
   ]);
 
+  // Status sinkron dengan pemutaran audio riil di browser
+  const effectiveStatus = !live.isConnected
+    ? "idle"
+    : audioEngine.isPlaying
+    ? "speaking"
+    : live.status;
+
+  const effectiveStatusMessage = !live.isConnected
+    ? live.statusMessage
+    : audioEngine.isPlaying
+    ? "Celyn sedang berbicara..."
+    : live.statusMessage;
+
   return (
     <div className="relative w-full h-[100dvh] flex flex-col justify-between bg-mesh overflow-hidden select-none safe-top safe-bottom safe-left safe-right">
       {/* Top Header Navbar */}
@@ -178,14 +191,16 @@ export function App() {
         <div className="flex items-center gap-1.5 sm:gap-3">
           <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full glass-pill text-[11px] sm:text-xs text-slate-300 border border-white/10">
             <Activity
-              className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${
+              className={`w-3.5 h-3.5 ${
                 live.isConnected
-                  ? "text-emerald-400 animate-pulse"
+                  ? effectiveStatus === "speaking"
+                    ? "text-rose-400 animate-pulse"
+                    : "text-emerald-400 animate-pulse"
                   : "text-slate-500"
               }`}
             />
             <span className="capitalize font-medium">
-              {live.isConnected ? live.status : "Offline"}
+              {live.isConnected ? effectiveStatus : "Offline"}
             </span>
           </div>
 
@@ -202,7 +217,7 @@ export function App() {
           <AvatarCanvas2D
             emotion={live.emotion}
             mouthOpen={audioEngine.volume}
-            isSpeaking={audioEngine.isPlaying || live.status === "speaking"}
+            isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
             lookAt={live.lookAt}
           />
         ) : (
@@ -217,7 +232,7 @@ export function App() {
             <AvatarVRM3D
               emotion={live.emotion}
               mouthOpen={audioEngine.volume}
-              isSpeaking={audioEngine.isPlaying || live.status === "speaking"}
+              isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
               lookAt={live.lookAt}
             />
           </Suspense>
@@ -241,8 +256,8 @@ export function App() {
       <footer className="relative z-30 pb-2 sm:pb-5 pt-1 sm:pt-2 flex flex-col items-center gap-2 sm:gap-3 px-2 sm:px-4 w-full">
         <SubtitleOverlay
           transcripts={live.transcripts}
-          statusMessage={live.statusMessage}
-          status={live.status}
+          statusMessage={effectiveStatusMessage}
+          status={effectiveStatus}
         />
 
         {/* Quick Text Input Form (Anti iOS Safari Auto-Zoom: text-base sm:text-xs) */}

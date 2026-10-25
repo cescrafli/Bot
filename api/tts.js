@@ -391,6 +391,34 @@ function synthesizeEdgeTTS(text, voice = DEFAULT_VOICE) {
   });
 }
 
+// In-memory IP rate limiter (maks 60 request TTS / menit per IP pada warm instance)
+const rateLimitMap = new Map();
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const maxRequests = 60;
+
+  const record = rateLimitMap.get(ip) || { count: 0, resetTime: now + windowMs };
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + windowMs;
+  } else {
+    record.count++;
+  }
+  rateLimitMap.set(ip, record);
+  return record.count > maxRequests;
+}
+
+async function synthesizeEdgeTTSWithRetry(text, voice = DEFAULT_VOICE) {
+  try {
+    return await synthesizeEdgeTTS(text, voice);
+  } catch (firstErr) {
+    console.warn("⚠️ [api/tts] Retry Edge TTS...", firstErr?.message);
+    return await synthesizeEdgeTTS(text, voice);
+  }
+}
+
 /**
  * Vercel Serverless Function: POST / GET /api/tts
  * Menyintesis kalimat Bahasa Indonesia menjadi suara Microsoft Edge Neural (id-ID-GadisNeural).
@@ -403,6 +431,18 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
+  }
+
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.headers["x-real-ip"] ||
+    req.socket?.remoteAddress ||
+    "unknown";
+
+  if (isRateLimited(clientIp)) {
+    return res.status(429).json({
+      error: "Terlalu banyak permintaan TTS. Harap tunggu sebentar.",
+    });
   }
 
   let text = "";
@@ -424,7 +464,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const mp3Buffer = await synthesizeEdgeTTS(String(text).slice(0, 1500), voice);
+    const mp3Buffer = await synthesizeEdgeTTSWithRetry(String(text).slice(0, 1500), voice);
     return res.status(200).json({
       audio: mp3Buffer.toString("base64"),
       mimeType: "audio/mp3",

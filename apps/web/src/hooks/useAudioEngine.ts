@@ -360,8 +360,8 @@ export function useAudioEngine({
         await ctx.resume();
       }
 
-      console.log("🔊 Memutar audio tes Celyn (/celyn_test_greeting.wav)...");
-      const res = await fetch("/celyn_test_greeting.wav");
+      console.log("🔊 Memutar audio tes GadisNeural (/celyn_test_greeting.mp3)...");
+      const res = await fetch("/celyn_test_greeting.mp3");
       const arrayBuffer = await res.arrayBuffer();
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 

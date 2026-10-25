@@ -9,6 +9,7 @@ import {
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
+  extractIndonesianSentences,
 } from "@celyn/shared";
 
 interface UseGeminiLiveOptions {
@@ -196,24 +197,14 @@ export function useGeminiLive({
 
       const flushDirectSentences = (forceAll: boolean) => {
         if (!useEdgeTts) return;
-        while (true) {
-          const match = directTtsBufferRef.current.match(
-            /^([\s\S]*?[.!?\n]+)(?:\s+|$)([\s\S]*)$/
-          );
-          if (match && match[1].trim().length >= 8) {
-            const sentence = match[1].trim();
-            directTtsBufferRef.current = match[2] || "";
-            enqueueDirectEdgeTts(sentence, directTtsTurnIdRef.current);
-          } else {
-            break;
-          }
-        }
-        if (forceAll) {
-          const remaining = directTtsBufferRef.current.trim();
-          directTtsBufferRef.current = "";
-          if (remaining.length > 0) {
-            enqueueDirectEdgeTts(remaining, directTtsTurnIdRef.current);
-          }
+        const { sentences, remaining } = extractIndonesianSentences(
+          directTtsBufferRef.current,
+          forceAll
+        );
+        directTtsBufferRef.current = remaining;
+
+        for (const sentence of sentences) {
+          enqueueDirectEdgeTts(sentence, directTtsTurnIdRef.current);
         }
       };
 

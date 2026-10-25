@@ -9,6 +9,7 @@ import {
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
+  extractIndonesianSentences,
 } from "@celyn/shared";
 
 export type SessionState = "DISCONNECTED" | "CONNECTING" | "ACTIVE" | "CLOSING" | "CLOSED";
@@ -235,23 +236,14 @@ export class GeminiSession {
   private flushCompleteSentences(forceAll: boolean): void {
     if (!this.useEdgeTts) return;
 
-    while (true) {
-      const match = this.ttsBuffer.match(/^([\s\S]*?[.!?\n]+)(?:\s+|$)([\s\S]*)$/);
-      if (match && match[1].trim().length >= 8) {
-        const sentence = match[1].trim();
-        this.ttsBuffer = match[2] || "";
-        this.enqueueEdgeTts(sentence, this.ttsTurnId);
-      } else {
-        break;
-      }
-    }
+    const { sentences, remaining } = extractIndonesianSentences(
+      this.ttsBuffer,
+      forceAll
+    );
+    this.ttsBuffer = remaining;
 
-    if (forceAll) {
-      const remaining = this.ttsBuffer.trim();
-      this.ttsBuffer = "";
-      if (remaining.length > 0) {
-        this.enqueueEdgeTts(remaining, this.ttsTurnId);
-      }
+    for (const sentence of sentences) {
+      this.enqueueEdgeTts(sentence, this.ttsTurnId);
     }
   }
 
