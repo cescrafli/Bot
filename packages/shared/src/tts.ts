@@ -609,7 +609,7 @@ export function buildExpressiveSsml(
 export function extractIndonesianSentences(
   buffer: string,
   forceAll: boolean,
-  _isFirstChunk?: boolean
+  isFirstChunk?: boolean
 ): { sentences: string[]; remaining: string } {
   let text = buffer;
   const sentences: string[] = [];
@@ -678,8 +678,13 @@ export function extractIndonesianSentences(
     }
 
     // Jika buffer sangat panjang (> 135 char) saat streaming dan belum ada tanda titik/tanya/seru,
+    // ATAU pada potongan awal respons (isFirstChunk=true dan buffer >= 40 char) untuk memangkas
+    // Time-To-First-Audio (TTFA) agar suara pertama Celyn keluar dalam hitungan ratusan milidetik,
     // pecah secara halus pada koma yang diikuti kata penghubung klausa mandiri
-    if (splitIdx === -1 && text.length > 135) {
+    const earlySplitThreshold = isFirstChunk ? 40 : 135;
+    const minSearchIdx = isFirstChunk ? 18 : 75;
+
+    if (splitIdx === -1 && text.length >= earlySplitThreshold) {
       const clauseConjunctions = [
         ", tapi ",
         ", karena ",
@@ -688,12 +693,16 @@ export function extractIndonesianSentences(
         ", lalu ",
         ", terus ",
         ", namun ",
+        ", kalau ",
+        ", nah ",
+        ", buat ",
+        ": ",
       ];
       for (const conj of clauseConjunctions) {
-        const foundIdx = text.indexOf(conj, 75);
-        if (foundIdx !== -1 && foundIdx < text.length - 20) {
+        const foundIdx = text.indexOf(conj, minSearchIdx);
+        if (foundIdx !== -1 && foundIdx < text.length - (isFirstChunk ? 8 : 20)) {
           splitIdx = foundIdx;
-          matchLen = 1; // Termasuk koma
+          matchLen = conj === ": " ? 2 : 1; // Termasuk koma atau titik dua
           break;
         }
       }

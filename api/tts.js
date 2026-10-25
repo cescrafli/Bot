@@ -447,35 +447,146 @@ function buildExpressiveSsml(rawText, options = {}) {
   );
 }
 
+let warmPool = [];
+const MAX_WARM = 2;
+let isReplenishing = false;
+
+function buildEdgeWs() {
+  const connId = crypto.randomBytes(16).toString("hex");
+  const muid = crypto.randomBytes(16).toString("hex").toUpperCase();
+  const gec = generateSecMsGecV2();
+  const url =
+    `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1` +
+    `?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}` +
+    `&ConnectionId=${connId}` +
+    `&Sec-MS-GEC=${gec}` +
+    `&Sec-MS-GEC-Version=${SEC_MS_GEC_VERSION}`;
+
+  return new WebSocket(url, {
+    headers: {
+      Pragma: "no-cache",
+      "Cache-Control": "no-cache",
+      Origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
+      "User-Agent":
+        `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ` +
+        `(KHTML, like Gecko) Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 ` +
+        `Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
+      "Accept-Encoding": "gzip, deflate, br, zstd",
+      "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+      Cookie: `muid=${muid};`,
+    },
+  });
+}
+
+function sendConfig(ws) {
+  const timestamp = new Date().toUTCString();
+  const configPayload = JSON.stringify({
+    context: {
+      synthesis: {
+        audio: {
+          metadataoptions: {
+            sentenceBoundaryEnabled: "false",
+            wordBoundaryEnabled: "false",
+          },
+          outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+        },
+      },
+    },
+  });
+
+  ws.send(
+    `X-Timestamp:${timestamp}\r\n` +
+      `Content-Type:application/json; charset=utf-8\r\n` +
+      `Path:speech.config\r\n\r\n` +
+      `${configPayload}\r\n`
+  );
+}
+
+function replenishWarmPool() {
+  const now = Date.now();
+  warmPool = warmPool.filter((entry) => {
+    if (entry.ws.readyState === WebSocket.OPEN && now - entry.createdAt < 35000) {
+      return true;
+    }
+    try {
+      entry.ws.removeAllListeners();
+      entry.ws.close();
+    } catch {}
+    return false;
+  });
+
+  if (warmPool.length >= MAX_WARM || isReplenishing) return;
+  isReplenishing = true;
+
+  try {
+    const ws = buildEdgeWs();
+    const entry = { ws, createdAt: Date.now() };
+
+    const cleanup = () => {
+      warmPool = warmPool.filter((e) => e !== entry);
+      try {
+        ws.removeAllListeners();
+        ws.close();
+      } catch {}
+    };
+
+    ws.once("open", () => {
+      try {
+        sendConfig(ws);
+        entry.createdAt = Date.now();
+        warmPool.push(entry);
+      } catch {
+        cleanup();
+      } finally {
+        isReplenishing = false;
+        if (warmPool.length < MAX_WARM) replenishWarmPool();
+      }
+    });
+
+    ws.once("error", () => {
+      cleanup();
+      isReplenishing = false;
+    });
+
+    ws.once("close", () => {
+      cleanup();
+      isReplenishing = false;
+    });
+  } catch {
+    isReplenishing = false;
+  }
+}
+
+setTimeout(replenishWarmPool, 100);
+
 function synthesizeEdgeTTS(text, options = {}) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return Promise.resolve(Buffer.alloc(0));
 
   return new Promise((resolve, reject) => {
-    const connId = crypto.randomBytes(16).toString("hex");
-    const muid = crypto.randomBytes(16).toString("hex").toUpperCase();
-    const gec = generateSecMsGecV2();
-    const url =
-      `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1` +
-      `?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}` +
-      `&ConnectionId=${connId}` +
-      `&Sec-MS-GEC=${gec}` +
-      `&Sec-MS-GEC-Version=${SEC_MS_GEC_VERSION}`;
+    let ws = null;
+    let isPreWarmed = false;
 
-    const ws = new WebSocket(url, {
-      headers: {
-        Pragma: "no-cache",
-        "Cache-Control": "no-cache",
-        Origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
-        "User-Agent":
-          `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ` +
-          `(KHTML, like Gecko) Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 ` +
-          `Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        Cookie: `muid=${muid};`,
-      },
-    });
+    while (warmPool.length > 0) {
+      const candidate = warmPool.shift();
+      if (candidate && candidate.ws.readyState === WebSocket.OPEN) {
+        ws = candidate.ws;
+        ws.removeAllListeners();
+        isPreWarmed = true;
+        break;
+      } else if (candidate) {
+        try {
+          candidate.ws.removeAllListeners();
+          candidate.ws.close();
+        } catch {}
+      }
+    }
+
+    replenishWarmPool();
+
+    if (!ws) {
+      ws = buildEdgeWs();
+    }
 
     const audioChunks = [];
     let settled = false;
@@ -484,40 +595,100 @@ function synthesizeEdgeTTS(text, options = {}) {
       if (!settled) {
         settled = true;
         try {
-          ws.close();
+          ws?.close();
         } catch {}
         reject(new Error("Edge TTS timeout"));
       }
     }, 12000);
 
-    ws.on("unexpected-response", (_req, res) => {
-      const serverDate = res.headers["date"];
-      if (serverDate) {
-        const parsedMs = Date.parse(serverDate);
-        if (!Number.isNaN(parsedMs)) {
-          clockSkewSeconds = parsedMs / 1000 - Date.now() / 1000;
+    const onAudioMessage = (data, isBinary) => {
+      if (isBinary) {
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        if (buf.length < 2) return;
+        const headerLen = buf.readUInt16BE(0);
+        const headerStr = buf.subarray(2, 2 + headerLen).toString("utf-8");
+        if (headerStr.includes("Path:audio")) {
+          const audioData = buf.subarray(2 + headerLen);
+          if (audioData.length > 0) {
+            audioChunks.push(audioData);
+          }
+        }
+      } else {
+        const textMsg = data.toString();
+        if (textMsg.includes("Path:turn.end")) {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            try {
+              ws?.close();
+            } catch {}
+            resolve(Buffer.concat(audioChunks));
+          }
         }
       }
+    };
+
+    ws.on("message", onAudioMessage);
+
+    ws.on("error", (err) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
-        reject(new Error(`Edge TTS HTTP ${res.statusCode}`));
+        reject(err);
       }
     });
 
-    ws.on("open", () => {
+    ws.on("close", () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        if (audioChunks.length > 0) {
+          resolve(Buffer.concat(audioChunks));
+        } else {
+          reject(new Error("Koneksi Edge TTS tertutup tanpa data audio."));
+        }
+      }
+    });
+
+    const sendSsmlPayload = () => {
       const timestamp = new Date().toUTCString();
-      const configPayload = JSON.stringify({
-        context: {
-          synthesis: {
-            audio: {
-              metadataoptions: {
-                sentenceBoundaryEnabled: "false",
-                wordBoundaryEnabled: "false",
-              },
-              outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-            },
-          },
+      const reqId = crypto.randomBytes(16).toString("hex");
+      const ssml = buildExpressiveSsml(trimmed, options);
+
+      ws.send(
+        `X-RequestId:${reqId}\r\n` +
+          `Content-Type:application/ssml+xml\r\n` +
+          `X-Timestamp:${timestamp}Z\r\n` +
+          `Path:ssml\r\n\r\n` +
+          `${ssml}`
+      );
+    };
+
+    if (isPreWarmed && ws.readyState === WebSocket.OPEN) {
+      sendSsmlPayload();
+    } else {
+      ws.on("unexpected-response", (_req, res) => {
+        const serverDate = res.headers["date"];
+        if (serverDate) {
+          const parsedMs = Date.parse(serverDate);
+          if (!Number.isNaN(parsedMs)) {
+            clockSkewSeconds = parsedMs / 1000 - Date.now() / 1000;
+          }
+        }
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error(`Edge TTS HTTP ${res.statusCode}`));
+        }
+      });
+
+      ws.on("open", () => {
+        sendConfig(ws);
+        sendSsmlPayload();
+      });
+    }
+  });
+}
         },
       });
 

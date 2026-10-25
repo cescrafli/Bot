@@ -41,11 +41,12 @@ export function useAudioEngine({
   const silentGainRef = useRef<GainNode | null>(null);
   const bargeInStreakRef = useRef<number>(0);
 
-  // Human-Voice VAD & Gumaman ("Hmmm / Aaa") Gate State
+  // Human-Voice VAD & Gumaman ("Hmmm / Aaa") Gate State (Frame 64ms / 1024 sample)
   const noiseFloorRef = useRef<number>(0.008);
   const preRollBufferRef = useRef<Int16Array[]>([]);
   const voiceHangoverFramesRef = useRef<number>(0);
   const isGateOpenRef = useRef<boolean>(false);
+  const silenceFramesRemainingRef = useRef<number>(0);
 
   // Playback queue & analyser
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
@@ -56,6 +57,7 @@ export function useAudioEngine({
   const lastVolumeRef = useRef<number>(0);
   const playbackEpochRef = useRef<number>(0);
   const decodeChainRef = useRef<Promise<void>>(Promise.resolve());
+  const stopPlayingTimerRef = useRef<any>(null);
 
   // Inisialisasi AudioContext (menggunakan sample rate native perangkat keras sistem)
   const getOrCreateAudioContext = useCallback(() => {
@@ -175,9 +177,53 @@ export function useAudioEngine({
     return buffer;
   };
 
+  // Pangkas keheningan kosong (leading & trailing dead silence) bawaan MP3 Edge TTS
+  const trimAudioBufferSilence = (
+    ctx: AudioContext,
+    buffer: AudioBuffer,
+    threshold = 0.0035
+  ): AudioBuffer => {
+    const data = buffer.getChannelData(0);
+    const len = data.length;
+    let start = 0;
+    while (start < len && Math.abs(data[start]) < threshold) {
+      start++;
+    }
+    let end = len - 1;
+    while (end > start && Math.abs(data[end]) < threshold) {
+      end--;
+    }
+    // Sisakan padding mikro ~12ms untuk mencegah popping / klik
+    const pad = Math.floor(buffer.sampleRate * 0.012);
+    const actualStart = Math.max(0, start - pad);
+    const actualEnd = Math.min(len, end + 1 + pad);
+    const newLen = actualEnd - actualStart;
+
+    if (newLen <= 0 || newLen >= len * 0.98) {
+      return buffer;
+    }
+
+    const trimmed = ctx.createBuffer(
+      buffer.numberOfChannels,
+      newLen,
+      buffer.sampleRate
+    );
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      trimmed
+        .getChannelData(ch)
+        .set(buffer.getChannelData(ch).subarray(actualStart, actualEnd));
+    }
+    return trimmed;
+  };
+
   // Jadwalkan AudioBuffer ke antrean pemutaran gapless & AnalyserNode Lip-Sync
   const scheduleAudioBuffer = useCallback(
     (ctx: AudioContext, audioBuffer: AudioBuffer) => {
+      if (stopPlayingTimerRef.current) {
+        clearTimeout(stopPlayingTimerRef.current);
+        stopPlayingTimerRef.current = null;
+      }
+
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
 
@@ -188,9 +234,9 @@ export function useAudioEngine({
       }
 
       const now = ctx.currentTime;
-      // Berikan natural breathing gap (140ms) jika menyambung dari audio sebelumnya
+      // Sambungan alami tanpa jeda kosong (25ms) setelah silence bawaan MP3 dipangkas
       const hasPriorAudio = nextPlayTimeRef.current > now;
-      const startTime = hasPriorAudio ? nextPlayTimeRef.current + 0.14 : now;
+      const startTime = hasPriorAudio ? nextPlayTimeRef.current + 0.025 : now;
       source.start(startTime);
       nextPlayTimeRef.current = startTime + audioBuffer.duration;
 
@@ -203,8 +249,14 @@ export function useAudioEngine({
           (s) => s !== source
         );
         if (activeSourcesRef.current.length === 0) {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
+          // Grace period 250ms untuk mencegah status flapping dan kebocoran gema speaker ke mikrofon
+          if (stopPlayingTimerRef.current) clearTimeout(stopPlayingTimerRef.current);
+          stopPlayingTimerRef.current = setTimeout(() => {
+            if (activeSourcesRef.current.length === 0) {
+              setIsPlaying(false);
+              isPlayingRef.current = false;
+            }
+          }, 250);
         }
       };
     },
@@ -242,7 +294,8 @@ export function useAudioEngine({
                 bytes.buffer.slice(0)
               );
               if (epochAtEnqueue !== playbackEpochRef.current) return;
-              scheduleAudioBuffer(ctx, decodedBuffer);
+              const cleanBuffer = trimAudioBufferSilence(ctx, decodedBuffer);
+              scheduleAudioBuffer(ctx, cleanBuffer);
             })
             .catch((err) => {
               console.error("Gagal men-decode audio MP3 GadisNeural:", err);
@@ -262,6 +315,11 @@ export function useAudioEngine({
   // Hentikan seketika saat barge-in dengan micro-fade untuk mencegah klik/pop
   const stopPlayback = useCallback(() => {
     playbackEpochRef.current++;
+
+    if (stopPlayingTimerRef.current) {
+      clearTimeout(stopPlayingTimerRef.current);
+      stopPlayingTimerRef.current = null;
+    }
 
     if (audioCtxRef.current && masterGainRef.current) {
       const now = audioCtxRef.current.currentTime;
@@ -349,8 +407,8 @@ export function useAudioEngine({
         if (isPlayingRef.current) {
           if (analysis.isHumanVoice && analysis.rms > 0.085) {
             bargeInStreakRef.current++;
-            // Jika pengguna berbicara kontinu selama 3 paket berturut-turut (~384ms), picu barge-in
-            if (bargeInStreakRef.current >= 3) {
+            // Jika pengguna berbicara kontinu selama 4 paket berturut-turut (~256ms @ 64ms), picu barge-in
+            if (bargeInStreakRef.current >= 4) {
               console.log("⚡ [Smart Barge-In] Suara manusia memotong Celyn terdeteksi!");
               stopPlayback();
               bargeInStreakRef.current = 0;
@@ -371,33 +429,39 @@ export function useAudioEngine({
         bargeInStreakRef.current = 0;
 
         if (analysis.isHumanVoice || analysis.isSustainedVocal) {
-          // Gerbang terbuka: jika baru aktif, flush pre-roll buffer (256ms) agar awalan kata tidak hilang
+          // Gerbang terbuka: jika baru aktif, flush pre-roll buffer (256ms = 4 frame @ 64ms) agar awalan kata tidak hilang
           if (!isGateOpenRef.current) {
             isGateOpenRef.current = true;
+            silenceFramesRemainingRef.current = 0;
             for (const preRoll of preRollBufferRef.current) {
               onAudioChunkRef.current?.(int16ToBase64(preRoll));
             }
             preRollBufferRef.current = [];
           }
-          voiceHangoverFramesRef.current = 7; // Tahan gerbang tetap terbuka ~896ms
+          voiceHangoverFramesRef.current = 6; // Tahan gerbang tetap terbuka ~384ms (6 frame @ 64ms)
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else if (voiceHangoverFramesRef.current > 0) {
           // Hangover tail: menjaga gumaman lambat ("hmmm... aaa...") dan jeda mikro antar-kata
           voiceHangoverFramesRef.current--;
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else {
-          // Gerbang tertutup: tidak ada orang berbicara (hanya kebisingan ruangan/kipas/klik)
+          // Gerbang tertutup: pengguna berhenti bersuara
           if (isGateOpenRef.current) {
             isGateOpenRef.current = false;
+            // Kirim 8 frame silence (~512ms) agar VAD Gemini Live yakin turn berakhir, lalu STOP kirim paket
+            silenceFramesRemainingRef.current = 8;
           }
-          // Simpan ke ring buffer pre-roll (maksimal 2 frame = 256ms)
+          // Simpan ke ring buffer pre-roll (maksimal 4 frame = 256ms @ 64ms)
           preRollBufferRef.current.push(pcm16k);
-          if (preRollBufferRef.current.length > 2) {
+          if (preRollBufferRef.current.length > 4) {
             preRollBufferRef.current.shift();
           }
-          // Kirim frame hening (digital silence) agar Gemini Live tetap sync tanpa terpicu bising
-          const silence = new Int16Array(pcm16k.length);
-          onAudioChunkRef.current?.(int16ToBase64(silence));
+          // Kirim digital silence HANYA selama masa flush cutoff untuk mencegah banjir jaringan
+          if (silenceFramesRemainingRef.current > 0) {
+            silenceFramesRemainingRef.current--;
+            const silence = new Int16Array(pcm16k.length);
+            onAudioChunkRef.current?.(int16ToBase64(silence));
+          }
         }
       };
 
@@ -414,7 +478,7 @@ export function useAudioEngine({
       silentGainRef.current = silentGain;
 
       setIsMicActive(true);
-      console.log("🎤 Mikrofon aktif dan terhubung ke AudioWorklet");
+      console.log("🎤 Mikrofon aktif dan terhubung ke AudioWorklet (Low-Latency 64ms)");
     } catch (err) {
       console.error("Gagal mengaktifkan mikrofon:", err);
       throw err;
@@ -423,6 +487,10 @@ export function useAudioEngine({
 
   // Hentikan mikrofon
   const stopMic = useCallback(() => {
+    if (stopPlayingTimerRef.current) {
+      clearTimeout(stopPlayingTimerRef.current);
+      stopPlayingTimerRef.current = null;
+    }
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;
@@ -445,6 +513,7 @@ export function useAudioEngine({
     }
     preRollBufferRef.current = [];
     voiceHangoverFramesRef.current = 0;
+    silenceFramesRemainingRef.current = 0;
     bargeInStreakRef.current = 0;
     isGateOpenRef.current = false;
     setIsMicActive(false);

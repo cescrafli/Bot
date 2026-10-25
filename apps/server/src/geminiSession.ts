@@ -333,6 +333,12 @@ export class GeminiSession {
           speaker: "user",
           text: userText,
         });
+        // ⚡ Berikan feedback visual seketika bahwa ucapan telah didengar dan sedang diproses
+        this.sendToClient({
+          type: "status",
+          status: "thinking",
+          message: "Celyn sedang menyimak & merangkai jawaban...",
+        });
       }
     }
 

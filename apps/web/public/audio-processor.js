@@ -5,7 +5,7 @@ class GeminiAudioRecorderProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.targetSampleRate = 16000;
-    this.bufferSize = 2048; // Buffer ukuran 128ms pada 16kHz
+    this.bufferSize = 1024; // Buffer ukuran 64ms pada 16kHz (Ultra-low latency)
     this.outputBuffer = new Int16Array(this.bufferSize);
     this.outputIndex = 0;
     this.phaseOffset = 0; // Akumulator kontinuitas fase antar blok

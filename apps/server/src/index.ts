@@ -218,7 +218,7 @@ wss.on("connection", (ws: AliveWebSocket, req) => {
   };
   resetIdleTimer();
 
-  // Rate limit pesan dari klien (maks 30 pesan / detik)
+  // Rate limit pesan dari klien (maks 80 pesan / detik untuk mendukung audio 64ms streaming)
   let messageCounter = 0;
   const rateLimitInterval = setInterval(() => {
     messageCounter = 0;
@@ -227,7 +227,7 @@ wss.on("connection", (ws: AliveWebSocket, req) => {
   ws.on("message", (data: Buffer) => {
     resetIdleTimer();
     messageCounter++;
-    if (messageCounter > 30) {
+    if (messageCounter > 80) {
       console.warn(`⚠️ [Throttled] Klien ${clientIp} mengirim pesan terlalu cepat.`);
       return;
     }

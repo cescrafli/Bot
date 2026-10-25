@@ -325,7 +325,38 @@ async function runTtsTests() {
     "Prompt sistem Celyn memuat instruksi eksplisit untuk menyimak gumaman berpikir ('hmmm...', 'aaa...')"
   );
 
-  // 8. Ringkasan
+  // Kasus F: Frame ultra-rendah latensi 64ms (1024 sample) pada analyzeHumanVoiceFrame
+  const pcm1024 = new Int16Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    pcm1024[i] = Math.round(Math.sin((2 * Math.PI * 220 * i) / sampleRate) * 12000);
+  }
+  const analysis1024 = analyzeHumanVoiceFrame(pcm1024);
+  assert(
+    analysis1024.isHumanVoice && analysis1024.isSustainedVocal,
+    `Frame audio ultra-rendah latensi 64ms (1024 sample) terdeteksi presisi (RMS: ${analysis1024.rms.toFixed(3)})`
+  );
+
+  // 8. Uji Optimasi Time-To-First-Audio (TTFA) & First-Chunk Early Split
+  console.log("\n--- 8. Uji Optimasi TTFA & First-Chunk Early Clause Split ---");
+
+  const sampleLongIntro = "Eh iya bener banget, jadi bagian kode ini bisa kita rapikan langsung ya.";
+  // Saat isFirstChunk = true: wajib pecah cepat pada klausa pembuka agar audio pertama keluar seketika
+  const earlySplit = extractIndonesianSentences(sampleLongIntro, false, true);
+  assert(
+    earlySplit.sentences.length === 1 &&
+      earlySplit.sentences[0].includes("Eh iya bener banget") &&
+      earlySplit.remaining.startsWith("jadi"),
+    `First-chunk TTFA split berhasil memecah klausa awal seketika: "${earlySplit.sentences[0]}" (sisa: "${earlySplit.remaining.slice(0, 25)}...")`
+  );
+
+  // Saat isFirstChunk = false: klausa pendek TIDAK dipotong sebelum ada tanda baca akhir (menjaga kurva intonasi)
+  const normalSplit = extractIndonesianSentences(sampleLongIntro, false, false);
+  assert(
+    normalSplit.sentences.length === 0,
+    "Kalimat berlanjut tidak dipotong terburu-buru saat isFirstChunk=false (menjaga prosodi alami)"
+  );
+
+  // 9. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

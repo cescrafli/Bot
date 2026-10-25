@@ -21,9 +21,17 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   lookAt,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
+  const torsoContainerRef = useRef<HTMLDivElement>(null);
+  const leftArmRef = useRef<HTMLDivElement>(null);
+  const rightArmRef = useRef<HTMLDivElement>(null);
+  const mouthOverlayRef = useRef<HTMLDivElement>(null);
+  const upperTeethRef = useRef<HTMLDivElement>(null);
+  const tongueRef = useRef<HTMLDivElement>(null);
+  const auraGlowRef = useRef<HTMLDivElement>(null);
+  const haloRingRef = useRef<HTMLDivElement>(null);
+
+  const mousePosRef = useRef({ x: 0.5, y: 0.5 });
   const [isBlinking, setIsBlinking] = useState(false);
-  const [tick, setTick] = useState(0);
 
   // Konfigurasi Rigging (tersimpan di localStorage)
   const [rigConfig, setRigConfig] = useState<RigConfig>(() => {
@@ -62,17 +70,20 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Fisika Pernapasan & Waktu Bicara
-  const [breath, setBreath] = useState(0);
+  // Simpan props & config terbaru dalam ref agar loop 60 FPS membacanya langsung tanpa re-render React
+  const propsRef = useRef({ emotion, mouthOpen, isSpeaking, lookAt, rigConfig });
+  useEffect(() => {
+    propsRef.current = { emotion, mouthOpen, isSpeaking, lookAt, rigConfig };
+  }, [emotion, mouthOpen, isSpeaking, lookAt, rigConfig]);
 
-  // Mouse & Touch gaze tracking (Dukungan Sentuh Jari di Layar HP)
+  // Mouse & Touch gaze tracking (Dukungan Sentuh Jari di Layar HP tanpa re-render)
   useEffect(() => {
     const handleMove = (clientX: number, clientY: number) => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-      setMousePos({ x: normX, y: normY });
+      mousePosRef.current = { x: normX, y: normY };
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -95,24 +106,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       window.removeEventListener("touchmove", handleTouch);
     };
   }, []);
-
-  // Animation Loop (60 FPS: Menggerakkan Napas, Gestur, dan Siklus Bicara Suku Kata)
-  useEffect(() => {
-    let animId: number;
-    const startTime = performance.now();
-
-    const loop = (now: number) => {
-      if (document.visibilityState !== "hidden") {
-        const t = (now - startTime) / 1000;
-        setBreath(Math.sin(t * rigConfig.breathSpeed));
-        setTick(now);
-      }
-      animId = requestAnimationFrame(loop);
-    };
-
-    animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
-  }, [rigConfig.breathSpeed]);
 
   // Preload semua aset tekstur rig agar perpindahan frame instan dan mulus
   useEffect(() => {
@@ -146,71 +139,117 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return () => clearTimeout(blinkTimeout);
   }, []);
 
-  // Arah Tatapan Mata
-  const gazeTarget = useMemo(() => {
-    if (lookAt) {
-      return { x: lookAt.x, y: lookAt.y };
-    }
-    return mousePos;
-  }, [lookAt, mousePos]);
+  // ⚡ ULTRA-SMOOTH GPU ANIMATION LOOP (0 React Re-renders / sec)
+  // Memanipulasi transform CSS secara langsung pada layer GPU compositor tanpa membakar CPU
+  useEffect(() => {
+    let animId: number;
+    const startTime = performance.now();
 
-  // Kemiringan Kepala Halus (mengikuti tatapan kursor mouse)
-  let headTilt = (gazeTarget.x - 0.5) * 3.2;
-  if (emotion === "thinking") {
-    headTilt += 4.5;
-  } else if (emotion === "happy") {
-    headTilt -= 1.8;
-  }
+    const loop = (now: number) => {
+      if (document.visibilityState !== "hidden") {
+        const {
+          mouthOpen: curMouthOpen,
+          isSpeaking: curIsSpeaking,
+          lookAt: curLookAt,
+          rigConfig: curRig,
+        } = propsRef.current;
 
-  // =========================================================================
-  // LOGIKA LIP-SYNC MULUT DINAMIS & HALUS (Sesuai Proporsi Bibir Asli)
-  // Saat diam atau jeda napas: bibir menutup manis secara alami
-  // Saat ada gelombang vokal: bibir membuka-menutup proporsional
-  // =========================================================================
-  const speechCadence = Math.sin(tick / 85) * 0.45 + 0.55; // 0.10 s/d 1.0 gelombang suku kata
-  const dynamicMouthAmount =
-    isSpeaking && mouthOpen >= 0.015
-      ? Math.min(1, Math.max(mouthOpen * 2.6, speechCadence * 0.9))
-      : 0;
+        const tSec = (now - startTime) / 1000;
+        const breath = Math.sin(tSec * curRig.breathSpeed);
 
-  // =========================================================================
-  // KINEMATIKA PROSEDURAL 2D RIGGING (Napas Tubuh, Tangan & Gestur Hidup)
-  // =========================================================================
-  const tSec = tick / 1000;
+        const gazeTarget = curLookAt
+          ? { x: curLookAt.x, y: curLookAt.y }
+          : mousePosRef.current;
 
-  // 1. Fisika Napas & Active Listening Nod (Translasi & Kompresi-Peregangan Volume Tubuh)
-  // Active Listening non-verbal motion saat Celyn mendengarkan (micro-nodding halus)
-  const listeningNod = !isSpeaking
-    ? Math.sin(tSec * 1.8) * 0.4 * Math.max(0, Math.sin(tSec * 0.45))
-    : 0;
+        // Active listening micro-nod saat mendengarkan
+        const listeningNod = !curIsSpeaking
+          ? Math.sin(tSec * 1.8) * 0.4 * Math.max(0, Math.sin(tSec * 0.45))
+          : 0;
 
-  const breathY = breath * -rigConfig.breathIntensity + Math.abs(listeningNod) * 1.2;
-  const breathScaleY = 1 + breath * 0.009;
-  const breathScaleX = 1 - breath * 0.004; // Volume preservation
+        const breathY = breath * -curRig.breathIntensity + Math.abs(listeningNod) * 1.2;
+        const breathScaleY = 1 + breath * 0.009;
+        const breathScaleX = 1 - breath * 0.004;
 
-  // 2. Kemiringan & Gestur Badan Saat Berbicara / Mendengarkan (Living Conversational Motion)
-  const bodyTilt = isSpeaking
-    ? Math.sin(tSec * 2.6) * 0.8 + (gazeTarget.x - 0.5) * 1.5
-    : (gazeTarget.x - 0.5) * 1.0 + listeningNod;
+        const bodyTilt = curIsSpeaking
+          ? Math.sin(tSec * 2.6) * 0.8 + (gazeTarget.x - 0.5) * 1.5
+          : (gazeTarget.x - 0.5) * 1.0 + listeningNod;
 
-  // 3. Kinematika Independen Lengan & Tangan Kiri-Kanan (Independent Arm Sway & Gestures)
-  // - Ayunan Napas: saat bernapas (inhale/exhale), lengan bergerak sedikit keluar-masuk
-  const armBreathL = -breath * 0.9;
-  const armBreathR = breath * 0.9;
+        // Lip-Sync dinamis
+        const speechCadence = Math.sin(now / 85) * 0.45 + 0.55;
+        const dynamicMouthAmount =
+          curIsSpeaking && curMouthOpen >= 0.015
+            ? Math.min(1, Math.max(curMouthOpen * 2.6, speechCadence * 0.9))
+            : 0;
 
-  // - Ayunan Bicara: gestur tangan bergerak mengayun alami mengikuti suku kata suara
-  const speechArmL = isSpeaking
-    ? Math.sin(tSec * 2.8) * (rigConfig.armMaxRot * 0.85) + (dynamicMouthAmount * 1.5)
-    : 0;
-  const speechArmR = isSpeaking
-    ? -Math.cos(tSec * 2.4 + 0.4) * (rigConfig.armMaxRot * 0.8) - (dynamicMouthAmount * 1.3)
-    : 0;
+        // Kinematika Lengan Kiri & Kanan
+        const armBreathL = -breath * 0.9;
+        const armBreathR = breath * 0.9;
+        const speechArmL = curIsSpeaking
+          ? Math.sin(tSec * 2.8) * (curRig.armMaxRot * 0.85) + dynamicMouthAmount * 1.5
+          : 0;
+        const speechArmR = curIsSpeaking
+          ? -Math.cos(tSec * 2.4 + 0.4) * (curRig.armMaxRot * 0.8) - dynamicMouthAmount * 1.3
+          : 0;
+        const armGazeOffset = (gazeTarget.x - 0.5) * 1.6;
 
-  // - Inersia Halus Tatapan Kursor (Parallax Reaction)
-  const armGazeOffset = (gazeTarget.x - 0.5) * 1.6;
+        const armAngleLeft = Math.max(-6, Math.min(6, armBreathL + speechArmL + armGazeOffset));
+        const armAngleRight = Math.max(-6, Math.min(6, armBreathR + speechArmR + armGazeOffset));
 
-  const armAngleLeft = Math.max(-6, Math.min(6, armBreathL + speechArmL + armGazeOffset));
-  const armAngleRight = Math.max(-6, Math.min(6, armBreathR + speechArmR + armGazeOffset));
+        // 1. Update Torso Container Transform (GPU Layer)
+        if (torsoContainerRef.current) {
+          torsoContainerRef.current.style.transform = `translate3d(0, ${breathY.toFixed(
+            2
+          )}px, 0) scaleY(${breathScaleY.toFixed(3)}) scaleX(${breathScaleX.toFixed(
+            3
+          )}) rotate(${bodyTilt.toFixed(2)}deg)`;
+        }
+
+        // 2. Update Lengan Kiri & Kanan
+        if (leftArmRef.current) {
+          leftArmRef.current.style.transform = `rotate(${armAngleLeft.toFixed(2)}deg)`;
+        }
+        if (rightArmRef.current) {
+          rightArmRef.current.style.transform = `rotate(${armAngleRight.toFixed(2)}deg)`;
+        }
+
+        // 3. Update Lapisan Mulut
+        if (mouthOverlayRef.current) {
+          if (curIsSpeaking && dynamicMouthAmount > 0.08) {
+            mouthOverlayRef.current.style.display = "flex";
+            const w = (5.5 + dynamicMouthAmount * 1.4) * curRig.mouthScale;
+            const h = (0.45 + dynamicMouthAmount * 0.9) * curRig.mouthScale;
+            mouthOverlayRef.current.style.width = `${w.toFixed(2)}%`;
+            mouthOverlayRef.current.style.height = `${h.toFixed(2)}%`;
+
+            if (upperTeethRef.current) {
+              upperTeethRef.current.style.opacity = dynamicMouthAmount > 0.35 ? "0.95" : "0";
+            }
+            if (tongueRef.current) {
+              tongueRef.current.style.opacity = dynamicMouthAmount > 0.4 ? "0.9" : "0";
+            }
+          } else {
+            mouthOverlayRef.current.style.display = "none";
+          }
+        }
+
+        // 4. Update Aura Glow & Halo
+        if (auraGlowRef.current) {
+          const auraScale = curIsSpeaking ? (1.15 + dynamicMouthAmount * 0.2).toFixed(2) : "1";
+          auraGlowRef.current.style.transform = `scale(${auraScale})`;
+          auraGlowRef.current.style.opacity = curIsSpeaking ? "0.9" : "0.45";
+        }
+        if (haloRingRef.current) {
+          haloRingRef.current.style.transform = `scale(${(1 + dynamicMouthAmount * 0.25).toFixed(
+            2
+          )})`;
+        }
+      }
+      animId = requestAnimationFrame(loop);
+    };
+
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, []);
 
   // Konfigurasi Emosi
   const emotionConfig = {
@@ -285,28 +324,28 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       )}
 
       {/* Halo gelombang suara saat Celyn berbicara (Responsif Layar HP & Desktop) */}
-      {isSpeaking && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-          <div
-            className="w-[75vw] max-w-[440px] aspect-square rounded-full border border-rose-500/30 animate-ping"
-            style={{
-              animationDuration: "2.2s",
-              transform: `scale(${1 + dynamicMouthAmount * 0.25})`,
-            }}
-          />
-          <div
-            className="absolute w-[88vw] max-w-[560px] aspect-square rounded-full border border-pink-500/15 animate-pulse"
-            style={{ animationDuration: "3.2s" }}
-          />
-        </div>
-      )}
+      <div
+        className={`absolute inset-0 flex items-center justify-center pointer-events-none z-0 transition-opacity duration-300 ${
+          isSpeaking ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        <div
+          ref={haloRingRef}
+          className="w-[75vw] max-w-[440px] aspect-square rounded-full border border-rose-500/30 animate-ping will-change-transform"
+          style={{ animationDuration: "2.2s" }}
+        />
+        <div
+          className="absolute w-[88vw] max-w-[560px] aspect-square rounded-full border border-pink-500/15 animate-pulse"
+          style={{ animationDuration: "3.2s" }}
+        />
+      </div>
 
       {/* Aura Cahaya Halus di Belakang Celyn */}
       <div
-        className="absolute w-[70vw] max-w-[420px] aspect-square rounded-full blur-3xl transition-all duration-700 pointer-events-none"
+        ref={auraGlowRef}
+        className="absolute w-[70vw] max-w-[420px] aspect-square rounded-full blur-3xl transition-opacity duration-500 pointer-events-none will-change-transform"
         style={{
           background: emotionConfig.glowColor,
-          transform: isSpeaking ? `scale(${1.15 + dynamicMouthAmount * 0.2})` : "scale(1)",
           opacity: isSpeaking ? 0.9 : 0.45,
         }}
       />
@@ -327,11 +366,10 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         
         {/* KONTAINER UTAMA DENGAN GERAK NAPAS & GESTUR BADAN/TANGAN (Poros di panggul) */}
         <div
-          className="relative w-full h-full flex items-end justify-center"
+          ref={torsoContainerRef}
+          className="relative w-full h-full flex items-end justify-center will-change-transform"
           style={{
             transformOrigin: "50% 90%", // Poros pinggang
-            transform: `translateY(${breathY}px) scaleY(${breathScaleY}) scaleX(${breathScaleX}) rotate(${bodyTilt}deg)`,
-            transition: "transform 0.05s linear",
           }}
         >
           {/* ============================================================= */}
@@ -350,11 +388,10 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* LENGAN KIRI BERGERAK INDEPENDEN (Poros di Sendi Bahu Kiri) */}
           {/* ============================================================= */}
           <div
-            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+            ref={leftArmRef}
+            className="absolute inset-0 w-full h-full pointer-events-none z-20 will-change-transform"
             style={{
               transformOrigin: `${rigConfig.armPivotLX}% ${rigConfig.armPivotLY}%`,
-              transform: `rotate(${armAngleLeft}deg)`,
-              transition: "transform 0.05s linear",
             }}
           >
             <img
@@ -369,11 +406,10 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* LENGAN KANAN BERGERAK INDEPENDEN (Poros di Sendi Bahu Kanan) */}
           {/* ============================================================= */}
           <div
-            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+            ref={rightArmRef}
+            className="absolute inset-0 w-full h-full pointer-events-none z-20 will-change-transform"
             style={{
               transformOrigin: `${rigConfig.armPivotRX}% ${rigConfig.armPivotRY}%`,
-              transform: `rotate(${armAngleRight}deg)`,
-              transition: "transform 0.05s linear",
             }}
           >
             <img
@@ -388,34 +424,34 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* LAPISAN MULUT LIP-SYNC HALUS (Presisi Terkunci pada Bibir) */}
           {/* Menggunakan persentase proporsional terhadap rasio wajah 3:4 */}
           {/* ============================================================= */}
-          {isSpeaking && dynamicMouthAmount > 0.08 && (
+          <div
+            ref={mouthOverlayRef}
+            className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm pointer-events-none will-change-transform"
+            style={{
+              display: "none",
+              left: `${rigConfig.mouthPivotX}%`,
+              top: `${rigConfig.mouthPivotY}%`,
+              transform: `translate(-50%, -50%) scale(${rigConfig.mouthScale})`,
+              backgroundColor: "#4d161d",
+              borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
+              border: "1px solid #8e3e48",
+              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)",
+            }}
+          >
+            {/* Gigi Atas Halus */}
             <div
-              className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm transition-all duration-75 pointer-events-none"
-              style={{
-                left: `${rigConfig.mouthPivotX}%`,
-                top: `${rigConfig.mouthPivotY}%`,
-                transform: `translate(-50%, -50%) scale(${rigConfig.mouthScale})`,
-                width: `${(5.5 + dynamicMouthAmount * 1.4) * rigConfig.mouthScale}%`,
-                height: `${(0.45 + dynamicMouthAmount * 0.9) * rigConfig.mouthScale}%`,
-                backgroundColor: "#4d161d",
-                borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
-                border: "1px solid #8e3e48",
-                boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)",
-              }}
-            >
-              {/* Gigi Atas Halus */}
-              <div
-                className="w-3/4 h-[1.5px] bg-[#fffbfb] rounded-b-sm mt-0.2 transition-opacity duration-75"
-                style={{ opacity: dynamicMouthAmount > 0.35 ? 0.95 : 0 }}
-              />
+              ref={upperTeethRef}
+              className="w-3/4 h-[1.5px] bg-[#fffbfb] rounded-b-sm mt-0.2 transition-opacity duration-75"
+              style={{ opacity: 0 }}
+            />
 
-              {/* Lidah Halus */}
-              <div
-                className="w-2/3 h-1.5 bg-[#d96e7e] rounded-t-full mb-0.2 transition-all duration-75"
-                style={{ opacity: dynamicMouthAmount > 0.4 ? 0.9 : 0 }}
-              />
-            </div>
-          )}
+            {/* Lidah Halus */}
+            <div
+              ref={tongueRef}
+              className="w-2/3 h-1.5 bg-[#d96e7e] rounded-t-full mb-0.2 transition-opacity duration-75"
+              style={{ opacity: 0 }}
+            />
+          </div>
 
           {/* ============================================================= */}
           {/* PENANDA TITIK POROS VISUAL (Hanya muncul saat showPivots aktif) */}

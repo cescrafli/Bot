@@ -349,6 +349,11 @@ export function useGeminiLive({
                   speaker: "user",
                   text: userText,
                 });
+                handleServerMessage({
+                  type: "status",
+                  status: "thinking",
+                  message: "Celyn sedang menyimak & merangkai jawaban...",
+                });
               }
             }
 
