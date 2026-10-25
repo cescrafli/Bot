@@ -19,6 +19,8 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const vrmRef = useRef<VRM | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -31,6 +33,8 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
     const height = container.clientHeight || 500;
 
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
+
     const camera = new THREE.PerspectiveCamera(30.0, width / height, 0.1, 20.0);
     camera.position.set(0.0, 1.4, 1.3); // Fokus setengah badan / wajah
 
@@ -79,13 +83,20 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
       if (vrmRef.current) {
         vrmRef.current.update(delta);
 
-        // Update Lip-sync (viseme aa)
+        // Update Lip-sync (viseme aa) & ekspresi
         if (vrmRef.current.expressionManager) {
           vrmRef.current.expressionManager.setValue("aa", mouthOpen);
           vrmRef.current.expressionManager.setValue("happy", emotion === "happy" ? 0.8 : 0);
           vrmRef.current.expressionManager.setValue("surprised", emotion === "surprised" ? 0.8 : 0);
           vrmRef.current.expressionManager.setValue("sad", emotion === "sad" ? 0.8 : 0);
           vrmRef.current.expressionManager.update();
+        }
+
+        // Update LookAt tatapan mata / kepala
+        if (vrmRef.current.lookAt && lookAt) {
+          const targetX = (lookAt.x - 0.5) * 1.5;
+          const targetY = 1.4 - (lookAt.y - 0.5) * 0.8;
+          vrmRef.current.lookAt.lookAt(new THREE.Vector3(targetX, targetY, 2.0));
         }
       }
 
@@ -112,32 +123,52 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
         renderer.domElement.parentElement.removeChild(renderer.domElement);
       }
       renderer.dispose();
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+      }
     };
-  }, []);
-
-  // Update mouth sync saat props berubah
-  useEffect(() => {
-    if (vrmRef.current?.expressionManager) {
-      vrmRef.current.expressionManager.setValue("aa", mouthOpen);
-      vrmRef.current.expressionManager.update();
-    }
-  }, [mouthOpen]);
+  }, [emotion, mouthOpen, lookAt]);
 
   // Handle upload custom .vrm langsung dari browser
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+    }
+
     const url = URL.createObjectURL(file);
+    objectUrlRef.current = url;
+
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
 
-    loader.load(url, (gltf) => {
-      const vrm = gltf.userData.vrm as VRM;
-      vrmRef.current = vrm;
-      setModelLoaded(true);
-      setLoadError(null);
-    });
+    loader.load(
+      url,
+      (gltf) => {
+        const vrm = gltf.userData.vrm as VRM;
+        VRMUtils.removeUnnecessaryVertices(gltf.scene);
+        VRMUtils.combineSkeletons(gltf.scene);
+
+        // Hapus model lama dari scene jika ada
+        if (sceneRef.current) {
+          if (vrmRef.current) {
+            sceneRef.current.remove(vrmRef.current.scene);
+          }
+          sceneRef.current.add(vrm.scene);
+        }
+
+        vrmRef.current = vrm;
+        setModelLoaded(true);
+        setLoadError(null);
+      },
+      undefined,
+      (err) => {
+        console.error("Gagal memuat file VRM:", err);
+        setLoadError("Format file .VRM tidak valid.");
+      }
+    );
   };
 
   return (

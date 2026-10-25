@@ -14,6 +14,15 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",
   geminiVoice: process.env.GEMINI_VOICE || "Aoede",
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  maxPayloadBytes: 5 * 1024 * 1024, // 5 MB batas frame WebSocket
+  idleTimeoutMs: 300_000, // 5 menit tanpa interaksi = idle close
+  heartbeatIntervalMs: 25_000, // 25 detik ping/pong
+  sessionMaxDurationMs: 30 * 60 * 1000, // 30 menit durasi maksimal sesi Gemini Live
+  sessionWarningDurationMs: 25 * 60 * 1000, // 25 menit peringatan durasi
 };
 
 if (!config.geminiApiKey) {

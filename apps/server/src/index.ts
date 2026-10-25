@@ -62,10 +62,40 @@ const server = http.createServer((req, res) => {
   res.end("Not Found");
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: config.maxPayloadBytes,
+});
 
-wss.on("connection", (ws: WebSocket, req) => {
+// Interface untuk melacak heartbeat klien
+interface AliveWebSocket extends WebSocket {
+  isAlive?: boolean;
+}
+
+// Heartbeat ping interval untuk mendeteksi koneksi mati (dead peer)
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws: AliveWebSocket) => {
+    if (ws.isAlive === false) {
+      console.log("⏱️ [Heartbeat] Klien tidak merespons ping, menutup koneksi.");
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, config.heartbeatIntervalMs);
+
+wss.on("close", () => {
+  clearInterval(heartbeatInterval);
+});
+
+wss.on("connection", (ws: AliveWebSocket, req) => {
   const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "unknown";
+
+  // Tandai klien aktif saat pertama terhubung dan saat merespons pong
+  ws.isAlive = true;
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
 
   // Periksa batas koneksi per IP
   const currentCount = ipConnectionCount.get(clientIp) || 0;
@@ -90,15 +120,36 @@ wss.on("connection", (ws: WebSocket, req) => {
   const session = new GeminiSession(ws);
   session.connect();
 
-  // Rate limit pesan dari klien (maks 25 pesan / detik untuk menghindari spamming)
+  // Idle timeout timer: jika tidak ada interaksi dalam 5 menit, putuskan sesi secara tertib
+  let idleTimer: NodeJS.Timeout | null = null;
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      console.log(`💤 [Idle Timeout] Sesi untuk ${clientIp} dihentikan karena tidak ada aktivitas.`);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "status",
+            status: "idle",
+            message: "Sesi ditutup otomatis karena tidak ada aktivitas selama 5 menit.",
+          })
+        );
+        ws.close(1000, "Idle timeout");
+      }
+    }, config.idleTimeoutMs);
+  };
+  resetIdleTimer();
+
+  // Rate limit pesan dari klien (maks 30 pesan / detik)
   let messageCounter = 0;
   const rateLimitInterval = setInterval(() => {
     messageCounter = 0;
   }, 1000);
 
   ws.on("message", (data: Buffer) => {
+    resetIdleTimer();
     messageCounter++;
-    if (messageCounter > 25) {
+    if (messageCounter > 30) {
       console.warn(`⚠️ [Throttled] Klien ${clientIp} mengirim pesan terlalu cepat.`);
       return;
     }
@@ -112,6 +163,7 @@ wss.on("connection", (ws: WebSocket, req) => {
   });
 
   const cleanup = () => {
+    if (idleTimer) clearTimeout(idleTimer);
     clearInterval(rateLimitInterval);
     const count = ipConnectionCount.get(clientIp) || 1;
     if (count <= 1) {

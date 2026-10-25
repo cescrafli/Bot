@@ -44,6 +44,7 @@ lerna-debug.log*
 *.bak
 *.tmp
 *.temp
+assets_backup/
 
 # 6. File Sistem Operasi
 .DS_Store

@@ -1,2 +1,2 @@
-export * from "./avatar";
-export * from "./live";
+export * from "./avatar.js";
+export * from "./live.js";

@@ -156,7 +156,7 @@ export function App() {
               </span>
             </h1>
             <p className="text-xs text-slate-400 flex items-center gap-1.5">
-              <span>Model: Gemini 2.0 Flash</span>
+              <span>Model: {live.modelInfo.model}</span>
               <span>•</span>
               <span className="flex items-center gap-1 text-slate-500">
                 <Shield className="w-3 h-3" /> Privasi Terproteksi
@@ -279,7 +279,7 @@ export function App() {
         isOpen={isHistoryOpen}
         transcripts={live.transcripts}
         onClose={() => setIsHistoryOpen(false)}
-        onClear={() => {}}
+        onClear={live.clearTranscripts}
       />
 
       {/* Modal Bantuan & Pintasan Keyboard */}

@@ -10,7 +10,7 @@
   "scripts": {
     "dev:server": "npm --workspace=apps/server run dev",
     "dev:web": "npm --workspace=apps/web run dev",
-    "dev": "npm --workspace=apps/server run dev",
+    "dev": "node scripts/dev-all.mjs",
     "test:poc": "tsx scripts/test-poc-vision.ts",
     "test:pipeline": "tsx scripts/test-pipeline.ts",
     "build": "npm --workspaces run build"

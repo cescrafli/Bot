@@ -20,6 +20,10 @@ export function useGeminiLive({
     "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error"
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string>("Siap terhubung");
+  const [modelInfo, setModelInfo] = useState<{ model: string; voice: string }>({
+    model: "gemini-3.8-live",
+    voice: "Aoede",
+  });
   const [emotion, setEmotion] = useState<EmotionType>("neutral");
   const [lookAt, setLookAt] = useState<LookAtTarget | null>(null);
   const [transcripts, setTranscripts] = useState<
@@ -34,12 +38,10 @@ export function useGeminiLive({
     setStatus("connecting");
     setStatusMessage("Menghubungkan ke server backend...");
 
-    // Tentukan URL WebSocket (ke server localhost:3001)
+    // Tentukan URL WebSocket (menggunakan VITE_WS_URL atau fallback cerdas)
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl =
-      process.env.NODE_ENV === "production"
-        ? `${wsProtocol}//${window.location.host}/ws`
-        : "ws://localhost:3001";
+    const envWs = import.meta.env.VITE_WS_URL;
+    const wsUrl = envWs || `${wsProtocol}//${window.location.hostname}:3001`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -54,7 +56,9 @@ export function useGeminiLive({
       try {
         const msg = JSON.parse(event.data) as ServerMessage;
 
-        if (msg.type === "audio") {
+        if (msg.type === "session_info") {
+          setModelInfo({ model: msg.model, voice: msg.voice });
+        } else if (msg.type === "audio") {
           setStatus("speaking");
           onAudioReceived(msg.data);
         } else if (msg.type === "interrupted") {
@@ -66,10 +70,22 @@ export function useGeminiLive({
             hour: "2-digit",
             minute: "2-digit",
           });
-          setTranscripts((prev) => [
-            ...prev.slice(-10), // Simpan 10 percakapan terakhir
-            { speaker: msg.speaker, text: msg.text, time },
-          ]);
+          setTranscripts((prev) => {
+            const last = prev[prev.length - 1];
+            // Jika pesan terakhir berasal dari pembicara yang sama, gabungkan teksnya
+            if (last && last.speaker === msg.speaker && !msg.text.startsWith("\n")) {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...last,
+                text: `${last.text} ${msg.text}`.trim(),
+              };
+              return updated;
+            }
+            return [
+              ...prev.slice(-99),
+              { speaker: msg.speaker, text: msg.text, time },
+            ];
+          });
         } else if (msg.type === "tool_call") {
           if (msg.name === "set_expression") {
             const newEmotion = (msg.args.emotion as EmotionType) || "neutral";
@@ -144,10 +160,23 @@ export function useGeminiLive({
 
   const sendText = useCallback(
     (text: string) => {
+      const time = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      // Catat pesan teks pengguna ke riwayat lokal secara instan
+      setTranscripts((prev) => [
+        ...prev.slice(-99),
+        { speaker: "user", text, time },
+      ]);
       sendMessage({ type: "text", text });
     },
     [sendMessage]
   );
+
+  const clearTranscripts = useCallback(() => {
+    setTranscripts([]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -159,6 +188,7 @@ export function useGeminiLive({
     isConnected,
     status,
     statusMessage,
+    modelInfo,
     emotion,
     lookAt,
     transcripts,
@@ -167,5 +197,6 @@ export function useGeminiLive({
     sendAudio,
     sendScreen,
     sendText,
+    clearTranscripts,
   };
 }

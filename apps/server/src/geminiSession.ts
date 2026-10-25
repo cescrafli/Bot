@@ -1,12 +1,15 @@
 import { WebSocket } from "ws";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { config } from "./config.js";
-import { ClientMessage, ServerMessage } from "@celyn/shared";
+import { ClientMessage, ServerMessage, normalizeEmotion } from "@celyn/shared";
+
+export type SessionState = "DISCONNECTED" | "CONNECTING" | "ACTIVE" | "CLOSING" | "CLOSED";
 
 export class GeminiSession {
   private session: any = null;
   private clientWs: WebSocket;
-  private isConnected = false;
+  private state: SessionState = "DISCONNECTED";
+  private pendingQueue: ClientMessage[] = [];
   private maxDurationTimer: NodeJS.Timeout | null = null;
   private warningTimer: NodeJS.Timeout | null = null;
 
@@ -22,7 +25,11 @@ export class GeminiSession {
   }
 
   public async connect(): Promise<void> {
+    if (this.state === "CONNECTING" || this.state === "ACTIVE") return;
+    this.state = "CONNECTING";
+
     if (!config.geminiApiKey) {
+      this.state = "CLOSED";
       this.sendToClient({
         type: "error",
         message: "GEMINI_API_KEY belum dikonfigurasi di backend (.env).",
@@ -45,6 +52,9 @@ export class GeminiSession {
               },
             },
           },
+          // Aktifkan transkripsi dua arah real-time
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           systemInstruction: {
             parts: [
               {
@@ -108,7 +118,7 @@ ATURAN WAJIB PERCAKAPAN:
             });
           },
           onclose: (e: any) => {
-            this.isConnected = false;
+            this.state = "CLOSED";
             console.log("Gemini SDK Session closed:", e);
             this.clearTimers();
             this.sendToClient({
@@ -120,8 +130,15 @@ ATURAN WAJIB PERCAKAPAN:
         },
       });
 
-      this.isConnected = true;
+      this.state = "ACTIVE";
       console.log("✅ [Gemini Live SDK] Sesi Celyn berhasil tersambung dan siap merespons!");
+
+      // Kirim informasi model aktif ke klien
+      this.sendToClient({
+        type: "session_info",
+        model: config.geminiModel,
+        voice: config.geminiVoice,
+      });
 
       this.sendToClient({
         type: "status",
@@ -129,9 +146,19 @@ ATURAN WAJIB PERCAKAPAN:
         message: "Celyn aktif dan siap mendengarkan ucapanmu!",
       });
 
+      // Flush paket yang sempat masuk saat CONNECTING
+      if (this.pendingQueue.length > 0) {
+        console.log(`📦 [Gemini Live] Mem-flush ${this.pendingQueue.length} paket audio/pesan tertunda...`);
+        const queueToProcess = [...this.pendingQueue];
+        this.pendingQueue = [];
+        for (const queuedMsg of queueToProcess) {
+          await this.forwardMessageToGemini(queuedMsg);
+        }
+      }
+
       // Picu sapaan ramah pembuka Celyn secara otomatis saat pertama kali tersambung
       setTimeout(async () => {
-        if (this.session && this.isConnected) {
+        if (this.session && this.state === "ACTIVE") {
           try {
             console.log("👋 [Gemini Live] Mengirim trigger sapaan pembuka Celyn...");
             await this.session.sendClientContent({
@@ -155,6 +182,7 @@ ATURAN WAJIB PERCAKAPAN:
 
       this.setupSessionDurationLimit();
     } catch (err: any) {
+      this.state = "CLOSED";
       console.error("Gagal menghubungkan ke Gemini Live API:", err);
       this.sendToClient({
         type: "error",
@@ -164,16 +192,13 @@ ATURAN WAJIB PERCAKAPAN:
   }
 
   private setupSessionDurationLimit(): void {
-    const WARNING_TIME = 25 * 60 * 1000;
-    const MAX_DURATION = 30 * 60 * 1000;
-
     this.warningTimer = setTimeout(() => {
       this.sendToClient({
         type: "status",
         status: "listening",
         message: "Perhatian: Sesi telah berjalan 25 menit. Sesi akan otomatis direset pada menit ke-30.",
       });
-    }, WARNING_TIME);
+    }, config.sessionWarningDurationMs);
 
     this.maxDurationTimer = setTimeout(() => {
       this.sendToClient({
@@ -182,7 +207,7 @@ ATURAN WAJIB PERCAKAPAN:
         message: "Batas durasi sesi 30 menit tercapai.",
       });
       this.close();
-    }, MAX_DURATION);
+    }, config.sessionMaxDurationMs);
   }
 
   private clearTimers(): void {
@@ -200,7 +225,32 @@ ATURAN WAJIB PERCAKAPAN:
       return;
     }
 
-    // 2. Audio & Transkrip
+    // 2. Transkripsi Suara Pengguna (Input Transcription)
+    if (data.serverContent?.inputTranscription?.text) {
+      const userText = data.serverContent.inputTranscription.text.trim();
+      if (userText) {
+        console.log(`🎙️ [User Speech]: ${userText}`);
+        this.sendToClient({
+          type: "transcript",
+          speaker: "user",
+          text: userText,
+        });
+      }
+    }
+
+    // 2.1 Transkripsi Suara Celyn (Output Transcription)
+    if (data.serverContent?.outputTranscription?.text) {
+      const celynText = data.serverContent.outputTranscription.text;
+      if (celynText) {
+        this.sendToClient({
+          type: "transcript",
+          speaker: "celyn",
+          text: celynText,
+        });
+      }
+    }
+
+    // 2.2 Audio & Transkrip dari Model Turn
     const parts = data.serverContent?.modelTurn?.parts;
     if (Array.isArray(parts)) {
       for (const part of parts) {
@@ -239,14 +289,24 @@ ATURAN WAJIB PERCAKAPAN:
         this.stats.toolCallsHandled++;
         console.log(`🔧 [Tool Call] ${fc.name}:`, fc.args);
 
+        let sanitizedArgs = fc.args || {};
+        if (fc.name === "set_expression") {
+          const normEmotion = normalizeEmotion(sanitizedArgs.emotion);
+          sanitizedArgs = { ...sanitizedArgs, emotion: normEmotion };
+        } else if (fc.name === "point_at_screen") {
+          const clampedX = Math.max(0, Math.min(1, Number(sanitizedArgs.x) || 0.5));
+          const clampedY = Math.max(0, Math.min(1, Number(sanitizedArgs.y) || 0.5));
+          sanitizedArgs = { ...sanitizedArgs, x: clampedX, y: clampedY };
+        }
+
         this.sendToClient({
           type: "tool_call",
           id: fc.id,
           name: fc.name,
-          args: fc.args || {},
+          args: sanitizedArgs,
         });
 
-        // Balas otomatis
+        // Balas otomatis ke sesi Gemini Live
         if (this.session) {
           try {
             this.session.sendToolResponse({
@@ -267,7 +327,27 @@ ATURAN WAJIB PERCAKAPAN:
   }
 
   public async handleClientMessage(msg: ClientMessage): Promise<void> {
-    if (!this.session || !this.isConnected) return;
+    if (this.state === "CLOSED" || this.state === "CLOSING") return;
+
+    if (this.state === "CONNECTING") {
+      // Simpan di Ring Buffer sementara (maksimal 30 paket audio/pesan)
+      if (this.pendingQueue.length < 30) {
+        this.pendingQueue.push(msg);
+      } else {
+        // Buang paket terlama jika penuh
+        this.pendingQueue.shift();
+        this.pendingQueue.push(msg);
+      }
+      return;
+    }
+
+    if (this.state === "ACTIVE") {
+      await this.forwardMessageToGemini(msg);
+    }
+  }
+
+  private async forwardMessageToGemini(msg: ClientMessage): Promise<void> {
+    if (!this.session || this.state !== "ACTIVE") return;
 
     try {
       if (msg.type === "audio") {
@@ -315,13 +395,15 @@ ATURAN WAJIB PERCAKAPAN:
   }
 
   public close(): void {
+    this.state = "CLOSING";
     this.clearTimers();
+    this.pendingQueue = [];
     if (this.session) {
       try {
         this.session.close();
       } catch {}
       this.session = null;
     }
-    this.isConnected = false;
+    this.state = "CLOSED";
   }
 }

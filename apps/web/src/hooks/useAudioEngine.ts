@@ -25,9 +25,11 @@ export function useAudioEngine({
   }, [onAudioChunk]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const workletLoadedRef = useRef<boolean>(false);
   const micStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const silentGainRef = useRef<GainNode | null>(null);
+  const bargeInStreakRef = useRef<number>(0);
 
   // Playback queue & analyser
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
@@ -188,7 +190,10 @@ export function useAudioEngine({
   const startMic = useCallback(async () => {
     try {
       const ctx = getOrCreateAudioContext();
-      await ctx.audioWorklet.addModule("/audio-processor.js");
+      if (!workletLoadedRef.current) {
+        await ctx.audioWorklet.addModule("/audio-processor.js");
+        workletLoadedRef.current = true;
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -207,13 +212,34 @@ export function useAudioEngine({
       workletNode.port.onmessage = (e) => {
         const pcm16k = e.data as Int16Array;
 
-        // Proteksi Echo / Half-duplex guard:
-        // Saat Celyn sedang bersuara lewat speaker, jangan teruskan sinyal mic
-        // agar Gemini Live tidak mendengar dirinya sendiri dan memotong kalimatnya.
+        // Hitung RMS energi suara mikrofon
+        let sumSquares = 0;
+        for (let i = 0; i < pcm16k.length; i++) {
+          const norm = pcm16k[i] / 32768.0;
+          sumSquares += norm * norm;
+        }
+        const micRms = Math.sqrt(sumSquares / pcm16k.length);
+
+        // Smart Barge-In & Echo Protection:
+        // Saat Celyn bersuara: periksa apakah pengguna sengaja memotong pembicaraan
         if (isPlayingRef.current) {
+          if (micRms > 0.12) {
+            bargeInStreakRef.current++;
+            // Jika pengguna berbicara keras selama 2 paket berturut-turut, picu barge-in
+            if (bargeInStreakRef.current >= 2) {
+              console.log("⚡ [Smart Barge-In] Interupsi suara pengguna terdeteksi!");
+              stopPlayback();
+              bargeInStreakRef.current = 0;
+              const b64 = int16ToBase64(pcm16k);
+              onAudioChunkRef.current?.(b64);
+            }
+          } else {
+            bargeInStreakRef.current = 0;
+          }
           return;
         }
 
+        bargeInStreakRef.current = 0;
         const b64 = int16ToBase64(pcm16k);
         onAudioChunkRef.current?.(b64);
       };
@@ -233,7 +259,7 @@ export function useAudioEngine({
       console.error("Gagal mengaktifkan mikrofon:", err);
       throw err;
     }
-  }, [getOrCreateAudioContext]);
+  }, [getOrCreateAudioContext, stopPlayback]);
 
   // Hentikan mikrofon
   const stopMic = useCallback(() => {
@@ -255,6 +281,9 @@ export function useAudioEngine({
   // Fitur Tes Bicara & Lip-Sync Mandiri (Memutar rekaman suara asli Celyn dari Gemini)
   const triggerTestSpeech = useCallback(async () => {
     try {
+      // Hentikan pemutaran sebelumnya jika sedang ada suara
+      stopPlayback();
+
       const ctx = getOrCreateAudioContext();
       if (ctx.state === "suspended") {
         await ctx.resume();
@@ -274,13 +303,17 @@ export function useAudioEngine({
         source.connect(ctx.destination);
       }
 
+      activeSourcesRef.current.push(source);
       source.start();
       setIsPlaying(true);
       isPlayingRef.current = true;
 
       source.onended = () => {
-        setIsPlaying(false);
-        isPlayingRef.current = false;
+        activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+        if (activeSourcesRef.current.length === 0) {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+        }
         console.log("✅ Tes audio Celyn selesai.");
       };
     } catch (err) {
@@ -288,7 +321,7 @@ export function useAudioEngine({
       setIsPlaying(false);
       isPlayingRef.current = false;
     }
-  }, [getOrCreateAudioContext]);
+  }, [getOrCreateAudioContext, stopPlayback]);
 
   return {
     isMicActive,

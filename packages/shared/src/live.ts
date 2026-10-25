@@ -1,4 +1,4 @@
-import { EmotionType } from "./avatar";
+import { EmotionType } from "./avatar.js";
 
 // Pesan Client -> Server
 export type ClientMessage =
@@ -45,6 +45,11 @@ export type ServerMessage =
       type: "status";
       status: "idle" | "listening" | "thinking" | "speaking" | "error";
       message?: string;
+    }
+  | {
+      type: "session_info";
+      model: string;
+      voice: string;
     }
   | {
       type: "error";
