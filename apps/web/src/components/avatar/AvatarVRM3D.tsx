@@ -84,26 +84,66 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
     const clock = new THREE.Clock();
     let animId: number;
 
+    // State kedipan mata alami 3D
+    let blinkTimer = 0;
+    let nextBlinkTime = 2.8;
+    let isBlinking = false;
+    let blinkProgress = 0;
+
     const animate = () => {
       animId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
+      const elapsedTime = clock.getElapsedTime();
 
       const {
         emotion: curEmotion,
         mouthOpen: curMouthOpen,
+        isSpeaking: curIsSpeaking,
         lookAt: curLookAt,
       } = propsRef.current;
+
+      // Update siklus kedipan mata 3D alami (130ms tiap 2.5 - 5 detik)
+      blinkTimer += delta;
+      if (!isBlinking && blinkTimer > nextBlinkTime) {
+        isBlinking = true;
+        blinkProgress = 0;
+        blinkTimer = 0;
+        nextBlinkTime = 2.5 + Math.random() * 2.5;
+      }
+      let blinkVal = 0;
+      if (isBlinking) {
+        blinkProgress += delta;
+        const norm = blinkProgress / 0.13;
+        if (norm >= 1) {
+          isBlinking = false;
+          blinkVal = 0;
+        } else {
+          blinkVal = Math.sin(norm * Math.PI);
+        }
+      }
 
       if (vrmRef.current) {
         vrmRef.current.update(delta);
 
-        // Update Lip-sync (viseme aa) & ekspresi emosi
+        // Update Lip-sync dengan Pause Gate & ekspresi emosi
         if (vrmRef.current.expressionManager) {
-          vrmRef.current.expressionManager.setValue("aa", curMouthOpen);
+          const filteredMouth =
+            curIsSpeaking && curMouthOpen >= 0.015
+              ? Math.min(1, curMouthOpen * 2.4)
+              : 0;
+          vrmRef.current.expressionManager.setValue("aa", filteredMouth);
+          vrmRef.current.expressionManager.setValue("blink", blinkVal);
           vrmRef.current.expressionManager.setValue("happy", curEmotion === "happy" ? 0.8 : 0);
           vrmRef.current.expressionManager.setValue("surprised", curEmotion === "surprised" ? 0.8 : 0);
           vrmRef.current.expressionManager.setValue("sad", curEmotion === "sad" ? 0.8 : 0);
           vrmRef.current.expressionManager.update();
+        }
+
+        // Procedural spine breathing & idle motion
+        const spineNode = vrmRef.current.humanoid?.getNormalizedBoneNode("spine");
+        if (spineNode) {
+          spineNode.rotation.x = Math.sin(elapsedTime * 1.8) * 0.018;
+          spineNode.rotation.y = curLookAt ? (curLookAt.x - 0.5) * 0.12 : 0;
         }
 
         // Update LookAt tatapan mata / kepala

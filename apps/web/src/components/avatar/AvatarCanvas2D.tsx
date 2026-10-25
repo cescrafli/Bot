@@ -178,15 +178,20 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   // =========================================================================
   const tSec = tick / 1000;
 
-  // 1. Fisika Napas (Translasi & Kompresi-Peregangan Volume Tubuh)
-  const breathY = breath * -rigConfig.breathIntensity;
+  // 1. Fisika Napas & Active Listening Nod (Translasi & Kompresi-Peregangan Volume Tubuh)
+  // Active Listening non-verbal motion saat Celyn mendengarkan (micro-nodding halus)
+  const listeningNod = !isSpeaking
+    ? Math.sin(tSec * 1.8) * 0.4 * Math.max(0, Math.sin(tSec * 0.45))
+    : 0;
+
+  const breathY = breath * -rigConfig.breathIntensity + Math.abs(listeningNod) * 1.2;
   const breathScaleY = 1 + breath * 0.009;
   const breathScaleX = 1 - breath * 0.004; // Volume preservation
 
-  // 2. Kemiringan & Gestur Badan Saat Berbicara (Living Conversational Motion)
+  // 2. Kemiringan & Gestur Badan Saat Berbicara / Mendengarkan (Living Conversational Motion)
   const bodyTilt = isSpeaking
     ? Math.sin(tSec * 2.6) * 0.8 + (gazeTarget.x - 0.5) * 1.5
-    : (gazeTarget.x - 0.5) * 1.0;
+    : (gazeTarget.x - 0.5) * 1.0 + listeningNod;
 
   // 3. Kinematika Independen Lengan & Tangan Kiri-Kanan (Independent Arm Sway & Gestures)
   // - Ayunan Napas: saat bernapas (inhale/exhale), lengan bergerak sedikit keluar-masuk

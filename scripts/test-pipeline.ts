@@ -10,6 +10,8 @@ import {
   inferEmotionFromText,
   inferIndonesianProsody,
   normalizeSpokenIndonesian,
+  buildExpressiveSsml,
+  buildContextualGreetingPrompt,
 } from "@celyn/shared";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
@@ -180,16 +182,26 @@ async function runTtsTests() {
     "Buffer akhir giliran dipaksa di-flush saat turnComplete (forceAll=true)"
   );
 
-  // Uji Fast First-Clause Split (Respons awal instan <350ms)
-  const testFastClause = extractIndonesianSentences(
-    "Wah menarik banget nih kodenya, kelihatannya kamu lagi bikin komponen React ya?",
-    false,
-    true
+  // Uji Pemeliharaan Keutuhan Kalimat Bertanda Koma (Pitch Contour Kontinu Tanpa Terminal Fall)
+  const testFullContour = extractIndonesianSentences(
+    "Wah menarik banget nih kodenya, kelihatannya kamu lagi bikin komponen React ya? Yuk kita bahas!",
+    false
   );
   assert(
-    testFastClause.sentences.length >= 1 &&
-      testFastClause.sentences[0] === "Wah menarik banget nih kodenya,",
-    "Fast First-Clause Split berhasil memecah klausa awal di tanda koma untuk respon instan"
+    testFullContour.sentences.length === 1 &&
+      testFullContour.sentences[0] ===
+        "Wah menarik banget nih kodenya, kelihatannya kamu lagi bikin komponen React ya?",
+    "Kalimat ber-koma tidak dipotong sembarangan, menjaga kurva intonasi pitch utuh"
+  );
+
+  // Uji Pemecahan Kalimat Ekstra Panjang (> 135 karakter) pada Konjungsi Klausa
+  const veryLongText =
+    "Kita bisa mulai memeriksa struktur komponen terlebih dahulu untuk memastikan tidak ada kesalahan rendering, karena kalau ada error di bagian lifecycle efeknya bisa merambat ke komponen lain.";
+  const testLongSplit = extractIndonesianSentences(veryLongText, false);
+  assert(
+    testLongSplit.sentences.length >= 1 &&
+      testLongSplit.sentences[0].includes("komponen terlebih dahulu"),
+    "Kalimat ekstra panjang berhasil dipecah secara halus pada konjungsi klausa mandiri"
   );
 
   // Uji Normalisasi Teks Lisan & Fonetik Akronim Bahasa Indonesia
@@ -209,6 +221,23 @@ async function runTtsTests() {
     `Singkatan & tawa Indonesia diekspansi alami (dan lain-lain, yang, haha): "${normChat}"`
   );
 
+  // Uji Kontekstual Satuan Jarak (10 km -> kilometer, bukan "10 kamu") & Gelar Dokter (dr. vs dr)
+  const normContextual = normalizeSpokenIndonesian("Jaraknya 10 km dr sini ke tempat dr. Budi bayar Rp 15.000");
+  assert(
+    normContextual.includes("10 kilometer") &&
+      normContextual.includes("dari sini") &&
+      normContextual.includes("dokter Budi") &&
+      normContextual.includes("15.000 rupiah"),
+    `Konteks satuan '10 kilometer', 'dari sini', 'dokter Budi', dan '15.000 rupiah' presisi: "${normContextual}"`
+  );
+
+  // Uji Expressive SSML Builder (Jeda Berpikir <break> pada Elipsis & Tanda Pisah)
+  const ssmlOutput = buildExpressiveSsml("Hmm... bentar ya — coba aku cek kodenya.", { emotion: "thinking" });
+  assert(
+    ssmlOutput.includes("<break time='220ms'/>") && ssmlOutput.includes("<break time='160ms'/>"),
+    `SSML builder menyuntikkan jeda napas mikro (<break>) untuk elipsis dan tanda pisah`
+  );
+
   // Uji Inferensi Emosi Teks Otomatis
   assert(inferEmotionFromText("Wah keren banget hasil desainmu!") === "happy", "Inferensi emosi happy");
   assert(inferEmotionFromText("Hmm bentar ya coba aku cek kodenya...") === "thinking", "Inferensi emosi thinking");
@@ -222,10 +251,18 @@ async function runTtsTests() {
     `Prosodi happy dinaikkan dinamis (+9% rate, +4Hz pitch)`
   );
 
-  const prosodyQuestion = inferIndonesianProsody("Kamu lagi ngerjain project apa sekarang?");
+  const prosodyQuestion = inferIndonesianProsody("Kamu lagi ngerjain project apa sekarang ya?");
   assert(
-    prosodyQuestion.pitch === "+3Hz",
-    `Intonasi nada tanya dinaikkan minimal +3Hz untuk keluwesan vokal`
+    prosodyQuestion.pitch === "+4Hz",
+    `Intonasi nada tanya dinaikkan +4Hz untuk keluwesan vokal pertanyaan Indonesia`
+  );
+
+  // Uji Sapaan Kontekstual Waktu (Pagi / Siang / Sore / Malam)
+  const morningGreeting = buildContextualGreetingPrompt(new Date("2026-10-25T08:00:00"));
+  const nightGreeting = buildContextualGreetingPrompt(new Date("2026-10-25T21:00:00"));
+  assert(
+    morningGreeting.includes("pagi") && nightGreeting.includes("malam"),
+    `Sapaan pembuka dinamis menyesuaikan waktu pengguna (${morningGreeting.slice(0, 35)}...)`
   );
 
   // 7. Ringkasan

@@ -8,6 +8,7 @@ import {
   EmotionType,
   inferEmotionFromText,
   normalizeEmotion,
+  buildContextualGreetingPrompt,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
@@ -184,7 +185,7 @@ export class GeminiSession {
                   role: "user",
                   parts: [
                     {
-                      text: CELYN_GREETING_PROMPT,
+                      text: buildContextualGreetingPrompt(),
                     },
                   ],
                 },

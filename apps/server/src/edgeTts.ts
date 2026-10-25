@@ -5,13 +5,14 @@ import {
   generateSecMsGecV2,
   cleanAndEscapeForSsml,
   inferIndonesianProsody,
+  buildExpressiveSsml,
   EmotionType,
   SEC_MS_GEC_VERSION,
   TRUSTED_CLIENT_TOKEN,
   CHROMIUM_MAJOR_VERSION,
 } from "@celyn/shared";
 
-export { generateSecMsGecV2, cleanAndEscapeForSsml };
+export { generateSecMsGecV2, cleanAndEscapeForSsml, buildExpressiveSsml };
 
 let clockSkewSeconds = 0;
 
@@ -28,13 +29,9 @@ export interface EdgeTtsOptions {
  * Mencoba satu kali koneksi WebSocket ke Microsoft Edge ReadAloud TTS
  */
 function trySynthesizeOnce(
-  escapedText: string,
+  rawText: string,
   options: EdgeTtsOptions
 ): Promise<Buffer> {
-  const voice = options.voice || DEFAULT_VOICE_NAME;
-  const rate = options.rate || "+0%";
-  const pitch = options.pitch || "+0Hz";
-  const volume = options.volume || "+0%";
   const timeoutMs = options.timeoutMs || 10000;
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -116,14 +113,7 @@ function trySynthesizeOnce(
       );
 
       const reqId = crypto.randomBytes(16).toString("hex");
-      const ssml =
-        `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='id-ID'>` +
-        `<voice name='${voice}'>` +
-        `<prosody pitch='${pitch}' rate='${rate}' volume='${volume}'>` +
-        `${escapedText}` +
-        `</prosody>` +
-        `</voice>` +
-        `</speak>`;
+      const ssml = buildExpressiveSsml(rawText, options);
 
       ws.send(
         `X-RequestId:${reqId}\r\n` +
@@ -192,13 +182,13 @@ export async function synthesizeEdgeTTS(
   text: string,
   options: EdgeTtsOptions = {}
 ): Promise<Buffer> {
-  const escapedText = cleanAndEscapeForSsml(text);
-  if (!escapedText) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
     return Buffer.alloc(0);
   }
 
   // Terapkan Dynamic Emotional Prosody secara otomatis sesuai konteks kalimat & emosi
-  const dynamicProsody = inferIndonesianProsody(text, options.emotion);
+  const dynamicProsody = inferIndonesianProsody(trimmed, options.emotion);
   const resolvedOptions: EdgeTtsOptions = {
     ...options,
     rate: options.rate || dynamicProsody.rate,
@@ -207,11 +197,11 @@ export async function synthesizeEdgeTTS(
   };
 
   try {
-    return await trySynthesizeOnce(escapedText, resolvedOptions);
+    return await trySynthesizeOnce(trimmed, resolvedOptions);
   } catch (firstErr) {
     console.warn("⚠️ Percobaan 1 Edge TTS gagal, mencoba ulang dengan koreksi clock-skew...", firstErr);
     // Coba sekali lagi dengan waktu yang sudah disesuaikan
-    return await trySynthesizeOnce(escapedText, {
+    return await trySynthesizeOnce(trimmed, {
       ...resolvedOptions,
       timeoutMs: options.timeoutMs ? options.timeoutMs + 2000 : 12000,
     });

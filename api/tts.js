@@ -235,7 +235,17 @@ function normalizeSpokenIndonesian(rawText) {
 
   let text = String(rawText);
 
-  // 1. Singkatan umum & chat Indonesia
+  // 1. Satuan jarak & ukuran ("10 km", "5km") sebelum substitusi kata ganti
+  text = text.replace(/(\d+)\s*km\b/gi, "$1 kilometer");
+
+  // 2. Gelar dokter ("dr. Nama") vs kata depan dari ("dr sini")
+  text = text.replace(/\bdr\.\s+([A-Z])/g, "dokter $1");
+  text = text.replace(/\bdr\b/gi, "dari");
+
+  // 3. Format nominal mata uang Rupiah ("Rp 15.000" -> "15.000 rupiah")
+  text = text.replace(/\bRp\.?\s*(\d+(?:\.\d{3})*(?:,\d+)?)\b/gi, "$1 rupiah");
+
+  // 4. Singkatan umum & chat Indonesia
   const ABBR_MAP = {
     dll: "dan lain-lain",
     dsb: "dan sebagainya",
@@ -252,7 +262,6 @@ function normalizeSpokenIndonesian(rawText) {
     tp: "tapi",
     jd: "jadi",
     sy: "saya",
-    km: "kamu",
     brp: "berapa",
     td: "tadi",
     skrg: "sekarang",
@@ -263,7 +272,6 @@ function normalizeSpokenIndonesian(rawText) {
     bgm: "bagaimana",
     gmn: "gimana",
     kmrn: "kemarin",
-    dr: "dokter",
     prof: "profesor",
   };
 
@@ -272,7 +280,7 @@ function normalizeSpokenIndonesian(rawText) {
     text = text.replace(reg, expansion);
   }
 
-  // 2. Fonetik akronim teknis (supaya API tidak dibaca "api" kebakaran)
+  // 5. Fonetik akronim teknis (supaya API tidak dibaca "api" kebakaran)
   text = text
     .replace(/\bAPI\b/g, "E-P-I")
     .replace(/\bAI\b/g, "E-I")
@@ -289,16 +297,16 @@ function normalizeSpokenIndonesian(rawText) {
     .replace(/\bID\b/g, "Ai-Di")
     .replace(/\bVS\b/gi, "versus");
 
-  // 3. Tawa teks Indonesia
+  // 6. Tawa teks Indonesia
   text = text
     .replace(/\bwk(wk)+\b/gi, "haha")
     .replace(/\bhe(he)+\b/gi, "hehe")
     .replace(/\bha(ha)+\b/gi, "haha");
 
-  // 4. Garis miring antar kata (mis. "dan/atau", "layar/kamera")
+  // 7. Garis miring antar kata (mis. "dan/atau", "layar/kamera")
   text = text.replace(/([a-zA-Z0-9]+)\/([a-zA-Z0-9]+)/g, "$1 atau $2");
 
-  // 5. Interjeksi pembuka kalimat (tambahkan koma mikro agar ada jeda bernapas)
+  // 8. Interjeksi pembuka kalimat (tambahkan koma mikro agar ada jeda bernapas alami)
   text = text.replace(
     /^(\s*)(Wah|Eh|Hmm|Nah|Oalah|Sip|Oke|Aduh|Waduh)\s+([a-zA-Z])/i,
     "$1$2, $3"
@@ -342,13 +350,23 @@ function inferEmotionFromText(text) {
 function inferIndonesianProsody(text, emotion) {
   const activeEmotion = emotion && emotion !== "neutral" ? emotion : inferEmotionFromText(text);
 
+  const cleanLen = text.replace(/[^a-zA-Z0-9]/g, "").length;
+
   let rate = "+7%";
   let pitch = "+2Hz";
   let volume = "+0%";
 
+  if (cleanLen < 35) {
+    rate = "+8%";
+    pitch = "+3Hz";
+  } else if (cleanLen > 90) {
+    rate = "+5%";
+    pitch = "+1Hz";
+  }
+
   switch (activeEmotion) {
     case "happy":
-      rate = "+9%";
+      rate = cleanLen > 90 ? "+7%" : "+9%";
       pitch = "+4Hz";
       volume = "+4%";
       break;
@@ -369,16 +387,18 @@ function inferIndonesianProsody(text, emotion) {
       break;
     case "neutral":
     default:
-      rate = "+7%";
-      pitch = "+2Hz";
-      volume = "+0%";
       break;
   }
 
-  if (/\?[^?]*$/.test(text) || text.includes("?")) {
+  const isQuestion =
+    /\?[^?]*$/.test(text) ||
+    text.includes("?") ||
+    /\b(kan|ya|nih|dong|kok|gimana|kenapa|apa|berapa|kapan|siapa|belum)\s*\?/i.test(text);
+
+  if (isQuestion) {
     const currentHz = parseInt(pitch, 10) || 0;
-    if (currentHz < 3) {
-      pitch = "+3Hz";
+    if (currentHz < 4) {
+      pitch = "+4Hz";
     }
   }
 
@@ -403,16 +423,33 @@ function cleanAndEscapeForSsml(rawText) {
     .replace(/'/g, "&apos;");
 }
 
-function synthesizeEdgeTTS(text, options = {}) {
+function buildExpressiveSsml(rawText, options = {}) {
   const voice = typeof options === "string" ? options : options.voice || DEFAULT_VOICE;
   const emotion = typeof options === "object" ? options.emotion : "neutral";
-  const dyn = inferIndonesianProsody(text, emotion);
+  const dyn = inferIndonesianProsody(rawText, emotion);
   const rate = (typeof options === "object" && options.rate) || dyn.rate;
   const pitch = (typeof options === "object" && options.pitch) || dyn.pitch;
   const volume = (typeof options === "object" && options.volume) || dyn.volume;
 
-  const escapedText = cleanAndEscapeForSsml(text);
-  if (!escapedText) return Promise.resolve(Buffer.alloc(0));
+  let escapedText = cleanAndEscapeForSsml(rawText);
+  escapedText = escapedText
+    .replace(/(\.{3,}|…)/g, "<break time='220ms'/>")
+    .replace(/\s*—\s*/g, "<break time='160ms'/>");
+
+  return (
+    `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='id-ID'>` +
+    `<voice name='${voice}'>` +
+    `<prosody pitch='${pitch}' rate='${rate}' volume='${volume}'>` +
+    `${escapedText}` +
+    `</prosody>` +
+    `</voice>` +
+    `</speak>`
+  );
+}
+
+function synthesizeEdgeTTS(text, options = {}) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return Promise.resolve(Buffer.alloc(0));
 
   return new Promise((resolve, reject) => {
     const connId = crypto.randomBytes(16).toString("hex");
@@ -492,14 +529,7 @@ function synthesizeEdgeTTS(text, options = {}) {
       );
 
       const reqId = crypto.randomBytes(16).toString("hex");
-      const ssml =
-        `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='id-ID'>` +
-        `<voice name='${voice}'>` +
-        `<prosody pitch='${pitch}' rate='${rate}' volume='${volume}'>` +
-        `${escapedText}` +
-        `</prosody>` +
-        `</voice>` +
-        `</speak>`;
+      const ssml = buildExpressiveSsml(trimmed, options);
 
       ws.send(
         `X-RequestId:${reqId}\r\n` +

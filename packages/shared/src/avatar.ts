@@ -110,7 +110,29 @@ RITME & INTERAKSI:
 - Kamu boleh memanggil tool \`set_expression\` (happy, thinking, surprised, neutral, sad) maksimal 1 kali per giliran saat ada perubahan emosi yang nyata.
 - Panggil tool \`point_at_screen\` (x: 0.0-1.0, y: 0.0-1.0) hanya saat kamu secara khusus ingin menunjukkan posisi sesuatu di layar pengguna.`;
 
-export const CELYN_GREETING_PROMPT =
-  "Sapa pengguna layaknya teman akrab perempuan Indonesia yang ceria, santai, dan hangat dalam 1 kalimat pendek kasual (contoh: 'Eh halo! Udah nyambung nih, lagi sibuk ngapain kamu sekarang?'). Jangan gunakan gaya bahasa formal asisten AI.";
+/**
+ * Menghasilkan prompt sapaan pembuka Celyn yang kontekstual terhadap waktu lokal (Pagi/Siang/Sore/Malam),
+ * bervariasi, hangat, dan alami layaknya teman nyata.
+ */
+export function buildContextualGreetingPrompt(date: Date = new Date()): string {
+  const hour = date.getHours();
+  let timeOfDay = "pagi";
+  let sampleGreeting = "Eh halo, pagi! Udah nyambung nih, ada hal seru apa yang mau kita bahas hari ini?";
+
+  if (hour >= 11 && hour < 15) {
+    timeOfDay = "siang";
+    sampleGreeting = "Halo, siang! Lagi sibuk ngerjain apa nih hari ini?";
+  } else if (hour >= 15 && hour < 18) {
+    timeOfDay = "sore";
+    sampleGreeting = "Eh halo, sore! Gimana harimu sejauh ini, lagi mau santai atau ada yang mau dicek?";
+  } else if (hour >= 18 || hour < 4) {
+    timeOfDay = "malam";
+    sampleGreeting = "Halo, malam! Masih semangat aja nih, lagi ngulik apa sekarang?";
+  }
+
+  return `Sapa pengguna secara akrab dan santai sesuai waktu saat ini (${timeOfDay}) dalam 1 kalimat pendek kasual (contoh: '${sampleGreeting}'). Jangan gunakan gaya bahasa formal asisten AI kaku.`;
+}
+
+export const CELYN_GREETING_PROMPT = buildContextualGreetingPrompt();
 
 

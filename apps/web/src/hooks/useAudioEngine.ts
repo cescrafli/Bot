@@ -42,6 +42,7 @@ export function useAudioEngine({
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const nextPlayTimeRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const lastVolumeRef = useRef<number>(0);
   const playbackEpochRef = useRef<number>(0);
@@ -55,10 +56,15 @@ export function useAudioEngine({
       const ctx = new AudioCtxClass();
       audioCtxRef.current = ctx;
 
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(1, ctx.currentTime);
+      masterGain.connect(ctx.destination);
+      masterGainRef.current = masterGain;
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.25;
-      analyser.connect(ctx.destination);
+      analyser.connect(masterGain);
       analyserRef.current = analyser;
     }
     if (audioCtxRef.current.state === "suspended") {
@@ -94,7 +100,11 @@ export function useAudioEngine({
         const rms = Math.sqrt(sum / dataArray.length);
         const rawNormalized = Math.min(1, rms * 4.5);
         const filtered = rawNormalized < 0.02 ? 0 : rawNormalized;
-        const smoothed = lastVolumeRef.current * 0.35 + filtered * 0.65;
+
+        // Asymmetric attack/release envelope: mulut terbuka cepat (0.75), menutup luwes (0.40)
+        const isRising = filtered > lastVolumeRef.current;
+        const alpha = isRising ? 0.75 : 0.40;
+        const smoothed = lastVolumeRef.current * (1 - alpha) + filtered * alpha;
 
         // Deadband Filter: hanya panggil setVolume jika perubahan > 0.012 atau turun ke 0
         if (
@@ -169,7 +179,9 @@ export function useAudioEngine({
       }
 
       const now = ctx.currentTime;
-      const startTime = Math.max(now, nextPlayTimeRef.current);
+      // Berikan natural breathing gap (140ms) jika menyambung dari audio sebelumnya
+      const hasPriorAudio = nextPlayTimeRef.current > now;
+      const startTime = hasPriorAudio ? nextPlayTimeRef.current + 0.14 : now;
       source.start(startTime);
       nextPlayTimeRef.current = startTime + audioBuffer.duration;
 
@@ -238,16 +250,34 @@ export function useAudioEngine({
     [getOrCreateAudioContext, scheduleAudioBuffer]
   );
 
-  // Hentikan seketika saat barge-in
+  // Hentikan seketika saat barge-in dengan micro-fade untuk mencegah klik/pop
   const stopPlayback = useCallback(() => {
     playbackEpochRef.current++;
-    for (const source of activeSourcesRef.current) {
+
+    if (audioCtxRef.current && masterGainRef.current) {
+      const now = audioCtxRef.current.currentTime;
       try {
-        source.stop();
-        source.disconnect();
+        masterGainRef.current.gain.cancelScheduledValues(now);
+        masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, now);
+        masterGainRef.current.gain.linearRampToValueAtTime(0, now + 0.035);
       } catch {}
     }
-    activeSourcesRef.current = [];
+
+    setTimeout(() => {
+      for (const source of activeSourcesRef.current) {
+        try {
+          source.stop();
+          source.disconnect();
+        } catch {}
+      }
+      activeSourcesRef.current = [];
+      if (audioCtxRef.current && masterGainRef.current) {
+        try {
+          masterGainRef.current.gain.setValueAtTime(1, audioCtxRef.current.currentTime);
+        } catch {}
+      }
+    }, 40);
+
     if (audioCtxRef.current) {
       nextPlayTimeRef.current = audioCtxRef.current.currentTime;
     }

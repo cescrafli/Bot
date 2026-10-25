@@ -271,9 +271,9 @@ export interface IndonesianProsody {
 }
 
 /**
- * Inferensi prosodi dinamis (kecepatan bicara, tinggi nada, dan volume)
+ * Inferensi prosodi dinamis & adaptif (kecepatan bicara, tinggi nada, dan volume)
  * untuk Microsoft Edge Neural id-ID-GadisNeural agar intonasi terdengar
- * manusiawi, ekspresif, dan tidak monoton.
+ * manusiawi, berekspresi luwes, dan menyesuaikan panjang kalimat serta jenis kalimat tanya.
  */
 export function inferIndonesianProsody(
   text: string,
@@ -282,13 +282,24 @@ export function inferIndonesianProsody(
   const activeEmotion =
     emotion && emotion !== "neutral" ? emotion : inferEmotionFromText(text);
 
+  const cleanLen = text.replace(/[^a-zA-Z0-9]/g, "").length;
+
   let rate = "+7%";
   let pitch = "+2Hz";
   let volume = "+0%";
 
+  // Adaptasi panjang kalimat: kalimat pendek lebih spontan, kalimat panjang lebih tenang dan artikulatif
+  if (cleanLen < 35) {
+    rate = "+8%";
+    pitch = "+3Hz";
+  } else if (cleanLen > 90) {
+    rate = "+5%";
+    pitch = "+1Hz";
+  }
+
   switch (activeEmotion) {
     case "happy":
-      rate = "+9%";
+      rate = cleanLen > 90 ? "+7%" : "+9%";
       pitch = "+4Hz";
       volume = "+4%";
       break;
@@ -309,17 +320,19 @@ export function inferIndonesianProsody(
       break;
     case "neutral":
     default:
-      rate = "+7%";
-      pitch = "+2Hz";
-      volume = "+0%";
       break;
   }
 
-  // Jika kalimat bertanya (intonasi naik di akhir)
-  if (/\?[^?]*$/.test(text) || text.includes("?")) {
+  // Kalimat bertanya khas Indonesia (mis. berakhiran "?", "... ya?", "... kan?", "... nih?", "... gimana?")
+  const isQuestion =
+    /\?[^?]*$/.test(text) ||
+    text.includes("?") ||
+    /\b(kan|ya|nih|dong|kok|gimana|kenapa|apa|berapa|kapan|siapa|belum)\s*\?/i.test(text);
+
+  if (isQuestion) {
     const currentHz = parseInt(pitch, 10) || 0;
-    if (currentHz < 3) {
-      pitch = "+3Hz";
+    if (currentHz < 4) {
+      pitch = "+4Hz";
     }
   }
 
@@ -328,7 +341,10 @@ export function inferIndonesianProsody(
 
 /**
  * Normalisasi teks lisan Bahasa Indonesia sebelum diproses oleh TTS:
- * - Menangani akronim teknologi agar tidak salah baca (misal: "API" -> "E-P-I", bukan "api" kebakaran)
+ * - Menangani satuan jarak (mis. "10 km" -> "10 kilometer", bukan "10 kamu")
+ * - Menangani singkatan dokter vs dari ("dr. Budi" -> "dokter Budi", "dr tadi" -> "dari tadi")
+ * - Menangani nominal mata uang ("Rp 15.000" -> "15.000 rupiah")
+ * - Menangani akronim teknologi agar tidak salah baca ("API" -> "E-P-I", bukan api kebakaran)
  * - Mengekspansi singkatan teks/chatting Indonesia ("dll.", "yg", "bgt", "gak")
  * - Mengubah tawa teks ("wkwk", "hehe") menjadi lafal alami
  * - Menambahkan jeda mikro setelah interjeksi pembuka kalimat
@@ -338,7 +354,17 @@ export function normalizeSpokenIndonesian(rawText: string): string {
 
   let text = String(rawText);
 
-  // 1. Singkatan umum & chat Indonesia
+  // 1. Satuan jarak & ukuran ("10 km", "5km") sebelum substitusi kata ganti
+  text = text.replace(/(\d+)\s*km\b/gi, "$1 kilometer");
+
+  // 2. Gelar dokter ("dr. Nama") vs kata depan dari ("dr sini")
+  text = text.replace(/\bdr\.\s+([A-Z])/g, "dokter $1");
+  text = text.replace(/\bdr\b/gi, "dari");
+
+  // 3. Format nominal mata uang Rupiah ("Rp 15.000" -> "15.000 rupiah")
+  text = text.replace(/\bRp\.?\s*(\d+(?:\.\d{3})*(?:,\d+)?)\b/gi, "$1 rupiah");
+
+  // 4. Singkatan umum & chat Indonesia
   const ABBR_MAP: Record<string, string> = {
     dll: "dan lain-lain",
     dsb: "dan sebagainya",
@@ -355,7 +381,6 @@ export function normalizeSpokenIndonesian(rawText: string): string {
     tp: "tapi",
     jd: "jadi",
     sy: "saya",
-    km: "kamu",
     brp: "berapa",
     td: "tadi",
     skrg: "sekarang",
@@ -366,7 +391,6 @@ export function normalizeSpokenIndonesian(rawText: string): string {
     bgm: "bagaimana",
     gmn: "gimana",
     kmrn: "kemarin",
-    dr: "dokter",
     prof: "profesor",
   };
 
@@ -375,7 +399,7 @@ export function normalizeSpokenIndonesian(rawText: string): string {
     text = text.replace(reg, expansion);
   }
 
-  // 2. Fonetik akronim teknis (supaya API tidak dibaca "api" / kebakaran)
+  // 5. Fonetik akronim teknis (supaya API tidak dibaca "api" kebakaran)
   text = text
     .replace(/\bAPI\b/g, "E-P-I")
     .replace(/\bAI\b/g, "E-I")
@@ -392,16 +416,16 @@ export function normalizeSpokenIndonesian(rawText: string): string {
     .replace(/\bID\b/g, "Ai-Di")
     .replace(/\bVS\b/gi, "versus");
 
-  // 3. Tawa teks Indonesia
+  // 6. Tawa teks Indonesia
   text = text
     .replace(/\bwk(wk)+\b/gi, "haha")
     .replace(/\bhe(he)+\b/gi, "hehe")
     .replace(/\bha(ha)+\b/gi, "haha");
 
-  // 4. Garis miring antar kata (mis. "dan/atau", "layar/kamera")
+  // 7. Garis miring antar kata (mis. "dan/atau", "layar/kamera")
   text = text.replace(/([a-zA-Z0-9]+)\/([a-zA-Z0-9]+)/g, "$1 atau $2");
 
-  // 5. Interjeksi pembuka kalimat (tambahkan koma mikro agar ada jeda bernapas alami)
+  // 8. Interjeksi pembuka kalimat (tambahkan koma mikro agar ada jeda bernapas alami)
   text = text.replace(
     /^(\s*)(Wah|Eh|Hmm|Nah|Oalah|Sip|Oke|Aduh|Waduh)\s+([a-zA-Z])/i,
     "$1$2, $3"
@@ -432,21 +456,61 @@ export function cleanAndEscapeForSsml(rawText: string): string {
     .replace(/'/g, "&apos;");
 }
 
+export interface ExpressiveSsmlOptions {
+  voice?: string;
+  rate?: string;
+  pitch?: string;
+  volume?: string;
+  emotion?: EmotionType;
+}
+
+/**
+ * Membangun SSML ekspresif dengan jeda napas mikro (<break>) pada elipsis (...)
+ * dan penyesuaian prosodi kontur manusiawi untuk Microsoft Edge Neural TTS.
+ */
+export function buildExpressiveSsml(
+  rawText: string,
+  options: ExpressiveSsmlOptions = {}
+): string {
+  const voice = options.voice || DEFAULT_VOICE_NAME;
+  const prosody = inferIndonesianProsody(rawText, options.emotion);
+  const rate = options.rate || prosody.rate;
+  const pitch = options.pitch || prosody.pitch;
+  const volume = options.volume || prosody.volume;
+
+  let escapedText = cleanAndEscapeForSsml(rawText);
+
+  // Sisipkan jeda berpikir manusiawi (220ms) pada elipsis "..." atau tanda pisah "—"
+  escapedText = escapedText
+    .replace(/(\.{3,}|…)/g, "<break time='220ms'/>")
+    .replace(/\s*—\s*/g, "<break time='160ms'/>");
+
+  return (
+    `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='id-ID'>` +
+    `<voice name='${voice}'>` +
+    `<prosody pitch='${pitch}' rate='${rate}' volume='${volume}'>` +
+    `${escapedText}` +
+    `</prosody>` +
+    `</voice>` +
+    `</speak>`
+  );
+}
+
 /**
  * Pemecah kalimat Bahasa Indonesia cerdas untuk streaming TTS:
- * - Anti-potong angka berformat desimal / ribuan (mis. "Rp 10.000", "versi 2.0")
+ * - Anti-potong angka berformat desimal / ribuan (mis. "Rp 15.000", "versi 2.0")
  * - Anti-potong singkatan umum Indonesia (dll., dsb., dst., mis., no., rp., dr., prof., hlm.)
- * - Fast First-Clause Split (jika isFirstChunk=true, pecah lebih awal di tanda koma agar respon awal instan <350ms)
- * - Clause splitting pada koma/titik-koma jika klausa > 110 karakter
+ * - Menjaga keutuhan kurva intonasi: kalimat normal TIDAK dipotong sembarangan di koma
+ *   agar pitch tidak jatuh tiba-tiba (terminal fall) di tengah kalimat.
+ * - Hanya memecah klausa jika buffer melebihi 135 karakter dan berada di konjungsi klausa mandiri.
  */
 export function extractIndonesianSentences(
   buffer: string,
   forceAll: boolean,
-  isFirstChunk = false
+  _isFirstChunk?: boolean
 ): { sentences: string[]; remaining: string } {
   let text = buffer;
   const sentences: string[] = [];
-  let firstChunkActive = isFirstChunk;
 
   const ABBREVIATIONS = [
     "dll", "dsb", "dst", "mis", "hlm", "no", "dr", "prof", "rp", "thn", "bln", "jl",
@@ -511,24 +575,23 @@ export function extractIndonesianSentences(
       }
     }
 
-    // Fast First-Clause Split untuk respons awal instan
-    if (splitIdx === -1 && firstChunkActive && text.length >= 36) {
-      for (let i = 24; i < text.length - 8; i++) {
-        if ((text[i] === "," || text[i] === ";") && /\s/.test(text[i + 1])) {
-          splitIdx = i;
-          matchLen = 1;
-          break;
-        }
-      }
-    }
-
-    // Jika buffer sangat panjang (> 110 char) saat streaming dan belum ada titik,
-    // pecah secara halus pada koma atau titik-koma yang diikuti spasi
-    if (splitIdx === -1 && text.length > 110) {
-      for (let i = 70; i < text.length - 15; i++) {
-        if ((text[i] === "," || text[i] === ";") && /\s/.test(text[i + 1])) {
-          splitIdx = i;
-          matchLen = 1;
+    // Jika buffer sangat panjang (> 135 char) saat streaming dan belum ada tanda titik/tanya/seru,
+    // pecah secara halus pada koma yang diikuti kata penghubung klausa mandiri
+    if (splitIdx === -1 && text.length > 135) {
+      const clauseConjunctions = [
+        ", tapi ",
+        ", karena ",
+        ", jadi ",
+        ", sedangkan ",
+        ", lalu ",
+        ", terus ",
+        ", namun ",
+      ];
+      for (const conj of clauseConjunctions) {
+        const foundIdx = text.indexOf(conj, 75);
+        if (foundIdx !== -1 && foundIdx < text.length - 20) {
+          splitIdx = foundIdx;
+          matchLen = 1; // Termasuk koma
           break;
         }
       }
@@ -537,7 +600,6 @@ export function extractIndonesianSentences(
     if (splitIdx !== -1) {
       const sentence = text.slice(0, splitIdx + matchLen).trim();
       text = text.slice(splitIdx + matchLen).trimStart();
-      firstChunkActive = false;
       if (sentence.length > 0) {
         sentences.push(sentence);
       }

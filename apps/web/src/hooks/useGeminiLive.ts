@@ -7,6 +7,7 @@ import {
   LookAtTarget,
   normalizeEmotion,
   inferEmotionFromText,
+  buildContextualGreetingPrompt,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
@@ -52,6 +53,7 @@ export function useGeminiLive({
   const directExplicitEmotionRef = useRef<boolean>(false);
   const directCurrentEmotionRef = useRef<EmotionType>("neutral");
   const directRelaxTimerRef = useRef<number | null>(null);
+  const activeTurnSpeakerRef = useRef<"user" | "celyn" | null>(null);
 
   useEffect(() => {
     statusRef.current = status;
@@ -80,6 +82,7 @@ export function useGeminiLive({
         directTtsBufferRef.current = "";
         directIsFirstChunkRef.current = true;
         directExplicitEmotionRef.current = false;
+        activeTurnSpeakerRef.current = null;
         if (directRelaxTimerRef.current) {
           clearTimeout(directRelaxTimerRef.current);
           directRelaxTimerRef.current = null;
@@ -92,29 +95,30 @@ export function useGeminiLive({
           minute: "2-digit",
         });
         setTranscripts((prev) => {
-          const last = prev[prev.length - 1];
-          if (
-            last &&
-            last.speaker === msg.speaker &&
-            !msg.text.startsWith("\n")
-          ) {
-            const sep =
-              last.text.endsWith(" ") ||
-              msg.text.startsWith(" ") ||
-              /^[.,!?;:)]/.test(msg.text) ||
-              msg.speaker === "celyn"
-                ? ""
-                : " ";
+          const isSameOngoingTurn =
+            activeTurnSpeakerRef.current === msg.speaker && prev.length > 0;
+          activeTurnSpeakerRef.current = msg.speaker;
+
+          if (isSameOngoingTurn) {
+            const last = prev[prev.length - 1];
+            // Smart word boundary spacing untuk Bahasa Indonesia (cegah "Halokamu")
+            const needsSpace =
+              !last.text.endsWith(" ") &&
+              !msg.text.startsWith(" ") &&
+              !/^[.,!?;:)%]/.test(msg.text) &&
+              /[a-zA-Z0-9]$/.test(last.text);
+            const sep = needsSpace ? " " : "";
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...last,
-              text: `${last.text}${sep}${msg.text}`.replace(/\s+/g, " ").trim(),
+              text: `${last.text}${sep}${msg.text}`,
             };
             return updated;
           }
+
           return [
             ...prev.slice(-99),
-            { speaker: msg.speaker, text: msg.text.trim(), time },
+            { speaker: msg.speaker, text: msg.text.replace(/^\s+/, ""), time },
           ];
         });
       } else if (msg.type === "tool_call") {
@@ -396,6 +400,18 @@ export function useGeminiLive({
             if (msg.serverContent?.turnComplete) {
               directIsFirstChunkRef.current = true;
               directExplicitEmotionRef.current = false;
+              activeTurnSpeakerRef.current = null;
+
+              // Rapikan spasi akhir bubble chat yang baru saja selesai
+              setTranscripts((prev) => {
+                if (prev.length === 0) return prev;
+                const last = prev[prev.length - 1];
+                const trimmed = last.text.trim();
+                if (trimmed === last.text) return prev;
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...last, text: trimmed };
+                return updated;
+              });
 
               if (directRelaxTimerRef.current) clearTimeout(directRelaxTimerRef.current);
               directRelaxTimerRef.current = window.setTimeout(() => {
@@ -498,7 +514,7 @@ export function useGeminiLive({
               turns: [
                 {
                   role: "user",
-                  parts: [{ text: CELYN_GREETING_PROMPT }],
+                  parts: [{ text: buildContextualGreetingPrompt() }],
                 },
               ],
               turnComplete: true,
