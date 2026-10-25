@@ -54,6 +54,7 @@ export function useGeminiLive({
   const directCurrentEmotionRef = useRef<EmotionType>("neutral");
   const directRelaxTimerRef = useRef<number | null>(null);
   const activeTurnSpeakerRef = useRef<"user" | "celyn" | null>(null);
+  const backupPcmChunksRef = useRef<string[]>([]);
 
   useEffect(() => {
     statusRef.current = status;
@@ -80,6 +81,7 @@ export function useGeminiLive({
         console.log("⚡ Interrupted diterima");
         directTtsTurnIdRef.current++;
         directTtsBufferRef.current = "";
+        backupPcmChunksRef.current = [];
         directIsFirstChunkRef.current = true;
         directExplicitEmotionRef.current = false;
         activeTurnSpeakerRef.current = null;
@@ -215,14 +217,26 @@ export function useGeminiLive({
             const ttsData = await fetchPromise;
             if (
               turnId === directTtsTurnIdRef.current &&
-              directSessionRef.current &&
-              ttsData?.audio
+              directSessionRef.current
             ) {
-              handleServerMessage({
-                type: "audio",
-                data: ttsData.audio,
-                mimeType: ttsData.mimeType || "audio/mp3",
-              });
+              if (ttsData?.audio) {
+                handleServerMessage({
+                  type: "audio",
+                  data: ttsData.audio,
+                  mimeType: ttsData.mimeType || "audio/mp3",
+                });
+              } else if (backupPcmChunksRef.current.length > 0) {
+                // Fallback otomatis jika Edge TTS error / timeout: putar audio cadangan Gemini PCM agar Celyn tidak membisu
+                const pcm = backupPcmChunksRef.current.shift();
+                if (pcm) {
+                  console.warn("⚠️ Menggunakan audio cadangan native Gemini (Edge TTS fallback)");
+                  handleServerMessage({
+                    type: "audio",
+                    data: pcm,
+                    mimeType: "audio/pcm",
+                  });
+                }
+              }
             }
           })
           .catch(() => {});
@@ -380,6 +394,7 @@ export function useGeminiLive({
                   part.inlineData &&
                   part.inlineData.mimeType?.startsWith("audio/")
                 ) {
+                  backupPcmChunksRef.current.push(part.inlineData.data);
                   if (!useEdgeTts) {
                     handleServerMessage({
                       type: "audio",
@@ -657,6 +672,14 @@ export function useGeminiLive({
               data: msg.data,
             },
           });
+        } else if (msg.type === "audio_stream_end") {
+          try {
+            await session.sendRealtimeInput({
+              audioStreamEnd: true,
+            });
+          } catch (e: any) {
+            console.warn("directSession sendRealtimeInput audioStreamEnd:", e?.message);
+          }
         } else if (msg.type === "screen") {
           await session.sendRealtimeInput({
             video: {
@@ -667,6 +690,7 @@ export function useGeminiLive({
         } else if (msg.type === "text") {
           directTtsTurnIdRef.current++;
           directTtsBufferRef.current = "";
+          backupPcmChunksRef.current = [];
           await session.sendClientContent({
             turns: [{ role: "user", parts: [{ text: msg.text }] }],
             turnComplete: true,
@@ -694,12 +718,17 @@ export function useGeminiLive({
   const onBargeIn = useCallback(() => {
     directTtsTurnIdRef.current++;
     directTtsBufferRef.current = "";
+    backupPcmChunksRef.current = [];
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "barge_in" }));
     }
     setStatus("listening");
     setStatusMessage("Celyn sedang mendengarkan ucapanmu...");
   }, []);
+
+  const sendAudioStreamEnd = useCallback(() => {
+    sendMessage({ type: "audio_stream_end" });
+  }, [sendMessage]);
 
   const sendAudio = useCallback(
     (b64PCM16k: string) => {
@@ -752,6 +781,7 @@ export function useGeminiLive({
     connect,
     disconnect,
     sendAudio,
+    sendAudioStreamEnd,
     sendScreen,
     sendText,
     clearTranscripts,

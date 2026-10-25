@@ -279,7 +279,7 @@ export interface VoiceFrameAnalysis {
  */
 export function analyzeHumanVoiceFrame(
   pcm16k: Int16Array,
-  noiseFloor = 0.008
+  noiseFloor = 0.004
 ): VoiceFrameAnalysis {
   const len = pcm16k.length;
   if (len === 0) {
@@ -322,7 +322,7 @@ export function analyzeHumanVoiceFrame(
     }
 
     const subRms = Math.sqrt(subSum / (end - start));
-    if (subRms > Math.max(0.014, noiseFloor * 1.5)) {
+    if (subRms > Math.max(0.0045, noiseFloor * 1.3)) {
       activeSubFrames++;
     }
   }
@@ -331,18 +331,19 @@ export function analyzeHumanVoiceFrame(
   const zcr = zeroCrossings / len;
   const crestFactor = rms > 0.0001 ? maxAbs / rms : 0;
 
-  // 1. Ambang batas energi minimal agar tidak sensitif terhadap bisikan kipas / desis statis
-  const hasVoiceEnergy = rms > Math.max(0.016, noiseFloor * 1.8);
+  // 1. Ambang batas energi adaptif ramah smartphone (Android/iOS AEC) & desktop:
+  // RMS bicara wajar smartphone 0.006 - 0.025, noise floor ruangan hening ~0.001 - 0.003
+  const hasVoiceEnergy = rms > Math.max(0.0055, noiseFloor * 1.45);
 
   // 2. Rentang Zero-Crossing Rate (ZCR) pita suara manusia (85 Hz - 3600 Hz):
-  // Pita vokal & gumaman manusia berada di 0.008 s/d 0.28
-  // Desis / klik keyboard frekuensi tinggi > 0.30
-  const isVocalZcr = zcr >= 0.007 && zcr <= 0.28;
+  // Pita vokal & gumaman manusia berada di 0.005 s/d 0.32
+  // Desis / klik frekuensi sangat tinggi > 0.34
+  const isVocalZcr = zcr >= 0.005 && zcr <= 0.32;
 
   // 3. Crest Factor Rejection:
-  // Suara ketukan meja / klik mouse memiliki lonjakan sesaat impulsif (crestFactor > 7.5)
-  // Getaran pita suara manusia memiliki getaran harmonik kontinu (crestFactor 1.4 - 7.2)
-  const isNonImpulsive = crestFactor >= 1.3 && crestFactor <= 7.2;
+  // Impulsif murni seperti ketukan meja / klik mouse tajam memiliki crestFactor > 8.8
+  // Getaran pita suara manusia memiliki getaran harmonik kontinu (crestFactor 1.2 - 8.2)
+  const isNonImpulsive = crestFactor >= 1.2 && crestFactor <= 8.2;
 
   // 4. Deteksi khusus vokal berkelanjutan ("hmmm", "aaa", "uhm", "eh"):
   // Gumaman manusia bergetar stabil di minimal 2 dari 4 sub-frame dengan crest factor halus
@@ -350,7 +351,7 @@ export function analyzeHumanVoiceFrame(
     hasVoiceEnergy &&
     isVocalZcr &&
     activeSubFrames >= 2 &&
-    crestFactor <= 6.5;
+    crestFactor <= 7.8;
 
   // Deteksi suara manusia umum (bicara normal atau vokal berkelanjutan)
   const isHumanVoice =

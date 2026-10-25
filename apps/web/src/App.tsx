@@ -32,6 +32,9 @@ export function App() {
     onBargeIn: () => {
       live.onBargeIn();
     },
+    onAudioStreamEnd: () => {
+      live.sendAudioStreamEnd();
+    },
   });
 
   // Hook Gemini Live WebSocket
@@ -53,6 +56,9 @@ export function App() {
 
   // Toggle Koneksi Sesi
   const handleToggleConnection = useCallback(async () => {
+    // ⚡ Buka kunci AudioContext secara sinkron saat user gesture (wajib untuk iOS Safari & Android Chrome)
+    audioEngine.unlockAudio();
+
     if (live.isConnected) {
       screenCapture.stopScreenShare();
       audioEngine.stopMic();

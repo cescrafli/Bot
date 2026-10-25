@@ -528,6 +528,14 @@ export class GeminiSession {
       } else if (msg.type === "barge_in") {
         console.log("⚡ [Client Barge-In] Membatalkan antrean TTS Celyn...");
         this.cancelPendingTts();
+      } else if (msg.type === "audio_stream_end") {
+        try {
+          await this.session.sendRealtimeInput({
+            audioStreamEnd: true,
+          });
+        } catch (e: any) {
+          console.warn("sendRealtimeInput audioStreamEnd warning:", e?.message);
+        }
       } else if (msg.type === "tool_response") {
         await this.session.sendToolResponse({
           functionResponses: [

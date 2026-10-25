@@ -5,12 +5,14 @@ interface UseAudioEngineOptions {
   onAudioChunk: (b64PCM16k: string) => void;
   onVolumeChange?: (rms: number) => void;
   onBargeIn?: () => void;
+  onAudioStreamEnd?: () => void;
 }
 
 export function useAudioEngine({
   onAudioChunk,
   onVolumeChange,
   onBargeIn,
+  onAudioStreamEnd,
 }: UseAudioEngineOptions) {
   const [isMicActive, setIsMicActive] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -31,6 +33,11 @@ export function useAudioEngine({
   useEffect(() => {
     onBargeInRef.current = onBargeIn;
   }, [onBargeIn]);
+
+  const onAudioStreamEndRef = useRef(onAudioStreamEnd);
+  useEffect(() => {
+    onAudioStreamEndRef.current = onAudioStreamEnd;
+  }, [onAudioStreamEnd]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const workletLoadedRef = useRef<boolean>(false);
@@ -83,6 +90,22 @@ export function useAudioEngine({
     }
     return audioCtxRef.current;
   }, []);
+
+  // Membuka kunci (unlock) AudioContext secara sinkron saat user gesture (klik/tap tombol "Mulai")
+  // Diwajibkan oleh iOS WebKit & Android Chrome agar audio out tidak dibisukan secara otomatis
+  const unlockAudio = useCallback(() => {
+    try {
+      const ctx = getOrCreateAudioContext();
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+    } catch {}
+  }, [getOrCreateAudioContext]);
 
   // Animasi loop untuk membaca volume RMS dari AnalyserNode (untuk Lip-Sync)
   // Dilengkapi Deadband Filter untuk mencegah 60 FPS re-render berlebihan saat hening
@@ -372,6 +395,11 @@ export function useAudioEngine({
       });
       micStreamRef.current = stream;
 
+      // Pada beberapa smartphone (iOS Safari / Android Chrome), getUserMedia dapat men-suspend output audio context
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
       const micSource = ctx.createMediaStreamSource(stream);
 
       // Rantai filter frekuensi pita suara manusia (90 Hz HPF + 3600 Hz LPF)
@@ -461,6 +489,10 @@ export function useAudioEngine({
             silenceFramesRemainingRef.current--;
             const silence = new Int16Array(pcm16k.length);
             onAudioChunkRef.current?.(int16ToBase64(silence));
+            if (silenceFramesRemainingRef.current === 0) {
+              // Notifikasi akhir aliran ucapan pengguna ke VAD Gemini Live
+              onAudioStreamEndRef.current?.();
+            }
           }
         }
       };
@@ -582,6 +614,7 @@ export function useAudioEngine({
     isMicActive,
     isPlaying,
     volume,
+    unlockAudio,
     startMic,
     stopMic,
     playAudioChunk,

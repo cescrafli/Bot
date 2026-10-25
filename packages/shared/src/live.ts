@@ -21,6 +21,9 @@ export type ClientMessage =
     }
   | {
       type: "barge_in";
+    }
+  | {
+      type: "audio_stream_end";
     };
 
 // Pesan Server -> Client

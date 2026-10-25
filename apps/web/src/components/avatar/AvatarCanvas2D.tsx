@@ -33,9 +33,9 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   const mousePosRef = useRef({ x: 0.5, y: 0.5 });
   const [isBlinking, setIsBlinking] = useState(false);
 
-  // Konfigurasi Rigging (tersimpan di localStorage)
+  // Konfigurasi Rigging (tersimpan di localStorage v3)
   const [rigConfig, setRigConfig] = useState<RigConfig>(() => {
-    const saved = localStorage.getItem("celyn_rig_config");
+    const saved = localStorage.getItem("celyn_rig_config_v3");
     if (saved) {
       try {
         return { ...DEFAULT_RIG_CONFIG, ...JSON.parse(saved) };
@@ -50,12 +50,12 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
 
   const handleRigChange = (newConfig: RigConfig) => {
     setRigConfig(newConfig);
-    localStorage.setItem("celyn_rig_config", JSON.stringify(newConfig));
+    localStorage.setItem("celyn_rig_config_v3", JSON.stringify(newConfig));
   };
 
   const handleRigReset = () => {
     setRigConfig(DEFAULT_RIG_CONFIG);
-    localStorage.removeItem("celyn_rig_config");
+    localStorage.removeItem("celyn_rig_config_v3");
   };
 
   // Keyboard shortcut Alt+R untuk toggle panel kalibrasi
@@ -218,6 +218,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             mouthOverlayRef.current.style.display = "flex";
             const w = (5.5 + dynamicMouthAmount * 1.4) * curRig.mouthScale;
             const h = (0.45 + dynamicMouthAmount * 0.9) * curRig.mouthScale;
+            mouthOverlayRef.current.style.left = `${curRig.mouthPivotX}%`;
+            mouthOverlayRef.current.style.top = `${curRig.mouthPivotY}%`;
             mouthOverlayRef.current.style.width = `${w.toFixed(2)}%`;
             mouthOverlayRef.current.style.height = `${h.toFixed(2)}%`;
 
@@ -361,8 +363,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         </span>
       </div>
 
-      {/* STAGE UTAMA AVATAR CELYN: Terkunci pada Rasio 3:4 Gambar Asli (768x1024) */}
-      <div className="relative z-10 h-full max-h-[580px] aspect-[3/4] w-auto max-w-[92vw] flex items-end justify-center pointer-events-none select-none">
+      {/* STAGE UTAMA AVATAR CELYN: Terkunci pada Rasio 3:4 Gambar Asli (768x1024) Tanpa Distorsi Mobile */}
+      <div className="relative z-10 w-[min(90vw,calc(62dvh*0.75))] sm:w-[min(85vw,calc(70dvh*0.75))] max-w-[435px] aspect-[3/4] flex items-end justify-center pointer-events-none select-none">
         
         {/* KONTAINER UTAMA DENGAN GERAK NAPAS & GESTUR BADAN/TANGAN (Poros di panggul) */}
         <div
@@ -426,29 +428,28 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* ============================================================= */}
           <div
             ref={mouthOverlayRef}
-            className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm pointer-events-none will-change-transform"
+            className="absolute z-30 flex flex-col items-center justify-between overflow-hidden pointer-events-none will-change-transform"
             style={{
               display: "none",
               left: `${rigConfig.mouthPivotX}%`,
               top: `${rigConfig.mouthPivotY}%`,
               transform: `translate(-50%, -50%) scale(${rigConfig.mouthScale})`,
-              backgroundColor: "#4d161d",
-              borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
-              border: "1px solid #8e3e48",
-              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)",
+              background: "radial-gradient(ellipse at 50% 35%, #8c2535 0%, #58121f 55%, #2a050c 100%)",
+              borderRadius: "50% 50% 50% 50% / 40% 40% 60% 60%",
+              boxShadow: "0 0 1.5px rgba(220, 80, 100, 0.45), inset 0 1px 2.5px rgba(20, 2, 5, 0.75)",
             }}
           >
             {/* Gigi Atas Halus */}
             <div
               ref={upperTeethRef}
-              className="w-3/4 h-[1.5px] bg-[#fffbfb] rounded-b-sm mt-0.2 transition-opacity duration-75"
+              className="w-4/5 h-[1.5px] bg-[#fffcfc]/90 rounded-b-[2px] transition-opacity duration-75"
               style={{ opacity: 0 }}
             />
 
             {/* Lidah Halus */}
             <div
               ref={tongueRef}
-              className="w-2/3 h-1.5 bg-[#d96e7e] rounded-t-full mb-0.2 transition-opacity duration-75"
+              className="w-3/4 h-[2px] bg-[#e2697b] rounded-t-full transition-opacity duration-75"
               style={{ opacity: 0 }}
             />
           </div>

@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
-import { ClientMessage, DEFAULT_VOICE_NAME } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion } from "@celyn/shared";
 
 // Metrik Global Server
 const serverStats = {
@@ -98,19 +98,39 @@ const server = http.createServer((req, res) => {
   // Endpoint TTS Microsoft Edge Neural (id-ID-GadisNeural)
   if (req.url?.startsWith("/api/tts")) {
     let rawBody = "";
+    let bodyTooLarge = false;
     req.on("data", (chunk) => {
       rawBody += chunk.toString();
+      if (rawBody.length > 32 * 1024) {
+        bodyTooLarge = true;
+        req.destroy();
+      }
     });
     req.on("end", async () => {
+      if (bodyTooLarge) {
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Payload Too Large (maks 32KB)" }));
+        return;
+      }
       try {
         const parsedUrl = new URL(req.url || "/api/tts", `http://localhost:${config.port}`);
         let text = parsedUrl.searchParams.get("text") || "";
         let voice = parsedUrl.searchParams.get("voice") || config.geminiVoice || DEFAULT_VOICE_NAME;
+        let emotion = parsedUrl.searchParams.get("emotion") || "neutral";
+        let rate = parsedUrl.searchParams.get("rate") || "";
+        let pitch = parsedUrl.searchParams.get("pitch") || "";
+        let volume = parsedUrl.searchParams.get("volume") || "";
 
         if (rawBody) {
-          const parsedBody = JSON.parse(rawBody);
-          if (parsedBody.text) text = parsedBody.text;
-          if (parsedBody.voice) voice = parsedBody.voice;
+          try {
+            const parsedBody = JSON.parse(rawBody);
+            if (parsedBody.text) text = parsedBody.text;
+            if (parsedBody.voice) voice = parsedBody.voice;
+            if (parsedBody.emotion) emotion = parsedBody.emotion;
+            if (parsedBody.rate) rate = parsedBody.rate;
+            if (parsedBody.pitch) pitch = parsedBody.pitch;
+            if (parsedBody.volume) volume = parsedBody.volume;
+          } catch {}
         }
 
         if (!text.trim()) {
@@ -119,7 +139,13 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        const mp3Buffer = await synthesizeEdgeTTS(text.slice(0, 1500), { voice });
+        const mp3Buffer = await synthesizeEdgeTTS(text.slice(0, 1500), {
+          voice,
+          emotion: normalizeEmotion(emotion),
+          rate,
+          pitch,
+          volume,
+        });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
