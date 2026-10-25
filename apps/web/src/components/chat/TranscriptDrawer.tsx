@@ -44,7 +44,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md glass-panel border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-md glass-panel border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 safe-top safe-bottom">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/60">
         <div className="flex items-center gap-2 text-sm font-bold text-white">

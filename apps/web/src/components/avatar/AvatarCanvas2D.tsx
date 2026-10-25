@@ -65,18 +65,35 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   // Fisika Pernapasan & Waktu Bicara
   const [breath, setBreath] = useState(0);
 
-  // Mouse gaze tracking
+  // Mouse & Touch gaze tracking (Dukungan Sentuh Jari di Layar HP)
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMove = (clientX: number, clientY: number) => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const normX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const normY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      const normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
       setMousePos({ x: normX, y: normY });
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    const handleMouseMove = (e: MouseEvent) => {
+      handleMove(e.clientX, e.clientY);
+    };
+
+    const handleTouch = (e: TouchEvent) => {
+      if (e.touches && e.touches[0]) {
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    window.addEventListener("touchstart", handleTouch, { passive: true });
+    window.addEventListener("touchmove", handleTouch, { passive: true });
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("touchstart", handleTouch);
+      window.removeEventListener("touchmove", handleTouch);
+    };
   }, []);
 
   // Animation Loop (60 FPS: Menggerakkan Napas, Gestur, dan Siklus Bicara Suku Kata)
@@ -241,14 +258,14 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       ref={containerRef}
       className="relative flex flex-col items-center justify-center w-full h-full select-none overflow-hidden"
     >
-      {/* Tombol Pintas Kalibrasi Rig (Pojok Kiri Atas) */}
+      {/* Tombol Pintas Kalibrasi Rig (Pojok Kiri Atas Mobile & Desktop) */}
       <button
         onClick={() => setIsRigPanelOpen((prev) => !prev)}
-        className="absolute top-6 left-6 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-pill border border-white/10 hover:border-rose-500/40 text-slate-400 hover:text-white text-xs font-medium transition-all shadow-lg hover:scale-105"
+        className="absolute top-2.5 left-2.5 sm:top-5 sm:left-6 z-40 flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full glass-pill border border-white/10 hover:border-rose-500/40 text-slate-400 hover:text-white text-[11px] sm:text-xs font-medium transition-all shadow-lg hover:scale-105"
         title="Buka Panel Kalibrasi Rig 2D (Alt+R)"
       >
         <Sliders className="w-3.5 h-3.5 text-rose-400" />
-        <span>Kalibrasi Rig</span>
+        <span className="hidden xs:inline sm:inline">Kalibrasi</span>
       </button>
 
       {/* Panel Kalibrasi Rig Interaktif */}
@@ -261,18 +278,18 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         />
       )}
 
-      {/* Halo gelombang suara saat Celyn berbicara */}
+      {/* Halo gelombang suara saat Celyn berbicara (Responsif Layar HP & Desktop) */}
       {isSpeaking && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
           <div
-            className="w-[480px] h-[480px] rounded-full border border-rose-500/30 animate-ping"
+            className="w-[75vw] max-w-[440px] aspect-square rounded-full border border-rose-500/30 animate-ping"
             style={{
               animationDuration: "2.2s",
               transform: `scale(${1 + dynamicMouthAmount * 0.25})`,
             }}
           />
           <div
-            className="absolute w-[620px] h-[620px] rounded-full border border-pink-500/15 animate-pulse"
+            className="absolute w-[88vw] max-w-[560px] aspect-square rounded-full border border-pink-500/15 animate-pulse"
             style={{ animationDuration: "3.2s" }}
           />
         </div>
@@ -280,7 +297,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
 
       {/* Aura Cahaya Halus di Belakang Celyn */}
       <div
-        className="absolute w-[440px] h-[440px] rounded-full blur-3xl transition-all duration-700 pointer-events-none"
+        className="absolute w-[70vw] max-w-[420px] aspect-square rounded-full blur-3xl transition-all duration-700 pointer-events-none"
         style={{
           background: emotionConfig.glowColor,
           transform: isSpeaking ? `scale(${1.15 + dynamicMouthAmount * 0.2})` : "scale(1)",
@@ -288,19 +305,19 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         }}
       />
 
-      {/* Badge Status Emosi */}
+      {/* Badge Status Emosi (Responsif: Kanan Atas di Mobile, Tengah Atas di Desktop) */}
       <div
-        className={`absolute top-6 z-30 flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-pill border ${emotionConfig.borderColor} shadow-xl text-xs font-medium text-slate-200 transition-colors duration-300`}
+        className={`absolute top-2.5 right-2.5 sm:right-auto sm:top-5 sm:left-1/2 sm:-translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full glass-pill border ${emotionConfig.borderColor} shadow-xl text-[11px] sm:text-xs font-medium text-slate-200 transition-colors duration-300`}
       >
-        <EmotionIcon className={`w-4 h-4 ${emotionConfig.textColor} animate-pulse`} />
+        <EmotionIcon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${emotionConfig.textColor} animate-pulse`} />
         <span>Celyn:</span>
         <span className={`font-semibold ${emotionConfig.textColor}`}>
           {emotionConfig.label}
         </span>
       </div>
 
-      {/* STAGE UTAMA AVATAR CELYN */}
-      <div className="relative z-10 w-full max-w-[440px] h-[580px] flex items-end justify-center pointer-events-none">
+      {/* STAGE UTAMA AVATAR CELYN: Terkunci pada Rasio 3:4 Gambar Asli (768x1024) */}
+      <div className="relative z-10 h-full max-h-[580px] aspect-[3/4] w-auto max-w-[92vw] flex items-end justify-center pointer-events-none select-none">
         
         {/* KONTAINER UTAMA DENGAN GERAK NAPAS & GESTUR BADAN/TANGAN (Poros di panggul) */}
         <div
@@ -363,8 +380,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
 
           {/* ============================================================= */}
           {/* LAPISAN MULUT LIP-SYNC HALUS (Presisi Terkunci pada Bibir) */}
-          {/* Saat diam: 100% bibir asli gambar Celyn yang tersenyum manis */}
-          {/* Saat bersuara: membuka-menutup proporsional (2px s/d 6px saja) */}
+          {/* Menggunakan persentase proporsional terhadap rasio wajah 3:4 */}
           {/* ============================================================= */}
           {isSpeaking && dynamicMouthAmount > 0.08 && (
             <div
@@ -373,8 +389,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
                 left: `${rigConfig.mouthPivotX}%`,
                 top: `${rigConfig.mouthPivotY}%`,
                 transform: `translate(-50%, -50%) scale(${rigConfig.mouthScale})`,
-                width: `${Math.round(24 + dynamicMouthAmount * 6)}px`,
-                height: `${Math.round(2 + dynamicMouthAmount * 5)}px`,
+                width: `${(5.5 + dynamicMouthAmount * 1.4) * rigConfig.mouthScale}%`,
+                height: `${(0.45 + dynamicMouthAmount * 0.9) * rigConfig.mouthScale}%`,
                 backgroundColor: "#4d161d",
                 borderRadius: "50% 50% 50% 50% / 30% 30% 70% 70%",
                 border: "1px solid #8e3e48",

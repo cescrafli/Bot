@@ -7,16 +7,19 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
-body {
+html, body {
   margin: 0;
   padding: 0;
-  background-color: #0b0f19;
+  background-color: #070a12;
   color: #f1f5f9;
   overflow: hidden;
   user-select: none;
-  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
+  overscroll-behavior: none;
 }
 
 /* Background mesh */
@@ -29,7 +32,7 @@ body {
 
 /* Glassmorphism panels */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(15, 23, 42, 0.78);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -37,30 +40,42 @@ body {
 }
 
 .glass-pill {
-  background: rgba(30, 41, 59, 0.8);
+  background: rgba(30, 41, 59, 0.85);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Avatar animations */
-@keyframes breathing {
-  0%, 100% {
-    transform: translateY(0px) scale(1);
-  }
-  50% {
-    transform: translateY(-8px) scale(1.008);
-  }
+/* Safe Area Insets Utilities for Mobile (iOS Notch, Dynamic Island, Home Indicator) */
+.safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
 }
 
-.avatar-breathe {
-  animation: breathing 4.5s ease-in-out infinite;
-  transform-origin: bottom center;
+.safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.safe-left {
+  padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+}
+
+.safe-right {
+  padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: rgba(15, 23, 42, 0.6);

@@ -40,8 +40,8 @@ export const ScreenPreview: React.FC<ScreenPreviewProps> = ({
 
   return (
     <div
-      className={`absolute top-6 right-6 z-30 transition-all duration-300 rounded-2xl glass-panel p-2.5 shadow-2xl border border-cyan-500/40 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${
-        isMinimized ? "w-64 h-12" : "w-80 h-52"
+      className={`absolute top-14 right-2.5 sm:top-6 sm:right-6 z-30 transition-all duration-300 rounded-2xl glass-panel p-2 sm:p-2.5 shadow-2xl border border-cyan-500/40 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${
+        isMinimized ? "w-44 sm:w-64 h-10 sm:h-12" : "w-48 h-32 sm:w-80 sm:h-52"
       }`}
     >
       {/* Header bar preview */}
