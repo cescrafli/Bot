@@ -15,16 +15,23 @@ interface AvatarVRM3DProps {
 export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
   emotion,
   mouthOpen,
+  isSpeaking,
   lookAt,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const vrmRef = useRef<VRM | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Inisialisasi Three.js Scene & Render loop
+  // Simpan props dinamis dalam ref agar loop 60 FPS dapat membaca nilai terbaru
+  // tanpa memicu re-inisialisasi WebGLRenderer dan Scene Three.js
+  const propsRef = useRef({ emotion, mouthOpen, isSpeaking, lookAt });
+  propsRef.current = { emotion, mouthOpen, isSpeaking, lookAt };
+
+  // Inisialisasi Three.js Scene & Render loop SEKALI saat mount
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -40,7 +47,7 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
 
@@ -65,6 +72,7 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
         scene.add(vrm.scene);
         vrmRef.current = vrm;
         setModelLoaded(true);
+        setLoadError(null);
       },
       undefined,
       () => {
@@ -80,22 +88,28 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
       animId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
+      const {
+        emotion: curEmotion,
+        mouthOpen: curMouthOpen,
+        lookAt: curLookAt,
+      } = propsRef.current;
+
       if (vrmRef.current) {
         vrmRef.current.update(delta);
 
-        // Update Lip-sync (viseme aa) & ekspresi
+        // Update Lip-sync (viseme aa) & ekspresi emosi
         if (vrmRef.current.expressionManager) {
-          vrmRef.current.expressionManager.setValue("aa", mouthOpen);
-          vrmRef.current.expressionManager.setValue("happy", emotion === "happy" ? 0.8 : 0);
-          vrmRef.current.expressionManager.setValue("surprised", emotion === "surprised" ? 0.8 : 0);
-          vrmRef.current.expressionManager.setValue("sad", emotion === "sad" ? 0.8 : 0);
+          vrmRef.current.expressionManager.setValue("aa", curMouthOpen);
+          vrmRef.current.expressionManager.setValue("happy", curEmotion === "happy" ? 0.8 : 0);
+          vrmRef.current.expressionManager.setValue("surprised", curEmotion === "surprised" ? 0.8 : 0);
+          vrmRef.current.expressionManager.setValue("sad", curEmotion === "sad" ? 0.8 : 0);
           vrmRef.current.expressionManager.update();
         }
 
         // Update LookAt tatapan mata / kepala
-        if (vrmRef.current.lookAt && lookAt) {
-          const targetX = (lookAt.x - 0.5) * 1.5;
-          const targetY = 1.4 - (lookAt.y - 0.5) * 0.8;
+        if (vrmRef.current.lookAt && curLookAt) {
+          const targetX = (curLookAt.x - 0.5) * 1.5;
+          const targetY = 1.4 - (curLookAt.y - 0.5) * 0.8;
           vrmRef.current.lookAt.lookAt(new THREE.Vector3(targetX, targetY, 2.0));
         }
       }
@@ -127,7 +141,7 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
         URL.revokeObjectURL(objectUrlRef.current);
       }
     };
-  }, [emotion, mouthOpen, lookAt]);
+  }, []); // Run sekali saat mount
 
   // Handle upload custom .vrm langsung dari browser
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -169,11 +183,34 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
         setLoadError("Format file .VRM tidak valid.");
       }
     );
+    // Reset file input agar pengguna bisa memilih kembali file yang sama
+    e.target.value = "";
   };
 
   return (
     <div className="relative w-full h-full flex items-center justify-center">
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* Hidden file input untuk upload .vrm */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".vrm"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {/* Tombol ganti model ketika model 3D sudah aktif */}
+      {modelLoaded && (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/60 hover:bg-slate-900/90 text-[11px] font-medium text-slate-300 border border-white/10 backdrop-blur-md transition-colors shadow-md"
+          title="Ganti Model 3D .VRM"
+        >
+          <Upload className="w-3 h-3 text-rose-400" />
+          <span>Ganti Model</span>
+        </button>
+      )}
 
       {!modelLoaded && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-900/80 backdrop-blur-md rounded-2xl m-4 border border-slate-700/60">
@@ -182,18 +219,15 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
             Mode 3D VRM Siap Digunakan
           </h3>
           <p className="text-xs text-slate-400 max-w-xs mb-4">
-            Simpan model avatar 3D Anda di <code className="text-rose-400">apps/web/public/avatars/celyn.vrm</code> atau unggah langsung file .vrm dari komputer Anda.
+            Simpan model avatar 3D Anda di <code className="text-rose-400">apps/web/public/avatars/celyn.vrm</code> atau unggah langsung file .vrm dari perangkat Anda.
           </p>
-          <label className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white cursor-pointer shadow-lg transition-colors">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white cursor-pointer shadow-lg transition-colors"
+          >
             <Upload className="w-4 h-4" />
             <span>Pilih File .VRM</span>
-            <input
-              type="file"
-              accept=".vrm"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-          </label>
+          </button>
         </div>
       )}
     </div>

@@ -37,6 +37,23 @@ export function useGeminiLive({
 
   const wsRef = useRef<WebSocket | null>(null);
   const directSessionRef = useRef<any>(null);
+  const pendingQueueRef = useRef<ClientMessage[]>([]);
+  const statusRef = useRef(status);
+  const sendMessageRef = useRef<(msg: ClientMessage) => Promise<void> | void>(() => {});
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  const flushPendingQueue = useCallback(() => {
+    if (pendingQueueRef.current.length === 0) return;
+    const queue = [...pendingQueueRef.current];
+    pendingQueueRef.current = [];
+    console.log(`📦 Mengirim ${queue.length} antrean paket pre-connect...`);
+    for (const msg of queue) {
+      sendMessageRef.current(msg);
+    }
+  }, []);
 
   const handleServerMessage = useCallback(
     (msg: ServerMessage) => {
@@ -304,6 +321,7 @@ export function useGeminiLive({
       setIsConnected(true);
       setStatus("listening");
       setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
+      flushPendingQueue();
 
       // Kirim sapaan otomatis Celyn saat pertama kali terhubung
       setTimeout(async () => {
@@ -380,6 +398,7 @@ export function useGeminiLive({
       setIsConnected(true);
       setStatus("listening");
       setStatusMessage("Terhubung! Celyn sedang mendengarkan...");
+      flushPendingQueue();
     };
 
     ws.onmessage = (event) => {
@@ -411,9 +430,10 @@ export function useGeminiLive({
         setStatusMessage("Koneksi terputus.");
       }
     };
-  }, [handleServerMessage, connectViaServerlessToken]);
+  }, [handleServerMessage, connectViaServerlessToken, flushPendingQueue]);
 
   const disconnect = useCallback(() => {
+    pendingQueueRef.current = [];
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -438,32 +458,50 @@ export function useGeminiLive({
 
     // 2. Jika terhubung via Direct Gemini Live Session (Vercel Serverless Mode)
     const session = directSessionRef.current;
-    if (!session) return;
-
-    try {
-      if (msg.type === "audio") {
-        await session.sendRealtimeInput({
-          audio: {
-            mimeType: "audio/pcm;rate=16000",
-            data: msg.data,
-          },
-        });
-      } else if (msg.type === "screen") {
-        await session.sendRealtimeInput({
-          video: {
-            mimeType: "image/jpeg",
-            data: msg.data,
-          },
-        });
-      } else if (msg.type === "text") {
-        await session.sendClientContent({
-          turns: [{ role: "user", parts: [{ text: msg.text }] }],
-          turnComplete: true,
-        });
+    if (session) {
+      try {
+        if (msg.type === "audio") {
+          await session.sendRealtimeInput({
+            audio: {
+              mimeType: "audio/pcm;rate=16000",
+              data: msg.data,
+            },
+          });
+        } else if (msg.type === "screen") {
+          await session.sendRealtimeInput({
+            video: {
+              mimeType: "image/jpeg",
+              data: msg.data,
+            },
+          });
+        } else if (msg.type === "text") {
+          await session.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: msg.text }] }],
+            turnComplete: true,
+          });
+        }
+      } catch (err) {
+        console.error("Gagal mengirim pesan ke sesi Gemini:", err);
       }
-    } catch (err) {
-      console.error("Gagal mengirim pesan ke sesi Gemini:", err);
+      return;
     }
+
+    // 3. Jika status masih connecting, simpan ke antrean sementara (ring buffer maks 25 pesan)
+    if (statusRef.current === "connecting") {
+      pendingQueueRef.current.push(msg);
+      if (pendingQueueRef.current.length > 25) {
+        pendingQueueRef.current.shift();
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
+
+  const onBargeIn = useCallback(() => {
+    setStatus("listening");
+    setStatusMessage("Celyn sedang mendengarkan ucapanmu...");
   }, []);
 
   const sendAudio = useCallback(
@@ -520,5 +558,6 @@ export function useGeminiLive({
     sendScreen,
     sendText,
     clearTranscripts,
+    onBargeIn,
   };
 }

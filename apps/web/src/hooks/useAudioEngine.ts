@@ -3,11 +3,13 @@ import { useState, useRef, useCallback, useEffect } from "react";
 interface UseAudioEngineOptions {
   onAudioChunk: (b64PCM16k: string) => void;
   onVolumeChange?: (rms: number) => void;
+  onBargeIn?: () => void;
 }
 
 export function useAudioEngine({
   onAudioChunk,
   onVolumeChange,
+  onBargeIn,
 }: UseAudioEngineOptions) {
   const [isMicActive, setIsMicActive] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -23,6 +25,11 @@ export function useAudioEngine({
   useEffect(() => {
     onAudioChunkRef.current = onAudioChunk;
   }, [onAudioChunk]);
+
+  const onBargeInRef = useRef(onBargeIn);
+  useEffect(() => {
+    onBargeInRef.current = onBargeIn;
+  }, [onBargeIn]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const workletLoadedRef = useRef<boolean>(false);
@@ -253,6 +260,7 @@ export function useAudioEngine({
               console.log("⚡ [Smart Barge-In] Interupsi suara pengguna terdeteksi!");
               stopPlayback();
               bargeInStreakRef.current = 0;
+              onBargeInRef.current?.();
               const b64 = int16ToBase64(pcm16k);
               onAudioChunkRef.current?.(b64);
             }

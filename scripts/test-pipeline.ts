@@ -1,7 +1,8 @@
 /**
  * Unit & Integration Smoke Test Suite untuk Celyn AI BOT
- * Menguji pipeline audio, visual change-detection, dan tool-calling schema.
+ * Menguji pipeline audio, visual change-detection, tool-calling schema, dan emosi.
  */
+import { normalizeEmotion } from "@celyn/shared";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
 
@@ -99,7 +100,16 @@ assert(tools.length === 2, "Tepat 2 tool AI terdaftar untuk Celyn");
 assert(tools[0].name === "set_expression", "Tool 'set_expression' tersedia");
 assert(tools[1].name === "point_at_screen", "Tool 'point_at_screen' tersedia");
 
-// 4. Ringkasan
+// 4. Uji Normalisasi & Pemetaan Sinonim Emosi Avatar
+console.log("\n--- 4. Uji Normalisasi Emosi Avatar ---");
+assert(normalizeEmotion("happy") === "happy", "Pemetaan 'happy' -> 'happy'");
+assert(normalizeEmotion("senang") === "happy", "Pemetaan sinonim bahasa Indonesia 'senang' -> 'happy'");
+assert(normalizeEmotion("mikir") === "thinking", "Pemetaan sinonim bahasa Indonesia 'mikir' -> 'thinking'");
+assert(normalizeEmotion("kaget") === "surprised", "Pemetaan sinonim bahasa Indonesia 'kaget' -> 'surprised'");
+assert(normalizeEmotion("sedih") === "sad", "Pemetaan sinonim bahasa Indonesia 'sedih' -> 'sad'");
+assert(normalizeEmotion("unknown_random_string") === "neutral", "Fallback emosi yang tidak dikenal -> 'neutral'");
+
+// 5. Ringkasan
 console.log("\n=======================================================");
 console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
 console.log("=======================================================\n");

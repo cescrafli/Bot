@@ -29,6 +29,9 @@ export function App() {
     onAudioChunk: (b64PCM16k) => {
       live.sendAudio(b64PCM16k);
     },
+    onBargeIn: () => {
+      live.onBargeIn();
+    },
   });
 
   // Hook Gemini Live WebSocket
@@ -224,6 +227,7 @@ export function App() {
         {screenCapture.isSharing && (
           <ScreenPreview
             videoElement={screenCapture.videoElement}
+            captureMode={screenCapture.captureMode}
             lookAt={live.lookAt}
             stats={screenCapture.stats}
             isPaused={screenCapture.isPaused}

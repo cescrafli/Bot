@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Monitor, X, Crosshair, Pause, Play, Sparkles, Minimize2, Maximize2 } from "lucide-react";
+import { Monitor, Camera, X, Crosshair, Pause, Play, Sparkles, Minimize2, Maximize2 } from "lucide-react";
 import { LookAtTarget } from "@celyn/shared";
 import { ScreenCaptureStats } from "../../hooks/useScreenCapture";
 
 interface ScreenPreviewProps {
   videoElement: HTMLVideoElement | null;
+  captureMode?: "screen" | "camera" | null;
   lookAt: LookAtTarget | null;
   stats?: ScreenCaptureStats;
   isPaused?: boolean;
@@ -14,6 +15,7 @@ interface ScreenPreviewProps {
 
 export const ScreenPreview: React.FC<ScreenPreviewProps> = ({
   videoElement,
+  captureMode = "screen",
   lookAt,
   stats,
   isPaused,
@@ -47,12 +49,18 @@ export const ScreenPreview: React.FC<ScreenPreviewProps> = ({
       {/* Header bar preview */}
       <div className="flex items-center justify-between px-1.5 pb-2 text-xs font-semibold text-slate-300">
         <div className="flex items-center gap-2 text-cyan-400">
-          <Monitor className="w-4 h-4 animate-pulse" />
-          <span className="font-bold tracking-wide">Screen Share</span>
+          {captureMode === "camera" ? (
+            <Camera className="w-4 h-4 animate-pulse text-rose-400" />
+          ) : (
+            <Monitor className="w-4 h-4 animate-pulse" />
+          )}
+          <span className="font-bold tracking-wide">
+            {captureMode === "camera" ? "Kamera HP" : "Screen Share"}
+          </span>
           {stats && stats.savingsPercentage > 0 && (
             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               <Sparkles className="w-2.5 h-2.5" />
-              <span>{stats.savingsPercentage}% Hemat Token</span>
+              <span>{stats.savingsPercentage}% Hemat</span>
             </span>
           )}
         </div>

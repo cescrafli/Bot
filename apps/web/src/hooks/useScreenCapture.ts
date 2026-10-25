@@ -15,6 +15,8 @@ export interface ScreenCaptureStats {
 export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) {
   const [isSharing, setIsSharing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [captureMode, setCaptureMode] = useState<"screen" | "camera" | null>(null);
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<ScreenCaptureStats>({
     framesCaptured: 0,
@@ -53,6 +55,8 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
       videoRef.current.srcObject = null;
       videoRef.current = null;
     }
+    setVideoElement(null);
+    setCaptureMode(null);
     prevThumbRef.current = null;
     setIsSharing(false);
     setIsPaused(false);
@@ -150,23 +154,61 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
       setError(null);
       countersRef.current = { captured: 0, sent: 0, skipped: 0 };
 
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: "browser",
-        },
-        audio: false,
-      });
+      let stream: MediaStream | null = null;
+      let activeMode: "screen" | "camera" = "screen";
+
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+      // Cek ketersediaan getDisplayMedia (Desktop)
+      if (typeof navigator.mediaDevices?.getDisplayMedia === "function" && !isMobile) {
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              displaySurface: "browser",
+            },
+            audio: false,
+          });
+          activeMode = "screen";
+        } catch (displayErr: any) {
+          // Jika pengguna menolak di desktop, lempar error
+          if (displayErr.name === "NotAllowedError") {
+            throw displayErr;
+          }
+          console.warn("getDisplayMedia gagal, mencoba fallback kamera:", displayErr);
+        }
+      }
+
+      // Fallback Kamera HP (Mobile) atau bila getDisplayMedia tidak tersedia
+      if (!stream) {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Perangkat ini tidak mendukung video capture / kamera.");
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" }, // Kamera belakang HP
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+        activeMode = "camera";
+      }
 
       streamRef.current = stream;
+      setCaptureMode(activeMode);
 
       const video = document.createElement("video");
       video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
       await video.play();
       videoRef.current = video;
+      setVideoElement(video);
 
-      // Event saat pengguna menekan "Stop sharing" bawaan browser
+      // Event saat stream berhenti (misal pengguna menekan stop di notifikasi OS)
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.onended = () => {
@@ -183,17 +225,24 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
       // Mulai timer 1 FPS
       intervalRef.current = window.setInterval(captureFrame, 1000 / fps);
     } catch (err: any) {
-      console.warn("Screen share dibatalkan atau ditolak:", err);
+      console.warn("Screen/Camera capture dibatalkan atau ditolak:", err);
       if (err.name !== "NotAllowedError") {
-        setError(err.message || "Gagal memulai screen share");
+        setError(err.message || "Gagal memulai vision share");
       }
       stopScreenShare();
     }
   }, [fps, captureFrame, stopScreenShare]);
 
   const togglePause = useCallback(() => {
-    setIsPaused((prev) => !prev);
-  }, []);
+    setIsPaused((prev) => {
+      const next = !prev;
+      if (!next) {
+        // Unpausing: trigger captureFrame segera
+        setTimeout(captureFrame, 50);
+      }
+      return next;
+    });
+  }, [captureFrame]);
 
   useEffect(() => {
     return () => {
@@ -204,11 +253,12 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
   return {
     isSharing,
     isPaused,
+    captureMode,
     error,
     stats,
     startScreenShare,
     stopScreenShare,
     togglePause,
-    videoElement: videoRef.current,
+    videoElement,
   };
 }

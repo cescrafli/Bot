@@ -1,6 +1,7 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
+import path from "node:path";
 dotenv.config();
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -79,7 +80,7 @@ async function generateGreetingAudio() {
   wavHeader.writeUInt32LE(totalDataLen, 40);
 
   const finalWav = Buffer.concat([wavHeader, fullPcm]);
-  const outPath = "c:/laragon/www/Celyn_AI_BOT/apps/web/public/celyn_test_greeting.wav";
+  const outPath = path.resolve(process.cwd(), "apps/web/public/celyn_test_greeting.wav");
   fs.writeFileSync(outPath, finalWav);
   console.log("✅ Successfully saved test WAV to:", outPath, "File size:", finalWav.length);
 }
