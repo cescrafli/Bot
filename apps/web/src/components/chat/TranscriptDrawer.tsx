@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import { X, Trash2, Download, MessageSquare } from "lucide-react";
 
 interface TranscriptItem {
@@ -20,6 +20,14 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
   onClose,
   onClear,
 }) => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [transcripts, isOpen]);
+
   if (!isOpen) return null;
 
   const handleExport = () => {
@@ -101,6 +109,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
             </div>
           ))
         )}
+        <div ref={messagesEndRef} />
       </div>
     </div>
   );

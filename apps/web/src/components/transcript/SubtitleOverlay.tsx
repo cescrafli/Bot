@@ -4,14 +4,25 @@ import { MessageSquare } from "lucide-react";
 interface SubtitleOverlayProps {
   transcripts: Array<{ speaker: "user" | "celyn"; text: string; time: string }>;
   statusMessage: string;
+  status?: "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 }
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   transcripts,
   statusMessage,
+  status = "idle",
 }) => {
   const latestTranscript =
     transcripts.length > 0 ? transcripts[transcripts.length - 1] : null;
+
+  const dotColorClass =
+    status === "listening" || status === "speaking"
+      ? "bg-emerald-400 animate-pulse"
+      : status === "connecting" || status === "thinking"
+      ? "bg-amber-400 animate-ping"
+      : status === "error"
+      ? "bg-rose-500"
+      : "bg-slate-500";
 
   return (
     <div className="w-full max-w-xl mx-auto flex flex-col items-center gap-2 pointer-events-none">
@@ -36,7 +47,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
 
       {/* Status Bar Kecil */}
       <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/60 border border-white/5 text-[11px] text-slate-400">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColorClass}`} />
         <span>{statusMessage}</span>
       </div>
     </div>

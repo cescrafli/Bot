@@ -36,6 +36,7 @@ export function useAudioEngine({
   const nextPlayTimeRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const lastVolumeRef = useRef<number>(0);
 
   // Inisialisasi AudioContext (menggunakan sample rate native perangkat keras sistem)
   const getOrCreateAudioContext = useCallback(() => {
@@ -58,10 +59,22 @@ export function useAudioEngine({
   }, []);
 
   // Animasi loop untuk membaca volume RMS dari AnalyserNode (untuk Lip-Sync)
+  // Dilengkapi Deadband Filter untuk mencegah 60 FPS re-render berlebihan saat hening
   useEffect(() => {
     const dataArray = new Uint8Array(128);
 
     const updateVolume = () => {
+      // Saat tidak memutar suara Celyn, kunci volume ke 0 tanpa trigger re-render
+      if (!isPlayingRef.current) {
+        if (lastVolumeRef.current !== 0) {
+          lastVolumeRef.current = 0;
+          setVolume(0);
+          onVolumeChange?.(0);
+        }
+        animFrameRef.current = requestAnimationFrame(updateVolume);
+        return;
+      }
+
       if (analyserRef.current) {
         analyserRef.current.getByteTimeDomainData(dataArray);
         let sum = 0;
@@ -70,9 +83,19 @@ export function useAudioEngine({
           sum += norm * norm;
         }
         const rms = Math.sqrt(sum / dataArray.length);
-        const normalized = Math.min(1, rms * 4.5);
-        setVolume((prev) => prev * 0.4 + normalized * 0.6);
-        onVolumeChange?.(normalized);
+        const rawNormalized = Math.min(1, rms * 4.5);
+        const filtered = rawNormalized < 0.02 ? 0 : rawNormalized;
+        const smoothed = lastVolumeRef.current * 0.35 + filtered * 0.65;
+
+        // Deadband Filter: hanya panggil setVolume jika perubahan > 0.012 atau turun ke 0
+        if (
+          Math.abs(smoothed - lastVolumeRef.current) > 0.012 ||
+          (smoothed === 0 && lastVolumeRef.current > 0)
+        ) {
+          lastVolumeRef.current = smoothed;
+          setVolume(smoothed);
+          onVolumeChange?.(smoothed);
+        }
       }
       animFrameRef.current = requestAnimationFrame(updateVolume);
     };
@@ -322,6 +345,20 @@ export function useAudioEngine({
       isPlayingRef.current = false;
     }
   }, [getOrCreateAudioContext, stopPlayback]);
+
+  // Pembersihan resource audio saat hook di-unmount
+  useEffect(() => {
+    return () => {
+      stopPlayback();
+      stopMic();
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        try {
+          audioCtxRef.current.close();
+        } catch {}
+        audioCtxRef.current = null;
+      }
+    };
+  }, [stopPlayback, stopMic]);
 
   return {
     isMicActive,

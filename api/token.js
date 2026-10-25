@@ -1,5 +1,24 @@
 import { GoogleGenAI } from "@google/genai";
 
+// In-memory IP rate limiter sederhana (maks 15 token / menit per IP pada warm instance)
+const rateLimitMap = new Map();
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const maxRequests = 15;
+
+  const record = rateLimitMap.get(ip) || { count: 0, resetTime: now + windowMs };
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + windowMs;
+  } else {
+    record.count++;
+  }
+  rateLimitMap.set(ip, record);
+  return record.count > maxRequests;
+}
+
 /**
  * Vercel Serverless Function: GET /api/token
  * Membuat Ephemeral Auth Token berumur pendek (30 menit) untuk koneksi
@@ -9,9 +28,26 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
+  }
+
+  if (req.method !== "GET" && req.method !== "POST") {
+    return res.status(405).json({ error: "Method Not Allowed. Gunakan GET atau POST." });
+  }
+
+  const clientIp =
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.headers["x-real-ip"] ||
+    req.socket?.remoteAddress ||
+    "unknown";
+
+  if (isRateLimited(clientIp)) {
+    return res.status(429).json({
+      error: "Terlalu banyak permintaan token. Harap tunggu sebentar sebelum menyambungkan ulang.",
+    });
   }
 
   const apiKey = process.env.GEMINI_API_KEY || "";

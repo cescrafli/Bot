@@ -54,24 +54,32 @@ Buka file `.env` di root project, lalu masukkan API Key Anda:
 ```env
 GEMINI_API_KEY=AIzaSy...your_gemini_api_key_here
 PORT=3001
-GEMINI_MODEL=gemini-2.0-flash-exp
+GEMINI_MODEL=gemini-3.8-live
 GEMINI_VOICE=Aoede
 ```
 
-### 4. Jalankan Aplikasi
+### 4. Jalankan Aplikasi Lokal (1 Perintah)
 
-**Jalankan Backend Server:**
+Cukup jalankan satu perintah di root terminal:
 ```bash
-npm run dev:server
+npm run dev
 ```
-*Server aktif di `http://localhost:3001` (WebSocket: `ws://localhost:3001`)*
+Perintah ini akan menjalankan **Backend Server** (`http://localhost:3001`) dan **Frontend Web** (`http://localhost:5173`) secara serentak. Buka browser di:
+👉 **`http://localhost:5173`**
 
-**Jalankan Frontend Web:**
-Buka terminal baru:
-```bash
-npm run dev:web
-```
-*Buka browser di: `http://localhost:5173`*
+---
+
+## ☁️ Panduan Deployment ke Vercel (Zero External Server)
+
+Aplikasi ini mendukung arsitektur **Hybrid Vercel Serverless + Ephemeral Auth Tokens**, sehingga Anda dapat mendeploy seluruh aplikasi ke Vercel tanpa perlu menyewa server WebSocket/VPS eksternal!
+
+1. Buka [https://vercel.com/new](https://vercel.com/new) dan import repositori ini dari GitHub.
+2. Di bagian **Root Directory**, pilih **`Bot (root)`** (bukan `apps/web`).
+3. Tambahkan **Environment Variables** di Vercel:
+   - `GEMINI_API_KEY`: *(API Key Gemini Anda dari Google AI Studio)*
+   - `GEMINI_MODEL`: `gemini-3.8-live`
+   - `GEMINI_VOICE`: `Aoede`
+4. Klik **Deploy**! Vercel akan otomatis menyajikan frontend Vite dan fungsi Serverless `/api/token` yang mencetak Ephemeral Token sekali pakai untuk koneksi langsung yang aman.
 
 ---
 

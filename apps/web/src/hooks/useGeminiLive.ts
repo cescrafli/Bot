@@ -28,6 +28,7 @@ export function useGeminiLive({
     model: "gemini-3.8-live",
     voice: "Aoede",
   });
+  const [connectionLabel, setConnectionLabel] = useState<string>("ws://localhost:3001");
   const [emotion, setEmotion] = useState<EmotionType>("neutral");
   const [lookAt, setLookAt] = useState<LookAtTarget | null>(null);
   const [transcripts, setTranscripts] = useState<
@@ -122,6 +123,7 @@ export function useGeminiLive({
       const activeModel = data.model || "gemini-3.8-live";
       const activeVoice = data.voice || "Aoede";
       setModelInfo({ model: activeModel, voice: activeVoice });
+      setConnectionLabel("Vercel Live Direct");
       setStatusMessage("Menghubungkan ke Gemini Live API...");
 
       const ai = new GoogleGenAI({
@@ -359,8 +361,22 @@ export function useGeminiLive({
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
+    // Timeout cepat 2.5 detik untuk fallback ke Serverless jika server lokal tidak merespons
+    const wsTimeout = window.setTimeout(() => {
+      if (!opened && wsRef.current === ws) {
+        console.warn("⏱️ WebSocket local timeout (2.5s), beralih otomatis ke Serverless Ephemeral Token...");
+        try {
+          ws.close();
+        } catch {}
+        wsRef.current = null;
+        connectViaServerlessToken();
+      }
+    }, 2500);
+
     ws.onopen = () => {
+      clearTimeout(wsTimeout);
       opened = true;
+      setConnectionLabel(wsUrl);
       setIsConnected(true);
       setStatus("listening");
       setStatusMessage("Terhubung! Celyn sedang mendengarkan...");
@@ -376,6 +392,7 @@ export function useGeminiLive({
     };
 
     ws.onerror = (err) => {
+      clearTimeout(wsTimeout);
       console.warn("WebSocket error, memeriksa fallback Serverless...", err);
       if (!opened) {
         wsRef.current = null;
@@ -387,6 +404,7 @@ export function useGeminiLive({
     };
 
     ws.onclose = () => {
+      clearTimeout(wsTimeout);
       if (opened) {
         setIsConnected(false);
         setStatus("idle");
@@ -492,6 +510,7 @@ export function useGeminiLive({
     status,
     statusMessage,
     modelInfo,
+    connectionLabel,
     emotion,
     lookAt,
     transcripts,

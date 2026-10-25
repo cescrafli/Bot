@@ -1,6 +1,5 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, Suspense, lazy } from "react";
 import { AvatarCanvas2D } from "./components/avatar/AvatarCanvas2D";
-import { AvatarVRM3D } from "./components/avatar/AvatarVRM3D";
 import { ControlBar } from "./components/controls/ControlBar";
 import { ScreenPreview } from "./components/screen/ScreenPreview";
 import { SubtitleOverlay } from "./components/transcript/SubtitleOverlay";
@@ -9,7 +8,14 @@ import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
-import { Bot, Activity, Wifi, Shield, Send } from "lucide-react";
+import { Bot, Activity, Wifi, Shield, Send, Box } from "lucide-react";
+
+// Lazy-load Avatar 3D VRM agar initial bundle load ringan di Vercel
+const AvatarVRM3D = lazy(() =>
+  import("./components/avatar/AvatarVRM3D").then((m) => ({
+    default: m.AvatarVRM3D,
+  }))
+);
 
 export function App() {
   const [avatarMode, setAvatarMode] = useState<"2d" | "3d">("2d");
@@ -182,7 +188,7 @@ export function App() {
 
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-pill text-xs text-slate-400 border border-white/10">
             <Wifi className={`w-3.5 h-3.5 ${live.isConnected ? "text-emerald-400" : "text-slate-600"}`} />
-            <span>ws://localhost:3001</span>
+            <span>{live.isConnected ? live.connectionLabel : "Offline"}</span>
           </div>
         </div>
       </header>
@@ -197,12 +203,21 @@ export function App() {
             lookAt={live.lookAt}
           />
         ) : (
-          <AvatarVRM3D
-            emotion={live.emotion}
-            mouthOpen={audioEngine.volume}
-            isSpeaking={audioEngine.isPlaying || live.status === "speaking"}
-            lookAt={live.lookAt}
-          />
+          <Suspense
+            fallback={
+              <div className="flex flex-col items-center justify-center gap-2.5 text-cyan-300 text-xs animate-pulse p-8 rounded-2xl glass-panel border border-cyan-500/20">
+                <Box className="w-8 h-8 animate-spin" />
+                <span>Memuat Engine 3D VRM...</span>
+              </div>
+            }
+          >
+            <AvatarVRM3D
+              emotion={live.emotion}
+              mouthOpen={audioEngine.volume}
+              isSpeaking={audioEngine.isPlaying || live.status === "speaking"}
+              lookAt={live.lookAt}
+            />
+          </Suspense>
         )}
 
         {/* Floating Screen Preview jika sedang sharing */}
@@ -223,6 +238,7 @@ export function App() {
         <SubtitleOverlay
           transcripts={live.transcripts}
           statusMessage={live.statusMessage}
+          status={live.status}
         />
 
         {/* Quick Text Input Form */}

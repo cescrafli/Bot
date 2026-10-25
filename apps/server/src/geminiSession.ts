@@ -1,7 +1,13 @@
 import { WebSocket } from "ws";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { config } from "./config.js";
-import { ClientMessage, ServerMessage, normalizeEmotion } from "@celyn/shared";
+import {
+  ClientMessage,
+  ServerMessage,
+  normalizeEmotion,
+  CELYN_SYSTEM_PROMPT,
+  CELYN_GREETING_PROMPT,
+} from "@celyn/shared";
 
 export type SessionState = "DISCONNECTED" | "CONNECTING" | "ACTIVE" | "CLOSING" | "CLOSED";
 
@@ -58,18 +64,7 @@ export class GeminiSession {
           systemInstruction: {
             parts: [
               {
-                text: `Nama kamu adalah Celyn, asisten AI pribadi berwujud avatar visual perempuan muda yang pintar, ramah, hangat, dan ekspresif.
-Kamu berbicara dalam Bahasa Indonesia yang santai, luwes, natural, dan bersahabat (seperti teman mengobrol yang asik, gunakan kata sapaan wajar seperti 'kamu', 'aku', 'wah', 'oke', 'sip'). Jangan gunakan bahasa yang kaku seperti surat resmi pemerintah.
-
-FITUR & TANGGUNG JAWAB:
-1. Suara Real-time: Kamu mendengar ucapan pengguna lewat mikrofon atau teks dan langsung menjawabnya dengan suara.
-2. Penglihatan Layar (Screen Share): Jika pengguna membagikan layar komputernya, kamu bisa melihat apa yang ada di layar (kode pemrograman, peramban web, desain, teks dokumen, error terminal, dsb.).
-3. Bantu pengguna memecahkan masalah coding, menerjemahkan teks di layar, atau mendiskusikan konten visual yang sedang mereka buka.
-
-ATURAN WAJIB PERCAKAPAN:
-- Selalu prioritaskan menjawab LANGSUNG dengan SUARA audio yang ramah, santai, dan ringkas (1 sampai 2 kalimat pendek). Pengguna mengobrol real-time dan ingin respon cepat.
-- Kamu boleh memanggil tool \`set_expression\` (pilihan: happy, thinking, surprised, neutral, sad) paling banyak SATU KALI per giliran jika ada transisi emosi yang cocok, tapi JANGAN PERNAH memanggilnya berulang-ulang tanpa suara.
-- Panggil tool \`point_at_screen\` dengan koordinat x, y (0.0 sampai 1.0) hanya jika pengguna menanyakan lokasi suatu elemen tertentu di layar.`,
+                text: CELYN_SYSTEM_PROMPT,
               },
             ],
           },
@@ -167,7 +162,7 @@ ATURAN WAJIB PERCAKAPAN:
                   role: "user",
                   parts: [
                     {
-                      text: "Sapa pengguna dengan ramah, hangat, dan ceria dalam 1 kalimat pendek sapaan pembuka (contoh: 'Halo! Aku Celyn, senang bisa mengobrol denganmu! Ada yang bisa kubantu hari ini?').",
+                      text: CELYN_GREETING_PROMPT,
                     },
                   ],
                 },

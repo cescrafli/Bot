@@ -85,9 +85,11 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     const startTime = performance.now();
 
     const loop = (now: number) => {
-      const t = (now - startTime) / 1000;
-      setBreath(Math.sin(t * rigConfig.breathSpeed));
-      setTick(now);
+      if (document.visibilityState !== "hidden") {
+        const t = (now - startTime) / 1000;
+        setBreath(Math.sin(t * rigConfig.breathSpeed));
+        setTick(now);
+      }
       animId = requestAnimationFrame(loop);
     };
 
@@ -368,9 +370,9 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             <div
               className="absolute z-30 flex flex-col items-center justify-between overflow-hidden shadow-sm transition-all duration-75 pointer-events-none"
               style={{
-                left: "52.1%",
-                top: "33.1%",
-                transform: "translate(-50%, -50%)",
+                left: `${rigConfig.mouthPivotX}%`,
+                top: `${rigConfig.mouthPivotY}%`,
+                transform: `translate(-50%, -50%) scale(${rigConfig.mouthScale})`,
                 width: `${Math.round(24 + dynamicMouthAmount * 6)}px`,
                 height: `${Math.round(2 + dynamicMouthAmount * 5)}px`,
                 backgroundColor: "#4d161d",
@@ -417,7 +419,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
               {/* Mulut */}
               <div
                 className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: "52.1%", top: "33.1%" }}
+                style={{ left: `${rigConfig.mouthPivotX}%`, top: `${rigConfig.mouthPivotY}%` }}
                 title="Mulut"
               >
                 M

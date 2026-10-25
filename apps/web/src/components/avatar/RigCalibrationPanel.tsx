@@ -6,12 +6,10 @@ export interface RigConfig {
   armPivotLY: number;
   armPivotRX: number;
   armPivotRY: number;
-  hairPivotLX: number;
-  hairPivotLY: number;
-  hairPivotRX: number;
-  hairPivotRY: number;
+  mouthPivotX: number;
+  mouthPivotY: number;
+  mouthScale: number;
   armMaxRot: number;
-  hairMaxRot: number;
   breathIntensity: number;
   breathSpeed: number;
   showPivots: boolean;
@@ -22,12 +20,10 @@ export const DEFAULT_RIG_CONFIG: RigConfig = {
   armPivotLY: 45.1,
   armPivotRX: 71.7,
   armPivotRY: 44.7,
-  hairPivotLX: 38.0,
-  hairPivotLY: 23.0,
-  hairPivotRX: 62.0,
-  hairPivotRY: 23.0,
+  mouthPivotX: 52.1,
+  mouthPivotY: 33.1,
+  mouthScale: 1.0,
   armMaxRot: 3.5,
-  hairMaxRot: 3.2,
   breathIntensity: 3.5,
   breathSpeed: 1.6,
   showPivots: false,
@@ -168,35 +164,35 @@ export const RigCalibrationPanel: React.FC<RigCalibrationPanelProps> = ({
         </div>
       </div>
 
-      {/* Bagian Rambut */}
+      {/* Bagian Mulut & Lip-Sync */}
       <div className="space-y-3 mb-4 pt-2 border-t border-white/10">
         <div className="text-[11px] font-bold text-pink-300 uppercase tracking-wider">
-          Akar Helai Rambut
+          Posisi Mulut & Lip-Sync
         </div>
         <div>
           <div className="flex justify-between mb-1">
-            <span>Rambut Kiri (X, Y)</span>
+            <span>Koordinat Mulut (X, Y)</span>
             <span className="text-slate-400">
-              {config.hairPivotLX.toFixed(1)}%, {config.hairPivotLY.toFixed(1)}%
+              {config.mouthPivotX.toFixed(1)}%, {config.mouthPivotY.toFixed(1)}%
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <input
               type="range"
-              min="20"
-              max="50"
-              step="0.2"
-              value={config.hairPivotLX}
-              onChange={(e) => update("hairPivotLX", parseFloat(e.target.value))}
+              min="40"
+              max="65"
+              step="0.1"
+              value={config.mouthPivotX}
+              onChange={(e) => update("mouthPivotX", parseFloat(e.target.value))}
               className="w-full accent-pink-500"
             />
             <input
               type="range"
-              min="10"
-              max="40"
-              step="0.2"
-              value={config.hairPivotLY}
-              onChange={(e) => update("hairPivotLY", parseFloat(e.target.value))}
+              min="25"
+              max="45"
+              step="0.1"
+              value={config.mouthPivotY}
+              onChange={(e) => update("mouthPivotY", parseFloat(e.target.value))}
               className="w-full accent-pink-500"
             />
           </div>
@@ -204,45 +200,16 @@ export const RigCalibrationPanel: React.FC<RigCalibrationPanelProps> = ({
 
         <div>
           <div className="flex justify-between mb-1">
-            <span>Rambut Kanan (X, Y)</span>
-            <span className="text-slate-400">
-              {config.hairPivotRX.toFixed(1)}%, {config.hairPivotRY.toFixed(1)}%
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="range"
-              min="50"
-              max="80"
-              step="0.2"
-              value={config.hairPivotRX}
-              onChange={(e) => update("hairPivotRX", parseFloat(e.target.value))}
-              className="w-full accent-pink-500"
-            />
-            <input
-              type="range"
-              min="10"
-              max="40"
-              step="0.2"
-              value={config.hairPivotRY}
-              onChange={(e) => update("hairPivotRY", parseFloat(e.target.value))}
-              className="w-full accent-pink-500"
-            />
-          </div>
-        </div>
-
-        <div>
-          <div className="flex justify-between mb-1">
-            <span>Maks Ayunan Inersia Rambut</span>
-            <span className="text-slate-400">{config.hairMaxRot.toFixed(1)}°</span>
+            <span>Skala Ukuran Bukaan Mulut</span>
+            <span className="text-slate-400">{config.mouthScale.toFixed(2)}x</span>
           </div>
           <input
             type="range"
-            min="0"
-            max="8"
-            step="0.2"
-            value={config.hairMaxRot}
-            onChange={(e) => update("hairMaxRot", parseFloat(e.target.value))}
+            min="0.5"
+            max="2.0"
+            step="0.05"
+            value={config.mouthScale}
+            onChange={(e) => update("mouthScale", parseFloat(e.target.value))}
             className="w-full accent-pink-500"
           />
         </div>
