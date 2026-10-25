@@ -2,11 +2,15 @@
   "name": "celyn-ai-bot",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "AI Chatbot dengan Avatar Bergerak (2D & 3D VRM) + Live Screen Share + Gemini Live API",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
+  "dependencies": {
+    "@google/genai": "^2.31.0"
+  },
   "scripts": {
     "dev:server": "npm --workspace=apps/server run dev",
     "dev:web": "npm --workspace=apps/web run dev",

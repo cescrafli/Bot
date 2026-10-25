@@ -1,5 +1,6 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
+import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { ClientMessage } from "@celyn/shared";
@@ -55,6 +56,41 @@ const server = http.createServer((req, res) => {
         geminiVoice: config.geminiVoice,
       })
     );
+    return;
+  }
+
+  // Ephemeral Token endpoint (kompatibel dengan mode Vercel Serverless)
+  if (req.url === "/api/token") {
+    if (!config.geminiApiKey) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diisi di .env" }));
+      return;
+    }
+
+    (async () => {
+      try {
+        const ai = new GoogleGenAI({
+          apiKey: config.geminiApiKey,
+          httpOptions: { apiVersion: "v1alpha" },
+        });
+        const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        const tokenResource = await ai.authTokens.create({
+          config: { uses: 5, expireTime },
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            token: tokenResource.name,
+            model: config.geminiModel,
+            voice: config.geminiVoice,
+            expireTime,
+          })
+        );
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message || "Gagal membuat token" }));
+      }
+    })();
     return;
   }
 

@@ -1,9 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { GoogleGenAI, Modality, Type } from "@google/genai";
 import {
   ClientMessage,
   ServerMessage,
   EmotionType,
   LookAtTarget,
+  normalizeEmotion,
+  CELYN_SYSTEM_PROMPT,
+  CELYN_GREETING_PROMPT,
 } from "@celyn/shared";
 
 interface UseGeminiLiveOptions {
@@ -31,22 +35,332 @@ export function useGeminiLive({
   >([]);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const directSessionRef = useRef<any>(null);
+
+  const handleServerMessage = useCallback(
+    (msg: ServerMessage) => {
+      if (msg.type === "session_info") {
+        setModelInfo({ model: msg.model, voice: msg.voice });
+      } else if (msg.type === "audio") {
+        setStatus("speaking");
+        onAudioReceived(msg.data);
+      } else if (msg.type === "interrupted") {
+        console.log("⚡ Interrupted diterima");
+        setStatus("listening");
+        onInterrupted();
+      } else if (msg.type === "transcript") {
+        const time = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        setTranscripts((prev) => {
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            last.speaker === msg.speaker &&
+            !msg.text.startsWith("\n")
+          ) {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...last,
+              text: `${last.text} ${msg.text}`.trim(),
+            };
+            return updated;
+          }
+          return [
+            ...prev.slice(-99),
+            { speaker: msg.speaker, text: msg.text, time },
+          ];
+        });
+      } else if (msg.type === "tool_call") {
+        if (msg.name === "set_expression") {
+          const newEmotion = normalizeEmotion(msg.args.emotion);
+          console.log("🎭 Mengubah emosi avatar ke:", newEmotion);
+          setEmotion(newEmotion);
+        } else if (msg.name === "point_at_screen") {
+          const x = Math.max(0, Math.min(1, Number(msg.args.x) || 0.5));
+          const y = Math.max(0, Math.min(1, Number(msg.args.y) || 0.5));
+          const description = (msg.args.description as string) || undefined;
+          console.log("👁️ Avatar melirik ke layar:", { x, y, description });
+          setLookAt({ x, y, description });
+
+          setTimeout(() => {
+            setLookAt(null);
+          }, 6000);
+        }
+      } else if (msg.type === "status") {
+        setStatus(msg.status);
+        if (msg.message) setStatusMessage(msg.message);
+      } else if (msg.type === "error") {
+        setStatus("error");
+        setStatusMessage(msg.message);
+      }
+    },
+    [onAudioReceived, onInterrupted]
+  );
+
+  /**
+   * Mode Vercel Serverless / Ephemeral Token:
+   * Mengambil token sekali pakai dari /api/token lalu membuka sesi Gemini Live
+   * langsung dari browser tanpa perlu server WebSocket persisten port 3001.
+   */
+  const connectViaServerlessToken = useCallback(async () => {
+    try {
+      setStatus("connecting");
+      setStatusMessage("Meminta token sesi aman dari Vercel Serverless...");
+
+      const res = await fetch("/api/token");
+      const data = await res.json();
+
+      if (!res.ok || !data.token) {
+        throw new Error(
+          data.error ||
+            "Gagal mendapatkan Ephemeral Token dari /api/token. Pastikan GEMINI_API_KEY sudah diatur di Environment Variables Vercel."
+        );
+      }
+
+      const activeModel = data.model || "gemini-3.8-live";
+      const activeVoice = data.voice || "Aoede";
+      setModelInfo({ model: activeModel, voice: activeVoice });
+      setStatusMessage("Menghubungkan ke Gemini Live API...");
+
+      const ai = new GoogleGenAI({
+        apiKey: data.token,
+        httpOptions: { apiVersion: "v1alpha" },
+      });
+
+      const session = await ai.live.connect({
+        model: activeModel,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: activeVoice,
+              },
+            },
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: {
+            parts: [{ text: CELYN_SYSTEM_PROMPT }],
+          },
+          tools: [
+            {
+              functionDeclarations: [
+                {
+                  name: "set_expression",
+                  description: "Ubah ekspresi wajah avatar Celyn.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      emotion: {
+                        type: Type.STRING,
+                        enum: [
+                          "neutral",
+                          "happy",
+                          "thinking",
+                          "surprised",
+                          "sad",
+                        ],
+                      },
+                      intensity: { type: Type.NUMBER },
+                    },
+                    required: ["emotion"],
+                  },
+                },
+                {
+                  name: "point_at_screen",
+                  description:
+                    "Mengarahkan tatapan avatar ke area layar tertentu.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      x: { type: Type.NUMBER },
+                      y: { type: Type.NUMBER },
+                      description: { type: Type.STRING },
+                    },
+                    required: ["x", "y"],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        callbacks: {
+          onopen: () => {
+            setIsConnected(true);
+            setStatus("listening");
+            setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
+          },
+          onmessage: (msg: any) => {
+            if (msg.serverContent?.interrupted) {
+              handleServerMessage({ type: "interrupted" });
+              return;
+            }
+
+            if (msg.serverContent?.inputTranscription?.text) {
+              const userText = msg.serverContent.inputTranscription.text.trim();
+              if (userText) {
+                handleServerMessage({
+                  type: "transcript",
+                  speaker: "user",
+                  text: userText,
+                });
+              }
+            }
+
+            if (msg.serverContent?.outputTranscription?.text) {
+              const celynText = msg.serverContent.outputTranscription.text;
+              if (celynText) {
+                handleServerMessage({
+                  type: "transcript",
+                  speaker: "celyn",
+                  text: celynText,
+                });
+              }
+            }
+
+            const parts = msg.serverContent?.modelTurn?.parts;
+            if (Array.isArray(parts)) {
+              for (const part of parts) {
+                if (
+                  part.inlineData &&
+                  part.inlineData.mimeType?.startsWith("audio/")
+                ) {
+                  handleServerMessage({
+                    type: "audio",
+                    data: part.inlineData.data,
+                  });
+                }
+                if (part.text) {
+                  handleServerMessage({
+                    type: "transcript",
+                    speaker: "celyn",
+                    text: part.text,
+                  });
+                }
+              }
+            }
+
+            if (msg.serverContent?.turnComplete) {
+              handleServerMessage({
+                type: "status",
+                status: "listening",
+                message: "Celyn sedang mendengarkan ucapanmu...",
+              });
+            }
+
+            const toolCall = msg.toolCall;
+            if (
+              toolCall?.functionCalls &&
+              Array.isArray(toolCall.functionCalls)
+            ) {
+              for (const fc of toolCall.functionCalls) {
+                handleServerMessage({
+                  type: "tool_call",
+                  id: fc.id,
+                  name: fc.name,
+                  args: fc.args || {},
+                });
+
+                if (directSessionRef.current) {
+                  try {
+                    directSessionRef.current.sendToolResponse({
+                      functionResponses: [
+                        {
+                          id: fc.id,
+                          name: fc.name,
+                          response: { output: { status: "applied" } },
+                        },
+                      ],
+                    });
+                  } catch (e) {
+                    console.warn("Gagal mengirim tool response:", e);
+                  }
+                }
+              }
+            }
+          },
+          onerror: (err: any) => {
+            console.error("Gemini Live Direct Error:", err);
+            setStatus("error");
+            setStatusMessage(
+              `Koneksi Gemini Error: ${err?.message || "Terjadi kesalahan"}`
+            );
+          },
+          onclose: () => {
+            directSessionRef.current = null;
+            setIsConnected(false);
+            setStatus("idle");
+            setStatusMessage("Sesi Gemini telah berakhir.");
+          },
+        },
+      });
+
+      directSessionRef.current = session;
+      setIsConnected(true);
+      setStatus("listening");
+      setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
+
+      // Kirim sapaan otomatis Celyn saat pertama kali terhubung
+      setTimeout(async () => {
+        if (directSessionRef.current) {
+          try {
+            await directSessionRef.current.sendClientContent({
+              turns: [
+                {
+                  role: "user",
+                  parts: [{ text: CELYN_GREETING_PROMPT }],
+                },
+              ],
+              turnComplete: true,
+            });
+          } catch (e) {
+            console.warn("Gagal mengirim auto-greeting:", e);
+          }
+        }
+      }, 450);
+    } catch (err: any) {
+      console.error("Gagal membuka sesi Serverless Gemini:", err);
+      setStatus("error");
+      setStatusMessage(
+        err?.message || "Gagal terhubung ke server maupun Gemini Live API."
+      );
+    }
+  }, [handleServerMessage]);
 
   const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+    if (
+      (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) ||
+      directSessionRef.current
+    ) {
+      return;
+    }
+
+    const envWs = import.meta.env.VITE_WS_URL;
+    const isLocalhost =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+
+    // Jika berjalan di Vercel / domain produksi tanpa VITE_WS_URL, langsung gunakan mode Serverless Ephemeral Token
+    if (!envWs && !isLocalhost) {
+      connectViaServerlessToken();
+      return;
+    }
 
     setStatus("connecting");
     setStatusMessage("Menghubungkan ke server backend...");
 
-    // Tentukan URL WebSocket (menggunakan VITE_WS_URL atau fallback cerdas)
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const envWs = import.meta.env.VITE_WS_URL;
     const wsUrl = envWs || `${wsProtocol}//${window.location.hostname}:3001`;
 
+    let opened = false;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      opened = true;
       setIsConnected(true);
       setStatus("listening");
       setStatusMessage("Terhubung! Celyn sedang mendengarkan...");
@@ -55,92 +369,82 @@ export function useGeminiLive({
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as ServerMessage;
-
-        if (msg.type === "session_info") {
-          setModelInfo({ model: msg.model, voice: msg.voice });
-        } else if (msg.type === "audio") {
-          setStatus("speaking");
-          onAudioReceived(msg.data);
-        } else if (msg.type === "interrupted") {
-          console.log("⚡ Interrupted diterima dari server");
-          setStatus("listening");
-          onInterrupted();
-        } else if (msg.type === "transcript") {
-          const time = new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-          setTranscripts((prev) => {
-            const last = prev[prev.length - 1];
-            // Jika pesan terakhir berasal dari pembicara yang sama, gabungkan teksnya
-            if (last && last.speaker === msg.speaker && !msg.text.startsWith("\n")) {
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...last,
-                text: `${last.text} ${msg.text}`.trim(),
-              };
-              return updated;
-            }
-            return [
-              ...prev.slice(-99),
-              { speaker: msg.speaker, text: msg.text, time },
-            ];
-          });
-        } else if (msg.type === "tool_call") {
-          if (msg.name === "set_expression") {
-            const newEmotion = (msg.args.emotion as EmotionType) || "neutral";
-            console.log("🎭 Mengubah emosi avatar ke:", newEmotion);
-            setEmotion(newEmotion);
-          } else if (msg.name === "point_at_screen") {
-            const x = Number(msg.args.x) || 0.5;
-            const y = Number(msg.args.y) || 0.5;
-            const description = (msg.args.description as string) || undefined;
-            console.log("👁️ Avatar melirik ke layar:", { x, y, description });
-            setLookAt({ x, y, description });
-
-            // Reset lookAt setelah 6 detik
-            setTimeout(() => {
-              setLookAt(null);
-            }, 6000);
-          }
-        } else if (msg.type === "status") {
-          setStatus(msg.status);
-          if (msg.message) setStatusMessage(msg.message);
-        } else if (msg.type === "error") {
-          setStatus("error");
-          setStatusMessage(msg.message);
-        }
+        handleServerMessage(msg);
       } catch (err) {
         console.error("Gagal membaca pesan WebSocket:", err);
       }
     };
 
     ws.onerror = (err) => {
-      console.error("WebSocket client error:", err);
-      setStatus("error");
-      setStatusMessage("Koneksi ke backend gagal. Pastikan server aktif.");
+      console.warn("WebSocket error, memeriksa fallback Serverless...", err);
+      if (!opened) {
+        wsRef.current = null;
+        connectViaServerlessToken();
+      } else {
+        setStatus("error");
+        setStatusMessage("Koneksi ke backend terputus.");
+      }
     };
 
     ws.onclose = () => {
-      setIsConnected(false);
-      setStatus("idle");
-      setStatusMessage("Koneksi terputus.");
+      if (opened) {
+        setIsConnected(false);
+        setStatus("idle");
+        setStatusMessage("Koneksi terputus.");
+      }
     };
-  }, [onAudioReceived, onInterrupted]);
+  }, [handleServerMessage, connectViaServerlessToken]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
+    if (directSessionRef.current) {
+      try {
+        directSessionRef.current.close();
+      } catch {}
+      directSessionRef.current = null;
+    }
     setIsConnected(false);
     setStatus("idle");
     setStatusMessage("Sesi dihentikan.");
   }, []);
 
-  const sendMessage = useCallback((msg: ClientMessage) => {
+  const sendMessage = useCallback(async (msg: ClientMessage) => {
+    // 1. Jika terhubung via WebSocket Server lokal
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg));
+      return;
+    }
+
+    // 2. Jika terhubung via Direct Gemini Live Session (Vercel Serverless Mode)
+    const session = directSessionRef.current;
+    if (!session) return;
+
+    try {
+      if (msg.type === "audio") {
+        await session.sendRealtimeInput({
+          audio: {
+            mimeType: "audio/pcm;rate=16000",
+            data: msg.data,
+          },
+        });
+      } else if (msg.type === "screen") {
+        await session.sendRealtimeInput({
+          video: {
+            mimeType: "image/jpeg",
+            data: msg.data,
+          },
+        });
+      } else if (msg.type === "text") {
+        await session.sendClientContent({
+          turns: [{ role: "user", parts: [{ text: msg.text }] }],
+          turnComplete: true,
+        });
+      }
+    } catch (err) {
+      console.error("Gagal mengirim pesan ke sesi Gemini:", err);
     }
   }, []);
 
@@ -164,7 +468,6 @@ export function useGeminiLive({
         hour: "2-digit",
         minute: "2-digit",
       });
-      // Catat pesan teks pengguna ke riwayat lokal secara instan
       setTranscripts((prev) => [
         ...prev.slice(-99),
         { speaker: "user", text, time },
