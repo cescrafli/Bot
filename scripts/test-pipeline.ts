@@ -7,6 +7,9 @@ import {
   DEFAULT_VOICE_NAME,
   CELYN_SYSTEM_PROMPT,
   extractIndonesianSentences,
+  inferEmotionFromText,
+  inferIndonesianProsody,
+  normalizeSpokenIndonesian,
 } from "@celyn/shared";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
@@ -177,7 +180,55 @@ async function runTtsTests() {
     "Buffer akhir giliran dipaksa di-flush saat turnComplete (forceAll=true)"
   );
 
-  // 6. Ringkasan
+  // Uji Fast First-Clause Split (Respons awal instan <350ms)
+  const testFastClause = extractIndonesianSentences(
+    "Wah menarik banget nih kodenya, kelihatannya kamu lagi bikin komponen React ya?",
+    false,
+    true
+  );
+  assert(
+    testFastClause.sentences.length >= 1 &&
+      testFastClause.sentences[0] === "Wah menarik banget nih kodenya,",
+    "Fast First-Clause Split berhasil memecah klausa awal di tanda koma untuk respon instan"
+  );
+
+  // Uji Normalisasi Teks Lisan & Fonetik Akronim Bahasa Indonesia
+  console.log("\n--- 6. Uji Normalisasi Teks Lisan & Dynamic Emotional Prosody ---");
+  const normTech = normalizeSpokenIndonesian("Kita bisa panggil API dan pakai AI untuk UI/UX website.");
+  assert(
+    normTech.includes("E-P-I") && normTech.includes("E-I") && normTech.includes("Yu-Ai"),
+    `Fonetik akronim teknis ditransformasi dengan benar (E-P-I, E-I, Yu-Ai): "${normTech}"`
+  );
+
+  const normChat = normalizeSpokenIndonesian("buku, pulpen, dll. yg dibeli kmrn bgt wkwkwk");
+  assert(
+    normTech !== normChat &&
+      normChat.includes("dan lain-lain") &&
+      normChat.includes("yang") &&
+      normChat.includes("haha"),
+    `Singkatan & tawa Indonesia diekspansi alami (dan lain-lain, yang, haha): "${normChat}"`
+  );
+
+  // Uji Inferensi Emosi Teks Otomatis
+  assert(inferEmotionFromText("Wah keren banget hasil desainmu!") === "happy", "Inferensi emosi happy");
+  assert(inferEmotionFromText("Hmm bentar ya coba aku cek kodenya...") === "thinking", "Inferensi emosi thinking");
+  assert(inferEmotionFromText("Waduh, kok bisa error kayak gitu?!") === "surprised", "Inferensi emosi surprised");
+  assert(inferEmotionFromText("Yah, sayang banget filenya belum tersimpan.") === "sad", "Inferensi emosi sad");
+
+  // Uji Dynamic Prosody Engine
+  const prosodyHappy = inferIndonesianProsody("Wah asik banget nih!", "happy");
+  assert(
+    prosodyHappy.rate === "+9%" && prosodyHappy.pitch === "+4Hz",
+    `Prosodi happy dinaikkan dinamis (+9% rate, +4Hz pitch)`
+  );
+
+  const prosodyQuestion = inferIndonesianProsody("Kamu lagi ngerjain project apa sekarang?");
+  assert(
+    prosodyQuestion.pitch === "+3Hz",
+    `Intonasi nada tanya dinaikkan minimal +3Hz untuk keluwesan vokal`
+  );
+
+  // 7. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

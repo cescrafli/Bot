@@ -4,6 +4,8 @@ import {
   DEFAULT_VOICE_NAME,
   generateSecMsGecV2,
   cleanAndEscapeForSsml,
+  inferIndonesianProsody,
+  EmotionType,
   SEC_MS_GEC_VERSION,
   TRUSTED_CLIENT_TOKEN,
   CHROMIUM_MAJOR_VERSION,
@@ -18,6 +20,7 @@ export interface EdgeTtsOptions {
   rate?: string;
   pitch?: string;
   volume?: string;
+  emotion?: EmotionType;
   timeoutMs?: number;
 }
 
@@ -194,13 +197,22 @@ export async function synthesizeEdgeTTS(
     return Buffer.alloc(0);
   }
 
+  // Terapkan Dynamic Emotional Prosody secara otomatis sesuai konteks kalimat & emosi
+  const dynamicProsody = inferIndonesianProsody(text, options.emotion);
+  const resolvedOptions: EdgeTtsOptions = {
+    ...options,
+    rate: options.rate || dynamicProsody.rate,
+    pitch: options.pitch || dynamicProsody.pitch,
+    volume: options.volume || dynamicProsody.volume,
+  };
+
   try {
-    return await trySynthesizeOnce(escapedText, options);
+    return await trySynthesizeOnce(escapedText, resolvedOptions);
   } catch (firstErr) {
     console.warn("⚠️ Percobaan 1 Edge TTS gagal, mencoba ulang dengan koreksi clock-skew...", firstErr);
     // Coba sekali lagi dengan waktu yang sudah disesuaikan
     return await trySynthesizeOnce(escapedText, {
-      ...options,
+      ...resolvedOptions,
       timeoutMs: options.timeoutMs ? options.timeoutMs + 2000 : 12000,
     });
   }

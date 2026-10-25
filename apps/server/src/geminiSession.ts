@@ -5,6 +5,8 @@ import { synthesizeEdgeTTS } from "./edgeTts.js";
 import {
   ClientMessage,
   ServerMessage,
+  EmotionType,
+  inferEmotionFromText,
   normalizeEmotion,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
@@ -27,6 +29,10 @@ export class GeminiSession {
   private ttsTurnId = 0;
   private ttsChain: Promise<void> = Promise.resolve();
   private useEdgeTts = true;
+  private isFirstChunkInTurn = true;
+  private currentEmotion: EmotionType = "neutral";
+  private explicitEmotionUsedInTurn = false;
+  private relaxEmotionTimer: NodeJS.Timeout | null = null;
 
   public stats = {
     audioChunksIn: 0,
@@ -231,6 +237,12 @@ export class GeminiSession {
   private cancelPendingTts(): void {
     this.ttsTurnId++;
     this.ttsBuffer = "";
+    this.isFirstChunkInTurn = true;
+    this.explicitEmotionUsedInTurn = false;
+    if (this.relaxEmotionTimer) {
+      clearTimeout(this.relaxEmotionTimer);
+      this.relaxEmotionTimer = null;
+    }
   }
 
   private flushCompleteSentences(forceAll: boolean): void {
@@ -238,24 +250,51 @@ export class GeminiSession {
 
     const { sentences, remaining } = extractIndonesianSentences(
       this.ttsBuffer,
-      forceAll
+      forceAll,
+      this.isFirstChunkInTurn
     );
     this.ttsBuffer = remaining;
 
     for (const sentence of sentences) {
-      this.enqueueEdgeTts(sentence, this.ttsTurnId);
+      this.isFirstChunkInTurn = false;
+
+      // Auto-emotion inference dari teks jika LLM belum memanggil tool set_expression
+      if (!this.explicitEmotionUsedInTurn) {
+        const detected = inferEmotionFromText(sentence);
+        if (detected !== "neutral" && detected !== this.currentEmotion) {
+          this.currentEmotion = detected;
+          this.sendToClient({
+            type: "tool_call",
+            id: "auto_expression",
+            name: "set_expression",
+            args: { emotion: detected },
+          });
+        }
+      }
+
+      this.enqueueEdgeTts(sentence, this.ttsTurnId, this.currentEmotion);
     }
   }
 
-  private enqueueEdgeTts(sentence: string, turnId: number): void {
+  private enqueueEdgeTts(
+    sentence: string,
+    turnId: number,
+    emotion?: EmotionType
+  ): void {
     const voice = config.geminiVoice || DEFAULT_VOICE_NAME;
+    // Pipelined parallel prefetch: sintesis Edge TTS langsung dijalankan seketika di background
+    const prefetchPromise = synthesizeEdgeTTS(sentence, { voice, emotion });
+
     this.ttsChain = this.ttsChain
       .then(async () => {
         if (turnId !== this.ttsTurnId || this.state !== "ACTIVE") return;
         try {
-          console.log(`🗣️ [Edge Neural TTS - ${voice}] Menyintesis: "${sentence}"`);
-          const mp3Buf = await synthesizeEdgeTTS(sentence, { voice });
-          if (turnId !== this.ttsTurnId || this.state !== "ACTIVE" || mp3Buf.length === 0) {
+          const mp3Buf = await prefetchPromise;
+          if (
+            turnId !== this.ttsTurnId ||
+            this.state !== "ACTIVE" ||
+            mp3Buf.length === 0
+          ) {
             return;
           }
           this.stats.audioChunksOut++;
@@ -265,7 +304,10 @@ export class GeminiSession {
             mimeType: "audio/mp3",
           });
         } catch (err: any) {
-          console.error(`❌ [Edge Neural TTS] Gagal menyintesis kalimat:`, err?.message || err);
+          console.error(
+            `❌ [Edge Neural TTS] Gagal menyintesis kalimat:`,
+            err?.message || err
+          );
         }
       })
       .catch(() => {});
@@ -345,6 +387,23 @@ export class GeminiSession {
     // 2.5 Giliran Model Selesai
     if (data.serverContent?.turnComplete) {
       console.log("🏁 [Gemini Live] Giliran bicara Celyn selesai.");
+      this.isFirstChunkInTurn = true;
+      this.explicitEmotionUsedInTurn = false;
+
+      // Kembalikan ekspresi wajah secara rileks ke netral setelah beberapa detik selesai bicara
+      if (this.relaxEmotionTimer) clearTimeout(this.relaxEmotionTimer);
+      this.relaxEmotionTimer = setTimeout(() => {
+        if (this.state === "ACTIVE" && this.currentEmotion !== "neutral") {
+          this.currentEmotion = "neutral";
+          this.sendToClient({
+            type: "tool_call",
+            id: "auto_relax",
+            name: "set_expression",
+            args: { emotion: "neutral" },
+          });
+        }
+      }, 4500);
+
       if (this.useEdgeTts) {
         this.flushCompleteSentences(true);
         const turnAtComplete = this.ttsTurnId;
@@ -377,6 +436,8 @@ export class GeminiSession {
         if (fc.name === "set_expression") {
           const normEmotion = normalizeEmotion(sanitizedArgs.emotion);
           sanitizedArgs = { ...sanitizedArgs, emotion: normEmotion };
+          this.explicitEmotionUsedInTurn = true;
+          this.currentEmotion = normEmotion;
         } else if (fc.name === "point_at_screen") {
           const clampedX = Math.max(0, Math.min(1, Number(sanitizedArgs.x) || 0.5));
           const clampedY = Math.max(0, Math.min(1, Number(sanitizedArgs.y) || 0.5));

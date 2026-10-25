@@ -230,8 +230,164 @@ function generateSecMsGecV2() {
   return `${cs64}-${digest.toString("hex").toUpperCase()}`;
 }
 
+function normalizeSpokenIndonesian(rawText) {
+  if (!rawText) return "";
+
+  let text = String(rawText);
+
+  // 1. Singkatan umum & chat Indonesia
+  const ABBR_MAP = {
+    dll: "dan lain-lain",
+    dsb: "dan sebagainya",
+    dst: "dan seterusnya",
+    yg: "yang",
+    dgn: "dengan",
+    utk: "untuk",
+    krn: "karena",
+    bgt: "banget",
+    gak: "nggak",
+    gk: "nggak",
+    udh: "udah",
+    jg: "juga",
+    tp: "tapi",
+    jd: "jadi",
+    sy: "saya",
+    km: "kamu",
+    brp: "berapa",
+    td: "tadi",
+    skrg: "sekarang",
+    bkn: "bukan",
+    sdh: "sudah",
+    blm: "belum",
+    bs: "bisa",
+    bgm: "bagaimana",
+    gmn: "gimana",
+    kmrn: "kemarin",
+    dr: "dokter",
+    prof: "profesor",
+  };
+
+  for (const [abbr, expansion] of Object.entries(ABBR_MAP)) {
+    const reg = new RegExp(`\\b${abbr}\\.?\\b`, "gi");
+    text = text.replace(reg, expansion);
+  }
+
+  // 2. Fonetik akronim teknis (supaya API tidak dibaca "api" kebakaran)
+  text = text
+    .replace(/\bAPI\b/g, "E-P-I")
+    .replace(/\bAI\b/g, "E-I")
+    .replace(/\bUI\b/g, "Yu-Ai")
+    .replace(/\bUX\b/g, "Yu-Eks")
+    .replace(/\bURL\b/g, "Yu-Ar-El")
+    .replace(/\bJSON\b/gi, "Jei-son")
+    .replace(/\bSQL\b/gi, "Es-Kyu-El")
+    .replace(/\bHTML\b/gi, "Ha-Te-Em-El")
+    .replace(/\bCSS\b/gi, "Se-Es-Es")
+    .replace(/\bJS\b/g, "Je-Es")
+    .replace(/\bTS\b/g, "Te-Es")
+    .replace(/\bOK\b/gi, "Oke")
+    .replace(/\bID\b/g, "Ai-Di")
+    .replace(/\bVS\b/gi, "versus");
+
+  // 3. Tawa teks Indonesia
+  text = text
+    .replace(/\bwk(wk)+\b/gi, "haha")
+    .replace(/\bhe(he)+\b/gi, "hehe")
+    .replace(/\bha(ha)+\b/gi, "haha");
+
+  // 4. Garis miring antar kata (mis. "dan/atau", "layar/kamera")
+  text = text.replace(/([a-zA-Z0-9]+)\/([a-zA-Z0-9]+)/g, "$1 atau $2");
+
+  // 5. Interjeksi pembuka kalimat (tambahkan koma mikro agar ada jeda bernapas)
+  text = text.replace(
+    /^(\s*)(Wah|Eh|Hmm|Nah|Oalah|Sip|Oke|Aduh|Waduh)\s+([a-zA-Z])/i,
+    "$1$2, $3"
+  );
+
+  return text;
+}
+
+function inferEmotionFromText(text) {
+  if (!text || typeof text !== "string") return "neutral";
+  const lower = text.toLowerCase();
+
+  if (
+    /\b(waduh|astaga|lho|kaget|seriusan|wah beneran|shock|astagfirullah)\b/i.test(lower) ||
+    /\?\!|!\?/.test(text)
+  ) {
+    return "surprised";
+  }
+
+  if (/\b(yah|sayang banget|maaf ya|turut|sabar ya|kasihan|sedih|kecewa|sayangnya)\b/i.test(lower)) {
+    return "sad";
+  }
+
+  if (
+    /\b(hmm|sebentar|bentar|coba aku|coba kita|kayaknya|menurutku|mungkin|analisis|kita cek|penasaran)\b/i.test(lower) ||
+    /^\s*hmm/i.test(lower)
+  ) {
+    return "thinking";
+  }
+
+  if (
+    /\b(haha|hehe|hihi|wah|keren|mantap|asik|senang|sip|oke banget|yep|yoi|seru|asyik)\b/i.test(lower) ||
+    /[!]{1,2}/.test(text)
+  ) {
+    return "happy";
+  }
+
+  return "neutral";
+}
+
+function inferIndonesianProsody(text, emotion) {
+  const activeEmotion = emotion && emotion !== "neutral" ? emotion : inferEmotionFromText(text);
+
+  let rate = "+7%";
+  let pitch = "+2Hz";
+  let volume = "+0%";
+
+  switch (activeEmotion) {
+    case "happy":
+      rate = "+9%";
+      pitch = "+4Hz";
+      volume = "+4%";
+      break;
+    case "thinking":
+      rate = "+4%";
+      pitch = "+0Hz";
+      volume = "+0%";
+      break;
+    case "surprised":
+      rate = "+10%";
+      pitch = "+5Hz";
+      volume = "+5%";
+      break;
+    case "sad":
+      rate = "+1%";
+      pitch = "-2Hz";
+      volume = "-2%";
+      break;
+    case "neutral":
+    default:
+      rate = "+7%";
+      pitch = "+2Hz";
+      volume = "+0%";
+      break;
+  }
+
+  if (/\?[^?]*$/.test(text) || text.includes("?")) {
+    const currentHz = parseInt(pitch, 10) || 0;
+    if (currentHz < 3) {
+      pitch = "+3Hz";
+    }
+  }
+
+  return { rate, pitch, volume };
+}
+
 function cleanAndEscapeForSsml(rawText) {
-  const cleaned = String(rawText || "")
+  const normalized = normalizeSpokenIndonesian(rawText);
+  const cleaned = String(normalized || "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`+/g, "")
     .replace(/[*_#~]+/g, "")
@@ -247,7 +403,14 @@ function cleanAndEscapeForSsml(rawText) {
     .replace(/'/g, "&apos;");
 }
 
-function synthesizeEdgeTTS(text, voice = DEFAULT_VOICE) {
+function synthesizeEdgeTTS(text, options = {}) {
+  const voice = typeof options === "string" ? options : options.voice || DEFAULT_VOICE;
+  const emotion = typeof options === "object" ? options.emotion : "neutral";
+  const dyn = inferIndonesianProsody(text, emotion);
+  const rate = (typeof options === "object" && options.rate) || dyn.rate;
+  const pitch = (typeof options === "object" && options.pitch) || dyn.pitch;
+  const volume = (typeof options === "object" && options.volume) || dyn.volume;
+
   const escapedText = cleanAndEscapeForSsml(text);
   if (!escapedText) return Promise.resolve(Buffer.alloc(0));
 
@@ -332,7 +495,7 @@ function synthesizeEdgeTTS(text, voice = DEFAULT_VOICE) {
       const ssml =
         `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='id-ID'>` +
         `<voice name='${voice}'>` +
-        `<prosody pitch='+0Hz' rate='+0%' volume='+0%'>` +
+        `<prosody pitch='${pitch}' rate='${rate}' volume='${volume}'>` +
         `${escapedText}` +
         `</prosody>` +
         `</voice>` +
@@ -410,12 +573,12 @@ function isRateLimited(ip) {
   return record.count > maxRequests;
 }
 
-async function synthesizeEdgeTTSWithRetry(text, voice = DEFAULT_VOICE) {
+async function synthesizeEdgeTTSWithRetry(text, options = {}) {
   try {
-    return await synthesizeEdgeTTS(text, voice);
+    return await synthesizeEdgeTTS(text, options);
   } catch (firstErr) {
     console.warn("⚠️ [api/tts] Retry Edge TTS...", firstErr?.message);
-    return await synthesizeEdgeTTS(text, voice);
+    return await synthesizeEdgeTTS(text, options);
   }
 }
 
@@ -447,14 +610,26 @@ export default async function handler(req, res) {
 
   let text = "";
   let voice = DEFAULT_VOICE;
+  let emotion = "neutral";
+  let rate = "";
+  let pitch = "";
+  let volume = "";
 
   if (req.method === "GET") {
     text = req.query?.text || "";
     voice = req.query?.voice || DEFAULT_VOICE;
+    emotion = req.query?.emotion || "neutral";
+    rate = req.query?.rate || "";
+    pitch = req.query?.pitch || "";
+    volume = req.query?.volume || "";
   } else if (req.method === "POST") {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
     text = body.text || "";
     voice = body.voice || DEFAULT_VOICE;
+    emotion = body.emotion || "neutral";
+    rate = body.rate || "";
+    pitch = body.pitch || "";
+    volume = body.volume || "";
   } else {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
@@ -464,7 +639,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const mp3Buffer = await synthesizeEdgeTTSWithRetry(String(text).slice(0, 1500), voice);
+    const mp3Buffer = await synthesizeEdgeTTSWithRetry(
+      String(text).slice(0, 1500),
+      { voice, emotion, rate, pitch, volume }
+    );
     return res.status(200).json({
       audio: mp3Buffer.toString("base64"),
       mimeType: "audio/mp3",

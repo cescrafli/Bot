@@ -38,7 +38,7 @@ export type ServerMessage =
     }
   | {
       type: "tool_call";
-      id: string;
+      id?: string;
       name: "set_expression" | "point_at_screen";
       args: Record<string, unknown>;
     }

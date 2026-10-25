@@ -291,12 +291,12 @@ export function useAudioEngine({
         const micRms = Math.sqrt(sumSquares / pcm16k.length);
 
         // Smart Barge-In & Echo Protection:
-        // Saat Celyn bersuara: periksa apakah pengguna sengaja memotong pembicaraan
+        // Saat Celyn bersuara: periksa apakah pengguna memotong pembicaraan dengan volume normal
         if (isPlayingRef.current) {
-          if (micRms > 0.12) {
+          if (micRms > 0.075) {
             bargeInStreakRef.current++;
-            // Jika pengguna berbicara keras selama 2 paket berturut-turut, picu barge-in
-            if (bargeInStreakRef.current >= 2) {
+            // Jika pengguna berbicara selama 3 paket berturut-turut (~384ms), picu barge-in
+            if (bargeInStreakRef.current >= 3) {
               console.log("⚡ [Smart Barge-In] Interupsi suara pengguna terdeteksi!");
               stopPlayback();
               bargeInStreakRef.current = 0;

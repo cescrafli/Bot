@@ -164,13 +164,14 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
 
   // =========================================================================
   // LOGIKA LIP-SYNC MULUT DINAMIS & HALUS (Sesuai Proporsi Bibir Asli)
-  // Saat diam: 100% bibir asli gambar Celyn yang tersenyum manis
-  // Saat bersuara: bibir membuka-menutup natural proporsional (2px s/d 7px saja)
+  // Saat diam atau jeda napas: bibir menutup manis secara alami
+  // Saat ada gelombang vokal: bibir membuka-menutup proporsional
   // =========================================================================
   const speechCadence = Math.sin(tick / 85) * 0.45 + 0.55; // 0.10 s/d 1.0 gelombang suku kata
-  const dynamicMouthAmount = isSpeaking
-    ? Math.max(mouthOpen * 2.8, speechCadence * (mouthOpen > 0.01 ? 0.92 : 0.82))
-    : 0;
+  const dynamicMouthAmount =
+    isSpeaking && mouthOpen >= 0.015
+      ? Math.min(1, Math.max(mouthOpen * 2.6, speechCadence * 0.9))
+      : 0;
 
   // =========================================================================
   // KINEMATIKA PROSEDURAL 2D RIGGING (Napas Tubuh, Tangan & Gestur Hidup)

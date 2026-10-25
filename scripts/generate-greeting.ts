@@ -8,7 +8,7 @@ async function generateGreetingAudio() {
   console.log("🗣️ Menghasilkan audio sapaan Celyn dengan Microsoft Edge Neural (id-ID-GadisNeural)...");
 
   const greetingText =
-    "Halo! Aku Celyn, asisten AI pribadimu. Suara Bahasa Indonesiaku dan animasi gerak mulut avatar sudah aktif dan siap membantumu hari ini!";
+    "Eh halo! Aku Celyn. Suaraku udah aktif nih, senang banget bisa ngobrol langsung sama kamu hari ini. Mau kita mulai dari mana?";
 
   const mp3Buffer = await synthesizeEdgeTTS(greetingText, {
     voice: "id-ID-GadisNeural",

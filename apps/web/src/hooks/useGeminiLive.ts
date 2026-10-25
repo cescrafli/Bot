@@ -6,6 +6,7 @@ import {
   EmotionType,
   LookAtTarget,
   normalizeEmotion,
+  inferEmotionFromText,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
@@ -47,6 +48,10 @@ export function useGeminiLive({
   const directTtsBufferRef = useRef<string>("");
   const directTtsTurnIdRef = useRef<number>(0);
   const directTtsChainRef = useRef<Promise<void>>(Promise.resolve());
+  const directIsFirstChunkRef = useRef<boolean>(true);
+  const directExplicitEmotionRef = useRef<boolean>(false);
+  const directCurrentEmotionRef = useRef<EmotionType>("neutral");
+  const directRelaxTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     statusRef.current = status;
@@ -73,6 +78,12 @@ export function useGeminiLive({
         console.log("⚡ Interrupted diterima");
         directTtsTurnIdRef.current++;
         directTtsBufferRef.current = "";
+        directIsFirstChunkRef.current = true;
+        directExplicitEmotionRef.current = false;
+        if (directRelaxTimerRef.current) {
+          clearTimeout(directRelaxTimerRef.current);
+          directRelaxTimerRef.current = null;
+        }
         setStatus("listening");
         onInterrupted();
       } else if (msg.type === "transcript") {
@@ -110,6 +121,8 @@ export function useGeminiLive({
         if (msg.name === "set_expression") {
           const newEmotion = normalizeEmotion(msg.args.emotion);
           console.log("🎭 Mengubah emosi avatar ke:", newEmotion);
+          directExplicitEmotionRef.current = true;
+          directCurrentEmotionRef.current = newEmotion;
           setEmotion(newEmotion);
         } else if (msg.name === "point_at_screen") {
           const x = Math.max(0, Math.min(1, Number(msg.args.x) || 0.5));
@@ -163,33 +176,49 @@ export function useGeminiLive({
       setConnectionLabel("Vercel Live Direct");
       setStatusMessage("Menghubungkan ke Gemini Live API (Bahasa Indonesia)...");
 
-      const enqueueDirectEdgeTts = (sentence: string, turnId: number) => {
+      const enqueueDirectEdgeTts = (
+        sentence: string,
+        turnId: number,
+        emotion?: EmotionType
+      ) => {
+        // Pipelined parallel prefetch synthesis via /api/tts
+        const fetchPromise = fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: sentence,
+            voice: activeVoice,
+            emotion: emotion || "neutral",
+          }),
+        })
+          .then(async (ttsRes) => {
+            if (!ttsRes.ok) return null;
+            return await ttsRes.json();
+          })
+          .catch((e) => {
+            console.warn("Gagal menyintesis kalimat via /api/tts:", e);
+            return null;
+          });
+
         directTtsChainRef.current = directTtsChainRef.current
           .then(async () => {
-            if (turnId !== directTtsTurnIdRef.current || !directSessionRef.current) {
+            if (
+              turnId !== directTtsTurnIdRef.current ||
+              !directSessionRef.current
+            ) {
               return;
             }
-            try {
-              const ttsRes = await fetch("/api/tts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: sentence, voice: activeVoice }),
+            const ttsData = await fetchPromise;
+            if (
+              turnId === directTtsTurnIdRef.current &&
+              directSessionRef.current &&
+              ttsData?.audio
+            ) {
+              handleServerMessage({
+                type: "audio",
+                data: ttsData.audio,
+                mimeType: ttsData.mimeType || "audio/mp3",
               });
-              if (!ttsRes.ok) return;
-              const ttsData = await ttsRes.json();
-              if (
-                turnId === directTtsTurnIdRef.current &&
-                directSessionRef.current &&
-                ttsData.audio
-              ) {
-                handleServerMessage({
-                  type: "audio",
-                  data: ttsData.audio,
-                  mimeType: ttsData.mimeType || "audio/mp3",
-                });
-              }
-            } catch (e) {
-              console.warn("Gagal menyintesis kalimat via /api/tts:", e);
             }
           })
           .catch(() => {});
@@ -199,12 +228,36 @@ export function useGeminiLive({
         if (!useEdgeTts) return;
         const { sentences, remaining } = extractIndonesianSentences(
           directTtsBufferRef.current,
-          forceAll
+          forceAll,
+          directIsFirstChunkRef.current
         );
         directTtsBufferRef.current = remaining;
 
         for (const sentence of sentences) {
-          enqueueDirectEdgeTts(sentence, directTtsTurnIdRef.current);
+          directIsFirstChunkRef.current = false;
+
+          // Auto-emotion inference jika LLM belum memanggil tool set_expression
+          if (!directExplicitEmotionRef.current) {
+            const detected = inferEmotionFromText(sentence);
+            if (
+              detected !== "neutral" &&
+              detected !== directCurrentEmotionRef.current
+            ) {
+              directCurrentEmotionRef.current = detected;
+              handleServerMessage({
+                type: "tool_call",
+                id: "auto_expression",
+                name: "set_expression",
+                args: { emotion: detected },
+              });
+            }
+          }
+
+          enqueueDirectEdgeTts(
+            sentence,
+            directTtsTurnIdRef.current,
+            directCurrentEmotionRef.current
+          );
         }
       };
 
@@ -341,6 +394,25 @@ export function useGeminiLive({
             }
 
             if (msg.serverContent?.turnComplete) {
+              directIsFirstChunkRef.current = true;
+              directExplicitEmotionRef.current = false;
+
+              if (directRelaxTimerRef.current) clearTimeout(directRelaxTimerRef.current);
+              directRelaxTimerRef.current = window.setTimeout(() => {
+                if (
+                  directSessionRef.current &&
+                  directCurrentEmotionRef.current !== "neutral"
+                ) {
+                  directCurrentEmotionRef.current = "neutral";
+                  handleServerMessage({
+                    type: "tool_call",
+                    id: "auto_relax",
+                    name: "set_expression",
+                    args: { emotion: "neutral" },
+                  });
+                }
+              }, 4500);
+
               if (useEdgeTts) {
                 flushDirectSentences(true);
                 const turnAtComplete = directTtsTurnIdRef.current;
