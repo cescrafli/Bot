@@ -13,7 +13,7 @@ export const config = {
   port: parseInt(process.env.PORT || "3001", 10),
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",
-  geminiVoice: process.env.GEMINI_VOICE || "Aoede",
+  geminiVoice: process.env.GEMINI_VOICE || "id-ID-GadisNeural",
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
     .split(",")
     .map((s) => s.trim())

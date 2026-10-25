@@ -8,10 +8,11 @@ import {
   normalizeEmotion,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
+  DEFAULT_VOICE_NAME,
 } from "@celyn/shared";
 
 interface UseGeminiLiveOptions {
-  onAudioReceived: (b64PCM24k: string) => void;
+  onAudioReceived: (b64Audio: string, mimeType?: string) => void;
   onInterrupted: () => void;
 }
 
@@ -26,7 +27,7 @@ export function useGeminiLive({
   const [statusMessage, setStatusMessage] = useState<string>("Siap terhubung");
   const [modelInfo, setModelInfo] = useState<{ model: string; voice: string }>({
     model: "gemini-3.8-live",
-    voice: "Aoede",
+    voice: DEFAULT_VOICE_NAME,
   });
   const [connectionLabel, setConnectionLabel] = useState<string>("ws://localhost:3001");
   const [emotion, setEmotion] = useState<EmotionType>("neutral");
@@ -40,6 +41,11 @@ export function useGeminiLive({
   const pendingQueueRef = useRef<ClientMessage[]>([]);
   const statusRef = useRef(status);
   const sendMessageRef = useRef<(msg: ClientMessage) => Promise<void> | void>(() => {});
+
+  // State antrean TTS Microsoft Edge Neural (id-ID-GadisNeural) untuk mode Serverless Direct
+  const directTtsBufferRef = useRef<string>("");
+  const directTtsTurnIdRef = useRef<number>(0);
+  const directTtsChainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     statusRef.current = status;
@@ -61,9 +67,11 @@ export function useGeminiLive({
         setModelInfo({ model: msg.model, voice: msg.voice });
       } else if (msg.type === "audio") {
         setStatus("speaking");
-        onAudioReceived(msg.data);
+        onAudioReceived(msg.data, msg.mimeType);
       } else if (msg.type === "interrupted") {
         console.log("⚡ Interrupted diterima");
+        directTtsTurnIdRef.current++;
+        directTtsBufferRef.current = "";
         setStatus("listening");
         onInterrupted();
       } else if (msg.type === "transcript") {
@@ -78,16 +86,23 @@ export function useGeminiLive({
             last.speaker === msg.speaker &&
             !msg.text.startsWith("\n")
           ) {
+            const sep =
+              last.text.endsWith(" ") ||
+              msg.text.startsWith(" ") ||
+              /^[.,!?;:)]/.test(msg.text) ||
+              msg.speaker === "celyn"
+                ? ""
+                : " ";
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...last,
-              text: `${last.text} ${msg.text}`.trim(),
+              text: `${last.text}${sep}${msg.text}`.replace(/\s+/g, " ").trim(),
             };
             return updated;
           }
           return [
             ...prev.slice(-99),
-            { speaker: msg.speaker, text: msg.text, time },
+            { speaker: msg.speaker, text: msg.text.trim(), time },
           ];
         });
       } else if (msg.type === "tool_call") {
@@ -138,10 +153,69 @@ export function useGeminiLive({
       }
 
       const activeModel = data.model || "gemini-3.8-live";
-      const activeVoice = data.voice || "Aoede";
+      const activeVoice = data.voice || DEFAULT_VOICE_NAME;
+      const useEdgeTts =
+        activeVoice.includes("Neural") || activeVoice.startsWith("id-ID");
+      const internalGeminiVoice = useEdgeTts ? "Aoede" : activeVoice;
+
       setModelInfo({ model: activeModel, voice: activeVoice });
       setConnectionLabel("Vercel Live Direct");
-      setStatusMessage("Menghubungkan ke Gemini Live API...");
+      setStatusMessage("Menghubungkan ke Gemini Live API (Bahasa Indonesia)...");
+
+      const enqueueDirectEdgeTts = (sentence: string, turnId: number) => {
+        directTtsChainRef.current = directTtsChainRef.current
+          .then(async () => {
+            if (turnId !== directTtsTurnIdRef.current || !directSessionRef.current) {
+              return;
+            }
+            try {
+              const ttsRes = await fetch("/api/tts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: sentence, voice: activeVoice }),
+              });
+              if (!ttsRes.ok) return;
+              const ttsData = await ttsRes.json();
+              if (
+                turnId === directTtsTurnIdRef.current &&
+                directSessionRef.current &&
+                ttsData.audio
+              ) {
+                handleServerMessage({
+                  type: "audio",
+                  data: ttsData.audio,
+                  mimeType: ttsData.mimeType || "audio/mp3",
+                });
+              }
+            } catch (e) {
+              console.warn("Gagal menyintesis kalimat via /api/tts:", e);
+            }
+          })
+          .catch(() => {});
+      };
+
+      const flushDirectSentences = (forceAll: boolean) => {
+        if (!useEdgeTts) return;
+        while (true) {
+          const match = directTtsBufferRef.current.match(
+            /^([\s\S]*?[.!?\n]+)(?:\s+|$)([\s\S]*)$/
+          );
+          if (match && match[1].trim().length >= 8) {
+            const sentence = match[1].trim();
+            directTtsBufferRef.current = match[2] || "";
+            enqueueDirectEdgeTts(sentence, directTtsTurnIdRef.current);
+          } else {
+            break;
+          }
+        }
+        if (forceAll) {
+          const remaining = directTtsBufferRef.current.trim();
+          directTtsBufferRef.current = "";
+          if (remaining.length > 0) {
+            enqueueDirectEdgeTts(remaining, directTtsTurnIdRef.current);
+          }
+        }
+      };
 
       const ai = new GoogleGenAI({
         apiKey: data.token,
@@ -153,9 +227,10 @@ export function useGeminiLive({
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
+            languageCode: "id-ID",
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: activeVoice,
+                voiceName: internalGeminiVoice,
               },
             },
           },
@@ -237,37 +312,66 @@ export function useGeminiLive({
                   speaker: "celyn",
                   text: celynText,
                 });
+                if (useEdgeTts) {
+                  directTtsBufferRef.current += celynText;
+                  flushDirectSentences(false);
+                }
               }
             }
 
             const parts = msg.serverContent?.modelTurn?.parts;
             if (Array.isArray(parts)) {
               for (const part of parts) {
+                if (part.thought) continue;
                 if (
                   part.inlineData &&
                   part.inlineData.mimeType?.startsWith("audio/")
                 ) {
-                  handleServerMessage({
-                    type: "audio",
-                    data: part.inlineData.data,
-                  });
+                  if (!useEdgeTts) {
+                    handleServerMessage({
+                      type: "audio",
+                      data: part.inlineData.data,
+                      mimeType: "audio/pcm",
+                    });
+                  }
                 }
-                if (part.text) {
+                if (part.text && !msg.serverContent?.outputTranscription?.text) {
                   handleServerMessage({
                     type: "transcript",
                     speaker: "celyn",
                     text: part.text,
                   });
+                  if (useEdgeTts) {
+                    directTtsBufferRef.current += part.text;
+                    flushDirectSentences(false);
+                  }
                 }
               }
             }
 
             if (msg.serverContent?.turnComplete) {
-              handleServerMessage({
-                type: "status",
-                status: "listening",
-                message: "Celyn sedang mendengarkan ucapanmu...",
-              });
+              if (useEdgeTts) {
+                flushDirectSentences(true);
+                const turnAtComplete = directTtsTurnIdRef.current;
+                directTtsChainRef.current.then(() => {
+                  if (
+                    directTtsTurnIdRef.current === turnAtComplete &&
+                    directSessionRef.current
+                  ) {
+                    handleServerMessage({
+                      type: "status",
+                      status: "listening",
+                      message: "Celyn sedang mendengarkan ucapanmu...",
+                    });
+                  }
+                });
+              } else {
+                handleServerMessage({
+                  type: "status",
+                  status: "listening",
+                  message: "Celyn sedang mendengarkan ucapanmu...",
+                });
+              }
             }
 
             const toolCall = msg.toolCall;
@@ -434,6 +538,8 @@ export function useGeminiLive({
 
   const disconnect = useCallback(() => {
     pendingQueueRef.current = [];
+    directTtsTurnIdRef.current++;
+    directTtsBufferRef.current = "";
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -475,6 +581,8 @@ export function useGeminiLive({
             },
           });
         } else if (msg.type === "text") {
+          directTtsTurnIdRef.current++;
+          directTtsBufferRef.current = "";
           await session.sendClientContent({
             turns: [{ role: "user", parts: [{ text: msg.text }] }],
             turnComplete: true,
@@ -500,6 +608,11 @@ export function useGeminiLive({
   }, [sendMessage]);
 
   const onBargeIn = useCallback(() => {
+    directTtsTurnIdRef.current++;
+    directTtsBufferRef.current = "";
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "barge_in" }));
+    }
     setStatus("listening");
     setStatusMessage("Celyn sedang mendengarkan ucapanmu...");
   }, []);

@@ -18,13 +18,17 @@ export type ClientMessage =
       type: "tool_response";
       id: string;
       output: Record<string, unknown>;
+    }
+  | {
+      type: "barge_in";
     };
 
 // Pesan Server -> Client
 export type ServerMessage =
   | {
       type: "audio";
-      data: string; // Base64 PCM 24kHz mono
+      data: string; // Base64 MP3 (id-ID-GadisNeural) atau PCM 24kHz mono
+      mimeType?: string;
     }
   | {
       type: "transcript";

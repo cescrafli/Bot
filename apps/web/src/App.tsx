@@ -36,8 +36,8 @@ export function App() {
 
   // Hook Gemini Live WebSocket
   const live = useGeminiLive({
-    onAudioReceived: (b64Audio) => {
-      audioEngine.playAudioChunk(b64Audio);
+    onAudioReceived: (b64Audio, mimeType) => {
+      audioEngine.playAudioChunk(b64Audio, mimeType);
     },
     onInterrupted: () => {
       audioEngine.stopPlayback();
@@ -165,10 +165,10 @@ export function App() {
               </span>
             </h1>
             <p className="text-[10px] sm:text-xs text-slate-400 flex items-center gap-1 sm:gap-1.5">
-              <span>Model: {live.modelInfo.model}</span>
+              <span>Suara: {live.modelInfo.voice === "id-ID-GadisNeural" ? "Gadis (id-ID-GadisNeural)" : live.modelInfo.voice}</span>
               <span className="hidden sm:inline">•</span>
-              <span className="hidden sm:inline-flex items-center gap-1 text-slate-500">
-                <Shield className="w-3 h-3" /> Privasi
+              <span className="hidden sm:inline-flex items-center gap-1 text-emerald-400/90 font-medium">
+                <Shield className="w-3 h-3" /> Bahasa Indonesia
               </span>
             </p>
           </div>

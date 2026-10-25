@@ -3,7 +3,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
-import { ClientMessage } from "@celyn/shared";
+import { synthesizeEdgeTTS } from "./edgeTts.js";
+import { ClientMessage, DEFAULT_VOICE_NAME } from "@celyn/shared";
 
 // Metrik Global Server
 const serverStats = {
@@ -91,6 +92,47 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: err?.message || "Gagal membuat token" }));
       }
     })();
+    return;
+  }
+
+  // Endpoint TTS Microsoft Edge Neural (id-ID-GadisNeural)
+  if (req.url?.startsWith("/api/tts")) {
+    let rawBody = "";
+    req.on("data", (chunk) => {
+      rawBody += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        const parsedUrl = new URL(req.url || "/api/tts", `http://localhost:${config.port}`);
+        let text = parsedUrl.searchParams.get("text") || "";
+        let voice = parsedUrl.searchParams.get("voice") || config.geminiVoice || DEFAULT_VOICE_NAME;
+
+        if (rawBody) {
+          const parsedBody = JSON.parse(rawBody);
+          if (parsedBody.text) text = parsedBody.text;
+          if (parsedBody.voice) voice = parsedBody.voice;
+        }
+
+        if (!text.trim()) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Parameter 'text' wajib diisi." }));
+          return;
+        }
+
+        const mp3Buffer = await synthesizeEdgeTTS(text.slice(0, 1500), { voice });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            audio: mp3Buffer.toString("base64"),
+            mimeType: "audio/mp3",
+            voice,
+          })
+        );
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message || "Gagal menyintesis suara Edge TTS" }));
+      }
+    });
     return;
   }
 

@@ -44,6 +44,8 @@ export function useAudioEngine({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const lastVolumeRef = useRef<number>(0);
+  const playbackEpochRef = useRef<number>(0);
+  const decodeChainRef = useRef<Promise<void>>(Promise.resolve());
 
   // Inisialisasi AudioContext (menggunakan sample rate native perangkat keras sistem)
   const getOrCreateAudioContext = useCallback(() => {
@@ -154,53 +156,91 @@ export function useAudioEngine({
     return buffer;
   };
 
-  // Mainkan audio chunk yang datang dari Gemini
+  // Jadwalkan AudioBuffer ke antrean pemutaran gapless & AnalyserNode Lip-Sync
+  const scheduleAudioBuffer = useCallback(
+    (ctx: AudioContext, audioBuffer: AudioBuffer) => {
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+
+      if (analyserRef.current) {
+        source.connect(analyserRef.current);
+      } else {
+        source.connect(ctx.destination);
+      }
+
+      const now = ctx.currentTime;
+      const startTime = Math.max(now, nextPlayTimeRef.current);
+      source.start(startTime);
+      nextPlayTimeRef.current = startTime + audioBuffer.duration;
+
+      activeSourcesRef.current.push(source);
+      setIsPlaying(true);
+      isPlayingRef.current = true;
+
+      source.onended = () => {
+        activeSourcesRef.current = activeSourcesRef.current.filter(
+          (s) => s !== source
+        );
+        if (activeSourcesRef.current.length === 0) {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+        }
+      };
+    },
+    []
+  );
+
+  // Mainkan audio chunk (mendukung MP3 dari Microsoft Edge Neural id-ID-GadisNeural maupun PCM 24kHz)
   const playAudioChunk = useCallback(
-    (b64PCM24k: string) => {
+    (b64Audio: string, mimeType?: string) => {
       try {
         const ctx = getOrCreateAudioContext();
         if (ctx.state === "suspended") {
           ctx.resume();
         }
 
-        const audioBuffer = base64PcmToAudioBuffer(ctx, b64PCM24k, 24000);
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
+        const isMp3 =
+          mimeType?.includes("mp3") ||
+          mimeType?.includes("mpeg") ||
+          (!mimeType &&
+            (b64Audio.startsWith("//") ||
+              b64Audio.startsWith("SUQz") ||
+              b64Audio.startsWith("/+")));
 
-        if (analyserRef.current) {
-          source.connect(analyserRef.current);
-        } else {
-          source.connect(ctx.destination);
+        if (isMp3) {
+          const epochAtEnqueue = playbackEpochRef.current;
+          decodeChainRef.current = decodeChainRef.current
+            .then(async () => {
+              if (epochAtEnqueue !== playbackEpochRef.current) return;
+              const binary = atob(b64Audio);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+              }
+              const decodedBuffer = await ctx.decodeAudioData(
+                bytes.buffer.slice(0)
+              );
+              if (epochAtEnqueue !== playbackEpochRef.current) return;
+              scheduleAudioBuffer(ctx, decodedBuffer);
+            })
+            .catch((err) => {
+              console.error("Gagal men-decode audio MP3 GadisNeural:", err);
+            });
+          return;
         }
 
-        const now = ctx.currentTime;
-        // Jaga streaming audio tetap seamless tanpa jeda antar chunk
-        const startTime = Math.max(now, nextPlayTimeRef.current);
-        source.start(startTime);
-        nextPlayTimeRef.current = startTime + audioBuffer.duration;
-
-        activeSourcesRef.current.push(source);
-        setIsPlaying(true);
-        isPlayingRef.current = true;
-
-        source.onended = () => {
-          activeSourcesRef.current = activeSourcesRef.current.filter(
-            (s) => s !== source
-          );
-          if (activeSourcesRef.current.length === 0) {
-            setIsPlaying(false);
-            isPlayingRef.current = false;
-          }
-        };
+        const audioBuffer = base64PcmToAudioBuffer(ctx, b64Audio, 24000);
+        scheduleAudioBuffer(ctx, audioBuffer);
       } catch (err) {
         console.error("Gagal memainkan chunk audio:", err);
       }
     },
-    [getOrCreateAudioContext]
+    [getOrCreateAudioContext, scheduleAudioBuffer]
   );
 
   // Hentikan seketika saat barge-in
   const stopPlayback = useCallback(() => {
+    playbackEpochRef.current++;
     for (const source of activeSourcesRef.current) {
       try {
         source.stop();

@@ -1,8 +1,9 @@
 /**
  * Unit & Integration Smoke Test Suite untuk Celyn AI BOT
- * Menguji pipeline audio, visual change-detection, tool-calling schema, dan emosi.
+ * Menguji pipeline audio, visual change-detection, tool-calling schema, emosi, dan suara id-ID-GadisNeural.
  */
-import { normalizeEmotion } from "@celyn/shared";
+import { normalizeEmotion, DEFAULT_VOICE_NAME, CELYN_SYSTEM_PROMPT } from "@celyn/shared";
+import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
 
@@ -109,13 +110,47 @@ assert(normalizeEmotion("kaget") === "surprised", "Pemetaan sinonim bahasa Indon
 assert(normalizeEmotion("sedih") === "sad", "Pemetaan sinonim bahasa Indonesia 'sedih' -> 'sad'");
 assert(normalizeEmotion("unknown_random_string") === "neutral", "Fallback emosi yang tidak dikenal -> 'neutral'");
 
-// 5. Ringkasan
-console.log("\n=======================================================");
-console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
-console.log("=======================================================\n");
+// 5. Uji Suara Microsoft Edge Neural (id-ID-GadisNeural) & Bahasa Indonesia
+async function runTtsTests() {
+  console.log("\n--- 5. Uji Suara Microsoft Edge Neural (id-ID-GadisNeural) & Bahasa Indonesia ---");
+  assert(
+    DEFAULT_VOICE_NAME === "id-ID-GadisNeural",
+    `Default voice Celyn adalah '${DEFAULT_VOICE_NAME}'`
+  );
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("100% BAHASA INDONESIA") &&
+      CELYN_SYSTEM_PROMPT.includes("id-ID-GadisNeural"),
+    "System prompt mengunci percakapan 100% Bahasa Indonesia dengan id-ID-GadisNeural"
+  );
 
-if (failed > 0) {
-  process.exit(1);
-} else {
-  console.log("🎉 SEMUA UJI PIPELINE BERHASIL DENGAN SEMPURNA!");
+  const gecToken = generateSecMsGecV2();
+  assert(
+    /^[0-9A-F]{16}-[0-9A-F]{64}$/.test(gecToken),
+    `Token Sec-MS-GEC v2 valid (${gecToken.slice(0, 24)}...)`
+  );
+
+  const audioBuf = await synthesizeEdgeTTS(
+    "Halo! Aku Celyn, senang sekali bisa mengobrol denganmu dalam bahasa Indonesia.",
+    { voice: "id-ID-GadisNeural" }
+  );
+  assert(
+    audioBuf.length > 10000,
+    `Sintesis suara Gadis (id-ID-GadisNeural) berhasil (${audioBuf.length} bytes MP3)`
+  );
+
+  // 6. Ringkasan
+  console.log("\n=======================================================");
+  console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
+  console.log("=======================================================\n");
+
+  if (failed > 0) {
+    process.exit(1);
+  } else {
+    console.log("🎉 SEMUA UJI PIPELINE BERHASIL DENGAN SEMPURNA!");
+  }
 }
+
+runTtsTests().catch((err) => {
+  console.error("❌ Error pada pengujian TTS:", err);
+  process.exit(1);
+});

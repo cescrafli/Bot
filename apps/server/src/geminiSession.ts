@@ -1,12 +1,14 @@
 import { WebSocket } from "ws";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { config } from "./config.js";
+import { synthesizeEdgeTTS } from "./edgeTts.js";
 import {
   ClientMessage,
   ServerMessage,
   normalizeEmotion,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
+  DEFAULT_VOICE_NAME,
 } from "@celyn/shared";
 
 export type SessionState = "DISCONNECTED" | "CONNECTING" | "ACTIVE" | "CLOSING" | "CLOSED";
@@ -19,6 +21,12 @@ export class GeminiSession {
   private maxDurationTimer: NodeJS.Timeout | null = null;
   private warningTimer: NodeJS.Timeout | null = null;
 
+  // State untuk streaming sintesis suara Microsoft Edge Neural (id-ID-GadisNeural)
+  private ttsBuffer = "";
+  private ttsTurnId = 0;
+  private ttsChain: Promise<void> = Promise.resolve();
+  private useEdgeTts = true;
+
   public stats = {
     audioChunksIn: 0,
     audioChunksOut: 0,
@@ -28,6 +36,9 @@ export class GeminiSession {
 
   constructor(clientWs: WebSocket) {
     this.clientWs = clientWs;
+    this.useEdgeTts =
+      config.geminiVoice.includes("Neural") ||
+      config.geminiVoice.startsWith("id-ID");
   }
 
   public async connect(): Promise<void> {
@@ -44,21 +55,25 @@ export class GeminiSession {
     }
 
     try {
-      console.log(`🔌 [Gemini Live SDK] Menginisialisasi sesi dengan model: ${config.geminiModel}`);
+      console.log(
+        `🔌 [Gemini Live SDK] Menginisialisasi sesi (${config.geminiModel}) dengan suara: ${config.geminiVoice}`
+      );
       const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+      const internalGeminiVoice = this.useEdgeTts ? "Aoede" : config.geminiVoice;
 
       this.session = await ai.live.connect({
         model: config.geminiModel,
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
+            languageCode: "id-ID",
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: config.geminiVoice,
+                voiceName: internalGeminiVoice,
               },
             },
           },
-          // Aktifkan transkripsi dua arah real-time
+          // Aktifkan transkripsi dua arah real-time Bahasa Indonesia
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           systemInstruction: {
@@ -212,10 +227,63 @@ export class GeminiSession {
     this.maxDurationTimer = null;
   }
 
+  private cancelPendingTts(): void {
+    this.ttsTurnId++;
+    this.ttsBuffer = "";
+  }
+
+  private flushCompleteSentences(forceAll: boolean): void {
+    if (!this.useEdgeTts) return;
+
+    while (true) {
+      const match = this.ttsBuffer.match(/^([\s\S]*?[.!?\n]+)(?:\s+|$)([\s\S]*)$/);
+      if (match && match[1].trim().length >= 8) {
+        const sentence = match[1].trim();
+        this.ttsBuffer = match[2] || "";
+        this.enqueueEdgeTts(sentence, this.ttsTurnId);
+      } else {
+        break;
+      }
+    }
+
+    if (forceAll) {
+      const remaining = this.ttsBuffer.trim();
+      this.ttsBuffer = "";
+      if (remaining.length > 0) {
+        this.enqueueEdgeTts(remaining, this.ttsTurnId);
+      }
+    }
+  }
+
+  private enqueueEdgeTts(sentence: string, turnId: number): void {
+    const voice = config.geminiVoice || DEFAULT_VOICE_NAME;
+    this.ttsChain = this.ttsChain
+      .then(async () => {
+        if (turnId !== this.ttsTurnId || this.state !== "ACTIVE") return;
+        try {
+          console.log(`🗣️ [Edge Neural TTS - ${voice}] Menyintesis: "${sentence}"`);
+          const mp3Buf = await synthesizeEdgeTTS(sentence, { voice });
+          if (turnId !== this.ttsTurnId || this.state !== "ACTIVE" || mp3Buf.length === 0) {
+            return;
+          }
+          this.stats.audioChunksOut++;
+          this.sendToClient({
+            type: "audio",
+            data: mp3Buf.toString("base64"),
+            mimeType: "audio/mp3",
+          });
+        } catch (err: any) {
+          console.error(`❌ [Edge Neural TTS] Gagal menyintesis kalimat:`, err?.message || err);
+        }
+      })
+      .catch(() => {});
+  }
+
   private handleGeminiMessage(data: any): void {
     // 1. Interupsi (Barge-in)
     if (data.serverContent?.interrupted) {
       console.log("⚡ [Gemini Live] Interrupted: pengguna memotong bicara Celyn");
+      this.cancelPendingTts();
       this.sendToClient({ type: "interrupted" });
       return;
     }
@@ -233,7 +301,7 @@ export class GeminiSession {
       }
     }
 
-    // 2.1 Transkripsi Suara Celyn (Output Transcription)
+    // 2.1 Transkripsi Suara Celyn (Output Transcription Bahasa Indonesia)
     if (data.serverContent?.outputTranscription?.text) {
       const celynText = data.serverContent.outputTranscription.text;
       if (celynText) {
@@ -242,6 +310,10 @@ export class GeminiSession {
           speaker: "celyn",
           text: celynText,
         });
+        if (this.useEdgeTts) {
+          this.ttsBuffer += celynText;
+          this.flushCompleteSentences(false);
+        }
       }
     }
 
@@ -249,20 +321,31 @@ export class GeminiSession {
     const parts = data.serverContent?.modelTurn?.parts;
     if (Array.isArray(parts)) {
       for (const part of parts) {
+        // Abaikan token thought internal model agar tidak tampil atau dibacakan
+        if (part.thought) continue;
+
         if (part.inlineData && part.inlineData.mimeType?.startsWith("audio/")) {
-          this.stats.audioChunksOut++;
-          this.sendToClient({
-            type: "audio",
-            data: part.inlineData.data,
-          });
+          // Hanya kirim audio bawaan Gemini jika tidak menggunakan Microsoft Edge Neural TTS
+          if (!this.useEdgeTts) {
+            this.stats.audioChunksOut++;
+            this.sendToClient({
+              type: "audio",
+              data: part.inlineData.data,
+              mimeType: "audio/pcm",
+            });
+          }
         }
-        if (part.text) {
+        if (part.text && !data.serverContent?.outputTranscription?.text) {
           console.log(`💬 [Celyn AI]: ${part.text}`);
           this.sendToClient({
             type: "transcript",
             speaker: "celyn",
             text: part.text,
           });
+          if (this.useEdgeTts) {
+            this.ttsBuffer += part.text;
+            this.flushCompleteSentences(false);
+          }
         }
       }
     }
@@ -270,11 +353,25 @@ export class GeminiSession {
     // 2.5 Giliran Model Selesai
     if (data.serverContent?.turnComplete) {
       console.log("🏁 [Gemini Live] Giliran bicara Celyn selesai.");
-      this.sendToClient({
-        type: "status",
-        status: "listening",
-        message: "Celyn sedang mendengarkan ucapanmu...",
-      });
+      if (this.useEdgeTts) {
+        this.flushCompleteSentences(true);
+        const turnAtComplete = this.ttsTurnId;
+        this.ttsChain.then(() => {
+          if (this.ttsTurnId === turnAtComplete && this.state === "ACTIVE") {
+            this.sendToClient({
+              type: "status",
+              status: "listening",
+              message: "Celyn sedang mendengarkan ucapanmu...",
+            });
+          }
+        });
+      } else {
+        this.sendToClient({
+          type: "status",
+          status: "listening",
+          message: "Celyn sedang mendengarkan ucapanmu...",
+        });
+      }
     }
 
     // 3. Tool Calls
@@ -363,10 +460,14 @@ export class GeminiSession {
         });
       } else if (msg.type === "text") {
         console.log(`👤 [User Text]: "${msg.text}"`);
+        this.cancelPendingTts();
         await this.session.sendClientContent({
           turns: [{ role: "user", parts: [{ text: msg.text }] }],
           turnComplete: true,
         });
+      } else if (msg.type === "barge_in") {
+        console.log("⚡ [Client Barge-In] Membatalkan antrean TTS Celyn...");
+        this.cancelPendingTts();
       } else if (msg.type === "tool_response") {
         await this.session.sendToolResponse({
           functionResponses: [
@@ -391,6 +492,7 @@ export class GeminiSession {
 
   public close(): void {
     this.state = "CLOSING";
+    this.cancelPendingTts();
     this.clearTimers();
     this.pendingQueue = [];
     if (this.session) {
