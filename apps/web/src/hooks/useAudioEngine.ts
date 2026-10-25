@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { analyzeHumanVoiceFrame } from "@celyn/shared";
 
 interface UseAudioEngineOptions {
   onAudioChunk: (b64PCM16k: string) => void;
@@ -35,8 +36,16 @@ export function useAudioEngine({
   const workletLoadedRef = useRef<boolean>(false);
   const micStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const highPassFilterRef = useRef<BiquadFilterNode | null>(null);
+  const lowPassFilterRef = useRef<BiquadFilterNode | null>(null);
   const silentGainRef = useRef<GainNode | null>(null);
   const bargeInStreakRef = useRef<number>(0);
+
+  // Human-Voice VAD & Gumaman ("Hmmm / Aaa") Gate State
+  const noiseFloorRef = useRef<number>(0.008);
+  const preRollBufferRef = useRef<Int16Array[]>([]);
+  const voiceHangoverFramesRef = useRef<number>(0);
+  const isGateOpenRef = useRef<boolean>(false);
 
   // Playback queue & analyser
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
@@ -306,28 +315,43 @@ export function useAudioEngine({
       micStreamRef.current = stream;
 
       const micSource = ctx.createMediaStreamSource(stream);
+
+      // Rantai filter frekuensi pita suara manusia (90 Hz HPF + 3600 Hz LPF)
+      // Menghilangkan dengung AC/kipas angin (<90 Hz) dan klik mouse/keyboard (>3600 Hz)
+      const highPass = ctx.createBiquadFilter();
+      highPass.type = "highpass";
+      highPass.frequency.value = 90;
+      highPass.Q.value = 0.707;
+      highPassFilterRef.current = highPass;
+
+      const lowPass = ctx.createBiquadFilter();
+      lowPass.type = "lowpass";
+      lowPass.frequency.value = 3600;
+      lowPass.Q.value = 0.707;
+      lowPassFilterRef.current = lowPass;
+
       const workletNode = new AudioWorkletNode(ctx, "gemini-audio-recorder");
       workletNodeRef.current = workletNode;
 
       workletNode.port.onmessage = (e) => {
         const pcm16k = e.data as Int16Array;
+        const analysis = analyzeHumanVoiceFrame(pcm16k, noiseFloorRef.current);
 
-        // Hitung RMS energi suara mikrofon
-        let sumSquares = 0;
-        for (let i = 0; i < pcm16k.length; i++) {
-          const norm = pcm16k[i] / 32768.0;
-          sumSquares += norm * norm;
+        // Update noise floor secara adaptif saat hening/background noise ruangan
+        if (!analysis.isHumanVoice && analysis.rms < 0.02) {
+          noiseFloorRef.current = noiseFloorRef.current * 0.95 + analysis.rms * 0.05;
         }
-        const micRms = Math.sqrt(sumSquares / pcm16k.length);
 
-        // Smart Barge-In & Echo Protection:
-        // Saat Celyn bersuara: periksa apakah pengguna memotong pembicaraan dengan volume normal
+        // =========================================================================
+        // 1. SMART BARGE-IN (Saat Celyn sedang berbicara)
+        // Hanya bisa dipotong oleh suara bicara manusia / gumaman aktif, bukan klik/batuk
+        // =========================================================================
         if (isPlayingRef.current) {
-          if (micRms > 0.075) {
+          if (analysis.isHumanVoice && analysis.rms > 0.085) {
             bargeInStreakRef.current++;
-            // Jika pengguna berbicara selama 3 paket berturut-turut (~384ms), picu barge-in
+            // Jika pengguna berbicara kontinu selama 3 paket berturut-turut (~384ms), picu barge-in
             if (bargeInStreakRef.current >= 3) {
-              console.log("⚡ [Smart Barge-In] Interupsi suara pengguna terdeteksi!");
+              console.log("⚡ [Smart Barge-In] Suara manusia memotong Celyn terdeteksi!");
               stopPlayback();
               bargeInStreakRef.current = 0;
               onBargeInRef.current?.();
@@ -340,12 +364,47 @@ export function useAudioEngine({
           return;
         }
 
+        // =========================================================================
+        // 2. LISTENING MODE (Saat Celyn mendengarkan pengguna)
+        // Tidak sensitif terhadap bising, hanya aktif jika ada orang bicara / gumaman "hmmm" / "aaa"
+        // =========================================================================
         bargeInStreakRef.current = 0;
-        const b64 = int16ToBase64(pcm16k);
-        onAudioChunkRef.current?.(b64);
+
+        if (analysis.isHumanVoice || analysis.isSustainedVocal) {
+          // Gerbang terbuka: jika baru aktif, flush pre-roll buffer (256ms) agar awalan kata tidak hilang
+          if (!isGateOpenRef.current) {
+            isGateOpenRef.current = true;
+            for (const preRoll of preRollBufferRef.current) {
+              onAudioChunkRef.current?.(int16ToBase64(preRoll));
+            }
+            preRollBufferRef.current = [];
+          }
+          voiceHangoverFramesRef.current = 7; // Tahan gerbang tetap terbuka ~896ms
+          onAudioChunkRef.current?.(int16ToBase64(pcm16k));
+        } else if (voiceHangoverFramesRef.current > 0) {
+          // Hangover tail: menjaga gumaman lambat ("hmmm... aaa...") dan jeda mikro antar-kata
+          voiceHangoverFramesRef.current--;
+          onAudioChunkRef.current?.(int16ToBase64(pcm16k));
+        } else {
+          // Gerbang tertutup: tidak ada orang berbicara (hanya kebisingan ruangan/kipas/klik)
+          if (isGateOpenRef.current) {
+            isGateOpenRef.current = false;
+          }
+          // Simpan ke ring buffer pre-roll (maksimal 2 frame = 256ms)
+          preRollBufferRef.current.push(pcm16k);
+          if (preRollBufferRef.current.length > 2) {
+            preRollBufferRef.current.shift();
+          }
+          // Kirim frame hening (digital silence) agar Gemini Live tetap sync tanpa terpicu bising
+          const silence = new Int16Array(pcm16k.length);
+          onAudioChunkRef.current?.(int16ToBase64(silence));
+        }
       };
 
-      micSource.connect(workletNode);
+      // Sambungkan rantai filter: mic -> HPF -> LPF -> workletNode
+      micSource.connect(highPass);
+      highPass.connect(lowPass);
+      lowPass.connect(workletNode);
 
       // Hubungkan workletNode ke destination dengan gain 0 agar browser tidak men-suspend audio thread
       const silentGain = ctx.createGain();
@@ -368,6 +427,14 @@ export function useAudioEngine({
       micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;
     }
+    if (highPassFilterRef.current) {
+      highPassFilterRef.current.disconnect();
+      highPassFilterRef.current = null;
+    }
+    if (lowPassFilterRef.current) {
+      lowPassFilterRef.current.disconnect();
+      lowPassFilterRef.current = null;
+    }
     if (workletNodeRef.current) {
       workletNodeRef.current.disconnect();
       workletNodeRef.current = null;
@@ -376,6 +443,10 @@ export function useAudioEngine({
       silentGainRef.current.disconnect();
       silentGainRef.current = null;
     }
+    preRollBufferRef.current = [];
+    voiceHangoverFramesRef.current = 0;
+    bargeInStreakRef.current = 0;
+    isGateOpenRef.current = false;
     setIsMicActive(false);
   }, []);
 

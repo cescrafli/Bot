@@ -12,6 +12,7 @@ import {
   normalizeSpokenIndonesian,
   buildExpressiveSsml,
   buildContextualGreetingPrompt,
+  analyzeHumanVoiceFrame,
 } from "@celyn/shared";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
@@ -265,7 +266,66 @@ async function runTtsTests() {
     `Sapaan pembuka dinamis menyesuaikan waktu pengguna (${morningGreeting.slice(0, 35)}...)`
   );
 
-  // 7. Ringkasan
+  // 7. Uji Human-Voice VAD & Deteksi Gumaman ("hmmm", "aaa") vs Penolakan Noise
+  console.log("\n--- 7. Uji Smart Human-Voice VAD & Deteksi Gumaman (hmmm, aaa) ---");
+
+  // Helper untuk membuat buffer PCM 16kHz (2048 sample / 128ms)
+  const sampleRate = 16000;
+  const frameLength = 2048;
+
+  // Kasus A: Gumaman "hmmm" (gelombang sinus ~180 Hz dengan amplitudo vokal sedang)
+  const hmmmPcm = new Int16Array(frameLength);
+  for (let i = 0; i < frameLength; i++) {
+    hmmmPcm[i] = Math.round(Math.sin((2 * Math.PI * 180 * i) / sampleRate) * 10000);
+  }
+  const hmmmAnalysis = analyzeHumanVoiceFrame(hmmmPcm);
+  assert(
+    hmmmAnalysis.isHumanVoice && hmmmAnalysis.isSustainedVocal,
+    `Deteksi gumaman 'hmmm' (180Hz) berhasil diidentifikasi sebagai suara manusia & vokal berkelanjutan (RMS: ${hmmmAnalysis.rms.toFixed(3)}, ZCR: ${hmmmAnalysis.zcr.toFixed(3)})`
+  );
+
+  // Kasus B: Vokal "aaa" (gelombang sinus ~700 Hz dengan amplitudo vokal jelas)
+  const aaaPcm = new Int16Array(frameLength);
+  for (let i = 0; i < frameLength; i++) {
+    aaaPcm[i] = Math.round(Math.sin((2 * Math.PI * 700 * i) / sampleRate) * 12000);
+  }
+  const aaaAnalysis = analyzeHumanVoiceFrame(aaaPcm);
+  assert(
+    aaaAnalysis.isHumanVoice && aaaAnalysis.isSustainedVocal,
+    `Deteksi vokal 'aaa' (700Hz) berhasil diidentifikasi sebagai suara manusia & vokal berkelanjutan (RMS: ${aaaAnalysis.rms.toFixed(3)}, ZCR: ${aaaAnalysis.zcr.toFixed(3)})`
+  );
+
+  // Kasus C: Kebisingan ruangan / desis kipas halus (random noise, RMS rendah di bawah batas vokal)
+  const noisePcm = new Int16Array(frameLength);
+  for (let i = 0; i < frameLength; i++) {
+    noisePcm[i] = Math.round((Math.random() * 2 - 1) * 200); // Amplitudo sangat kecil
+  }
+  const noiseAnalysis = analyzeHumanVoiceFrame(noisePcm);
+  assert(
+    !noiseAnalysis.isHumanVoice && !noiseAnalysis.isSustainedVocal,
+    `Penolakan desis/noise ruangan berhasil (RMS: ${noiseAnalysis.rms.toFixed(4)} < threshold, isHumanVoice: false)`
+  );
+
+  // Kasus D: Ketukan meja / klik mouse impulsif (crest factor sangat tinggi)
+  const clickPcm = new Int16Array(frameLength);
+  clickPcm[500] = 26000;
+  clickPcm[501] = -22000;
+  clickPcm[502] = 12000;
+  const clickAnalysis = analyzeHumanVoiceFrame(clickPcm);
+  assert(
+    !clickAnalysis.isHumanVoice && clickAnalysis.crestFactor > 7.2,
+    `Penolakan klik/ketukan impulsif berhasil (Crest factor: ${clickAnalysis.crestFactor.toFixed(1)} > 7.2, isHumanVoice: false)`
+  );
+
+  // Kasus E: Instruksi prompt Celyn untuk mendengarkan gumaman & respons sabar
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("PEKA TERHADAP GUMAMAN & EKSPRESI VOKAL") &&
+      CELYN_SYSTEM_PROMPT.includes("hmmm...") &&
+      CELYN_SYSTEM_PROMPT.includes("aaa..."),
+    "Prompt sistem Celyn memuat instruksi eksplisit untuk menyimak gumaman berpikir ('hmmm...', 'aaa...')"
+  );
+
+  // 8. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

@@ -264,6 +264,108 @@ export function generateSecMsGecV2(unixSeconds?: number): string {
   return `${cs64}-${uint8ToHex(digest)}`;
 }
 
+export interface VoiceFrameAnalysis {
+  isHumanVoice: boolean;
+  isSustainedVocal: boolean; // Khusus vokal gumaman "hmmm", "aaa", "eh", "uhm"
+  rms: number;
+  zcr: number;
+  crestFactor: number;
+}
+
+/**
+ * Menganalisis frame audio 16kHz PCM (2048 sample / 128ms) untuk membedakan
+ * suara manusia & gumaman vokal ("hmmm", "aaa", "eh", "uhm") dari kebisingan ruangan,
+ * klik mouse, ketikan keyboard, dengung kipas, dan hembusan napas.
+ */
+export function analyzeHumanVoiceFrame(
+  pcm16k: Int16Array,
+  noiseFloor = 0.008
+): VoiceFrameAnalysis {
+  const len = pcm16k.length;
+  if (len === 0) {
+    return {
+      isHumanVoice: false,
+      isSustainedVocal: false,
+      rms: 0,
+      zcr: 0,
+      crestFactor: 0,
+    };
+  }
+
+  let sumSquares = 0;
+  let maxAbs = 0;
+  let zeroCrossings = 0;
+
+  // Analisis 4 sub-frame (masing-masing 32ms) untuk mengecek kontinuitas getaran vokal
+  const subFrameLen = Math.floor(len / 4);
+  let activeSubFrames = 0;
+
+  for (let s = 0; s < 4; s++) {
+    let subSum = 0;
+    const start = s * subFrameLen;
+    const end = s === 3 ? len : start + subFrameLen;
+
+    for (let i = start; i < end; i++) {
+      const val = pcm16k[i];
+      const norm = val / 32768.0;
+      const absNorm = Math.abs(norm);
+      sumSquares += norm * norm;
+      subSum += norm * norm;
+      if (absNorm > maxAbs) maxAbs = absNorm;
+
+      if (i > 0) {
+        const prev = pcm16k[i - 1];
+        if ((val >= 0 && prev < 0) || (val < 0 && prev >= 0)) {
+          zeroCrossings++;
+        }
+      }
+    }
+
+    const subRms = Math.sqrt(subSum / (end - start));
+    if (subRms > Math.max(0.014, noiseFloor * 1.5)) {
+      activeSubFrames++;
+    }
+  }
+
+  const rms = Math.sqrt(sumSquares / len);
+  const zcr = zeroCrossings / len;
+  const crestFactor = rms > 0.0001 ? maxAbs / rms : 0;
+
+  // 1. Ambang batas energi minimal agar tidak sensitif terhadap bisikan kipas / desis statis
+  const hasVoiceEnergy = rms > Math.max(0.016, noiseFloor * 1.8);
+
+  // 2. Rentang Zero-Crossing Rate (ZCR) pita suara manusia (85 Hz - 3600 Hz):
+  // Pita vokal & gumaman manusia berada di 0.008 s/d 0.28
+  // Desis / klik keyboard frekuensi tinggi > 0.30
+  const isVocalZcr = zcr >= 0.007 && zcr <= 0.28;
+
+  // 3. Crest Factor Rejection:
+  // Suara ketukan meja / klik mouse memiliki lonjakan sesaat impulsif (crestFactor > 7.5)
+  // Getaran pita suara manusia memiliki getaran harmonik kontinu (crestFactor 1.4 - 7.2)
+  const isNonImpulsive = crestFactor >= 1.3 && crestFactor <= 7.2;
+
+  // 4. Deteksi khusus vokal berkelanjutan ("hmmm", "aaa", "uhm", "eh"):
+  // Gumaman manusia bergetar stabil di minimal 2 dari 4 sub-frame dengan crest factor halus
+  const isSustainedVocal =
+    hasVoiceEnergy &&
+    isVocalZcr &&
+    activeSubFrames >= 2 &&
+    crestFactor <= 6.5;
+
+  // Deteksi suara manusia umum (bicara normal atau vokal berkelanjutan)
+  const isHumanVoice =
+    (hasVoiceEnergy && isVocalZcr && isNonImpulsive && activeSubFrames >= 2) ||
+    isSustainedVocal;
+
+  return {
+    isHumanVoice,
+    isSustainedVocal,
+    rms,
+    zcr,
+    crestFactor,
+  };
+}
+
 export interface IndonesianProsody {
   rate: string;
   pitch: string;
