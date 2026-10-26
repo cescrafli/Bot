@@ -41,7 +41,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
               </span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Pilih karakter vokal sesuai preferensi Anda (Real-Time Multimodal vs Neural TTS)
+              Pilih karakter vokal sesuai preferensi Anda (Real-Time Gemini Live Audio)
             </p>
           </div>
         </div>
@@ -122,10 +122,10 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
         <div className="p-3 sm:p-3.5 rounded-xl bg-slate-800/60 border border-white/5 text-xs text-slate-300 space-y-1">
           <div className="flex items-center gap-1.5 font-semibold text-rose-300 text-xs">
             <Sparkles className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>Tips Kenaturalan Suara</span>
+            <span>Karakter Suara Native Gemini</span>
           </div>
           <p className="text-[10px] sm:text-[11px] leading-relaxed text-slate-400">
-            Pilih <strong>Aoede</strong> untuk obrolan paling hidup dan ekspresif dengan latensi instan. Pilih <strong>Gadis</strong> jika Anda membutuhkan artikulasi teks Bahasa Indonesia baku yang sangat jelas.
+            Pilih <strong>Aoede</strong> untuk karakter ceria, ekspresif, dan tawa spontan. Pilih <strong>Kore</strong> untuk nada bicara yang lebih santai, tenang, dan hangat.
           </p>
         </div>
       </div>

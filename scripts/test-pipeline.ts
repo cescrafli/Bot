@@ -125,12 +125,12 @@ assert(normalizeEmotion("kaget") === "surprised", "Pemetaan sinonim bahasa Indon
 assert(normalizeEmotion("sedih") === "sad", "Pemetaan sinonim bahasa Indonesia 'sedih' -> 'sad'");
 assert(normalizeEmotion("unknown_random_string") === "neutral", "Fallback emosi yang tidak dikenal -> 'neutral'");
 
-// 5. Uji Katalog Multi-Voice & Sintesis Edge Neural
+// 5. Uji Katalog Multi-Voice Native Gemini & Sintesis Edge Neural
 async function runTtsTests() {
-  console.log("\n--- 5. Uji Katalog Multi-Voice & Sintesis Edge Neural ---");
+  console.log("\n--- 5. Uji Katalog Multi-Voice Native Gemini & Sintesis Edge Neural ---");
   assert(
-    VOICE_OPTIONS.length === 4,
-    `Katalog multi-voice memiliki 4 profil suara (${VOICE_OPTIONS.map((v) => v.name).join(", ")})`
+    VOICE_OPTIONS.length === 2,
+    `Katalog voice memiliki 2 profil suara ultra-natural (${VOICE_OPTIONS.map((v) => v.name).join(", ")})`
   );
   assert(
     DEFAULT_VOICE_NAME === "Aoede",
@@ -139,10 +139,6 @@ async function runTtsTests() {
   assert(
     isNativeGeminiVoice("Aoede") === true && isNativeGeminiVoice("Kore") === true,
     "Aoede & Kore teridentifikasi sebagai Native Gemini Voice (Real-Time)"
-  );
-  assert(
-    isNativeGeminiVoice("id-ID-GadisNeural") === false && isNativeGeminiVoice("en-US-AvaMultilingualNeural") === false,
-    "Gadis & Ava teridentifikasi sebagai Microsoft Edge Neural TTS Voice"
   );
   assert(
     CELYN_SYSTEM_PROMPT.includes("100% BAHASA INDONESIA"),

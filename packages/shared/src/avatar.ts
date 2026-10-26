@@ -119,24 +119,6 @@ export const VOICE_OPTIONS: VoiceOption[] = [
     badge: "Natural Hangat",
     internalGeminiVoice: "Kore",
   },
-  {
-    id: "id-ID-GadisNeural",
-    name: "Gadis",
-    label: "Gadis (Edge Neural Indonesia)",
-    engine: "edge",
-    description: "Microsoft Edge TTS: pelafalan Bahasa Indonesia baku dan jernih",
-    badge: "Artikulasi Jernih",
-    internalGeminiVoice: "Aoede",
-  },
-  {
-    id: "en-US-AvaMultilingualNeural",
-    name: "Ava",
-    label: "Ava (Edge Multilingual Conversational)",
-    engine: "edge",
-    description: "Microsoft Neural generasi baru: gaya obrolan luwes berbahasa Indonesia",
-    badge: "Conversational",
-    internalGeminiVoice: "Aoede",
-  },
 ];
 
 export function isNativeGeminiVoice(voiceId?: string): boolean {
