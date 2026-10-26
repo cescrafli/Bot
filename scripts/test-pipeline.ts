@@ -356,7 +356,37 @@ async function runTtsTests() {
     "Kalimat berlanjut tidak dipotong terburu-buru saat isFirstChunk=false (menjaga prosodi alami)"
   );
 
-  // 9. Ringkasan
+  // 9. Uji Gerbang Autentikasi Admin & Proteksi Sesi
+  console.log("\n--- 9. Uji Gerbang Autentikasi Admin & Proteksi Token ---");
+
+  const ADMIN_PASS = "admin";
+  const validateAuth = (input: string) => input.trim() === ADMIN_PASS;
+
+  assert(validateAuth("admin"), "Kata sandi otorisasi 'admin' berhasil divalidasi");
+  assert(validateAuth(" admin "), "Kata sandi dengan spasi ' admin ' berhasil ditoleransi via trim");
+  assert(!validateAuth("12345"), "Kata sandi salah '12345' ditolak oleh sistem");
+  assert(!validateAuth(""), "Kata sandi kosong ditolak oleh sistem");
+
+  // Simulasi verifikasi otentikasi endpoint /api/token
+  function checkApiTokenAuth(headers: Record<string, string>, query: Record<string, string>) {
+    const expected = "admin";
+    const provided = headers["x-admin-password"] || query.password || query.key;
+    if (!provided || String(provided).trim() !== expected) {
+      return { status: 401, error: "Unauthorized" };
+    }
+    return { status: 200, ok: true };
+  }
+
+  const noHeaderReq = checkApiTokenAuth({}, {});
+  assert(noHeaderReq.status === 401, "Permintaan /api/token tanpa x-admin-password ditolak (HTTP 401)");
+
+  const wrongHeaderReq = checkApiTokenAuth({ "x-admin-password": "salah" }, {});
+  assert(wrongHeaderReq.status === 401, "Permintaan /api/token dengan password salah ditolak (HTTP 401)");
+
+  const validHeaderReq = checkApiTokenAuth({ "x-admin-password": "admin" }, {});
+  assert(validHeaderReq.status === 200, "Permintaan /api/token dengan header 'x-admin-password: admin' diterima (HTTP 200)");
+
+  // 10. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

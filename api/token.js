@@ -27,7 +27,7 @@ function isRateLimited(ip) {
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
   if (req.method === "OPTIONS") {
@@ -36,6 +36,19 @@ export default async function handler(req, res) {
 
   if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed. Gunakan GET atau POST." });
+  }
+
+  // Verifikasi Kata Sandi Admin (x-admin-password)
+  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
+  const providedPassword =
+    req.headers["x-admin-password"] ||
+    req.query?.password ||
+    req.query?.key;
+
+  if (!providedPassword || String(providedPassword).trim() !== expectedPassword) {
+    return res.status(401).json({
+      error: "Akses ditolak: Kata sandi admin diperlukan untuk meminta token sesi Celyn AI.",
+    });
   }
 
   const clientIp =

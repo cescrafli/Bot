@@ -20,7 +20,7 @@ const server = http.createServer((req, res) => {
   // CORS Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization");
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -61,7 +61,19 @@ const server = http.createServer((req, res) => {
   }
 
   // Ephemeral Token endpoint (kompatibel dengan mode Vercel Serverless)
-  if (req.url === "/api/token") {
+  if (req.url?.startsWith("/api/token")) {
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
+    const authPass =
+      req.headers["x-admin-password"] ||
+      parsedUrl.searchParams.get("password") ||
+      parsedUrl.searchParams.get("key");
+
+    if (authPass !== "admin") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi admin diperlukan." }));
+      return;
+    }
+
     if (!config.geminiApiKey) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diisi di .env" }));

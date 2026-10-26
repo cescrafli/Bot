@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { getStoredAuthPassword } from "./useAuth";
 import {
   ClientMessage,
   ServerMessage,
@@ -162,7 +163,12 @@ export function useGeminiLive({
       setStatus("connecting");
       setStatusMessage("Meminta token sesi aman dari Vercel Serverless...");
 
-      const res = await fetch("/api/token");
+      const authPass = getStoredAuthPassword() || "admin";
+      const res = await fetch("/api/token", {
+        headers: {
+          "x-admin-password": authPass,
+        },
+      });
       const data = await res.json();
 
       if (!res.ok || !data.token) {

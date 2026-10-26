@@ -8,7 +8,9 @@ import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
-import { Bot, Activity, Wifi, Shield, Send, Box } from "lucide-react";
+import { useAuth } from "./hooks/useAuth";
+import { AuthGate } from "./components/auth/AuthGate";
+import { Bot, Activity, Wifi, Shield, Send, Box, Lock } from "lucide-react";
 
 // Lazy-load Avatar 3D VRM agar initial bundle load ringan di Vercel
 const AvatarVRM3D = lazy(() =>
@@ -18,6 +20,7 @@ const AvatarVRM3D = lazy(() =>
 );
 
 export function App() {
+  const auth = useAuth();
   const [avatarMode, setAvatarMode] = useState<"2d" | "3d">("2d");
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -163,6 +166,32 @@ export function App() {
     ? "Celyn sedang berbicara..."
     : live.statusMessage;
 
+  // Handler Logout / Kunci Sesi
+  const handleLogout = useCallback(() => {
+    if (live.isConnected) {
+      live.disconnect();
+    }
+    audioEngine.stopMic();
+    audioEngine.stopPlayback();
+    if (screenCapture.isSharing) {
+      screenCapture.stopScreenShare();
+    }
+    auth.logout();
+  }, [live, audioEngine, screenCapture, auth]);
+
+  // Gerbang Autentikasi: Tahan seluruh tampilan AI jika belum memasukkan password 'admin'
+  if (!auth.isAuthenticated) {
+    return (
+      <AuthGate
+        error={auth.error}
+        isLocked={auth.isLocked}
+        lockoutSeconds={auth.lockoutSeconds}
+        onLogin={auth.login}
+        onClearError={auth.clearError}
+      />
+    );
+  }
+
   return (
     <div className="relative w-full h-[100dvh] flex flex-col justify-between bg-mesh overflow-hidden select-none safe-top safe-bottom safe-left safe-right">
       {/* Top Header Navbar */}
@@ -193,8 +222,8 @@ export function App() {
           </div>
         </div>
 
-        {/* Status Pills */}
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* Status Pills & Tombol Kunci Sesi */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
           <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full glass-pill text-[11px] sm:text-xs text-slate-300 border border-white/10">
             <Activity
               className={`w-3.5 h-3.5 ${
@@ -214,6 +243,16 @@ export function App() {
             <Wifi className={`w-3.5 h-3.5 ${live.isConnected ? "text-emerald-400" : "text-slate-600"}`} />
             <span>{live.isConnected ? live.connectionLabel : "Offline"}</span>
           </div>
+
+          {/* Tombol Kunci Sesi (Logout) */}
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full glass-pill text-[11px] sm:text-xs text-rose-300 hover:text-white border border-rose-500/25 hover:border-rose-500/60 hover:bg-rose-500/10 transition-all shadow-md active:scale-95 cursor-pointer"
+            title="Kunci Sesi AI (Keluar)"
+          >
+            <Lock className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden xs:inline sm:inline">Kunci</span>
+          </button>
         </div>
       </header>
 
