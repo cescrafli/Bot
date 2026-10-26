@@ -100,29 +100,27 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         onMouseUp={isConnected && isPushToTalk ? () => onPttHoldEnd?.() : undefined}
         onMouseLeave={isConnected && isPushToTalk ? () => onPttHoldEnd?.() : undefined}
         title={
-          !isConnected
-            ? "Bicara dengan Celyn (Mulai)"
-            : isPushToTalk
+          isPushToTalk
             ? "Tahan untuk Bicara (PTT)"
             : isMicActive
             ? "Matikan Mikrofon (M)"
             : "Nyalakan Mikrofon (M)"
         }
-        className="relative group p-3.5 rounded-full bg-gradient-to-tr from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/35 hover:shadow-rose-500/50 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+        className={`relative group p-3.5 rounded-full transition-all cursor-pointer ${
+          isMicActive
+            ? "bg-gradient-to-tr from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/40 hover:shadow-rose-500/60 hover:scale-105 active:scale-95"
+            : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 hover:border-rose-500/40 hover:scale-105 active:scale-95 shadow-md"
+        }`}
       >
         {/* Glow / Ping Ring saat mic aktif */}
         {isConnected && isMicActive && (
           <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping pointer-events-none" />
         )}
         <div className="relative z-10 flex items-center justify-center">
-          {isConnected ? (
-            isMicActive ? (
-              <Mic className="w-5 h-5 text-white animate-pulse" />
-            ) : (
-              <MicOff className="w-5 h-5 text-rose-200" />
-            )
+          {isMicActive ? (
+            <Mic className="w-5 h-5 text-white animate-pulse" />
           ) : (
-            <Mic className="w-5 h-5 text-white" />
+            <MicOff className="w-5 h-5 text-rose-300" />
           )}
         </div>
       </button>
