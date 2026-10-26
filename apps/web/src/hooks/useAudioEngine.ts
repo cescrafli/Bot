@@ -282,14 +282,14 @@ export function useAudioEngine({
           (s) => s !== source
         );
         if (activeSourcesRef.current.length === 0) {
-          // Grace period 250ms untuk mencegah status flapping dan kebocoran gema speaker ke mikrofon
+          // Grace period 400ms untuk mencegah status flapping dan kebocoran gema speaker ke mikrofon
           if (stopPlayingTimerRef.current) clearTimeout(stopPlayingTimerRef.current);
           stopPlayingTimerRef.current = setTimeout(() => {
             if (activeSourcesRef.current.length === 0) {
               setIsPlaying(false);
               isPlayingRef.current = false;
             }
-          }, 250);
+          }, 400);
         }
       };
     },
@@ -457,13 +457,19 @@ export function useAudioEngine({
 
         // =========================================================================
         // 1. SMART BARGE-IN (Saat Celyn sedang berbicara)
-        // Hanya bisa dipotong oleh suara bicara manusia / gumaman aktif, bukan klik/batuk
+        // Reset listening gate states agar tidak pernah membeku dan bocor ke giliran berikutnya
         // =========================================================================
         if (isPlayingRef.current) {
-          if (analysis.isHumanVoice && analysis.rms > 0.085) {
+          isGateOpenRef.current = false;
+          voiceHangoverFramesRef.current = 0;
+          silenceFramesRemainingRef.current = 0;
+          preRollBufferRef.current = [];
+
+          // Hanya bisa dipotong oleh suara bicara manusia kencang (RMS > 0.11 & 6 frame / ~384ms)
+          // Mencegah false barge-in akibat suara Celyn sendiri yang keluar dari speaker
+          if (analysis.isHumanVoice && analysis.rms > 0.11) {
             bargeInStreakRef.current++;
-            // Jika pengguna berbicara kontinu selama 4 paket berturut-turut (~256ms @ 64ms), picu barge-in
-            if (bargeInStreakRef.current >= 4) {
+            if (bargeInStreakRef.current >= 6) {
               console.log("⚡ [Smart Barge-In] Suara manusia memotong Celyn terdeteksi!");
               stopPlayback();
               bargeInStreakRef.current = 0;
@@ -487,40 +493,41 @@ export function useAudioEngine({
           // Gerbang terbuka: jika baru aktif, flush pre-roll buffer (256ms = 4 frame @ 64ms) agar awalan kata tidak hilang
           if (!isGateOpenRef.current) {
             isGateOpenRef.current = true;
-            silenceFramesRemainingRef.current = 0;
             for (const preRoll of preRollBufferRef.current) {
               onAudioChunkRef.current?.(int16ToBase64(preRoll));
             }
             preRollBufferRef.current = [];
           }
-          voiceHangoverFramesRef.current = 6; // Tahan gerbang tetap terbuka ~384ms (6 frame @ 64ms)
+          // Tahan gerbang tetap terbuka ~896ms (14 frame @ 64ms) agar jeda napas & jeda klausa alami tidak terpotong
+          voiceHangoverFramesRef.current = 14;
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else if (voiceHangoverFramesRef.current > 0) {
-          // Hangover tail: menjaga gumaman lambat ("hmmm... aaa...") dan jeda mikro antar-kata
+          // Hangover tail: menjaga jeda mikro antar-kata dan gumaman lambat
           voiceHangoverFramesRef.current--;
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else {
-          // Gerbang tertutup: pengguna berhenti bersuara
+          // Gerbang tertutup: pengguna hening
           if (isGateOpenRef.current) {
             isGateOpenRef.current = false;
-            // Kirim 8 frame silence (~512ms) agar VAD Gemini Live yakin turn berakhir, lalu STOP kirim paket
-            silenceFramesRemainingRef.current = 8;
+            // Kirim 12 frame digital silence (~768ms) agar Server-Side VAD Gemini Live
+            // mendeteksi akhir giliran bicara secara bersih dan seketika
+            silenceFramesRemainingRef.current = 12;
           }
+
           // Simpan ke ring buffer pre-roll (maksimal 4 frame = 256ms @ 64ms)
           preRollBufferRef.current.push(pcm16k);
           if (preRollBufferRef.current.length > 4) {
             preRollBufferRef.current.shift();
           }
-          // Kirim digital silence HANYA selama masa flush cutoff untuk mencegah banjir jaringan
+
+          // Kirim digital silence kontinu HANYA selama masa flush cutoff turn
           if (silenceFramesRemainingRef.current > 0) {
             silenceFramesRemainingRef.current--;
             const silence = new Int16Array(pcm16k.length);
             onAudioChunkRef.current?.(int16ToBase64(silence));
-            if (silenceFramesRemainingRef.current === 0) {
-              // Notifikasi akhir aliran ucapan pengguna ke VAD Gemini Live
-              onAudioStreamEndRef.current?.();
-            }
           }
+          // CATATAN KRITIS: JANGAN mengirim onAudioStreamEnd() saat hening terbuka!
+          // Sinyal audioStreamEnd hanya dikirim saat mikrofon dimatikan (stopMic/lepas PTT).
         }
       };
 
@@ -548,6 +555,9 @@ export function useAudioEngine({
 
   // Hentikan mikrofon
   const stopMic = useCallback(() => {
+    // Beri tahu Gemini Live bahwa aliran audio mikrofon telah dimatikan secara bersih
+    onAudioStreamEndRef.current?.();
+
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;

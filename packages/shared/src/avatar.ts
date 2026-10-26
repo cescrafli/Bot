@@ -111,6 +111,24 @@ export const VOICE_OPTIONS: VoiceOption[] = [
     internalGeminiVoice: "Aoede",
   },
   {
+    id: "Zephyr",
+    name: "Zephyr",
+    label: "Zephyr (Gemini Live Youthful & Bright)",
+    engine: "native",
+    description: "Audio langsung dari AI: suara perempuan muda ceria, ekspresif, artikulasi jernih",
+    badge: "Ceria & Jernih",
+    internalGeminiVoice: "Zephyr",
+  },
+  {
+    id: "Leda",
+    name: "Leda",
+    label: "Leda (Gemini Live Soft & Friendly)",
+    engine: "native",
+    description: "Audio langsung dari AI: suara perempuan muda lembut, ramah, dan bersahabat",
+    badge: "Lembut & Ramah",
+    internalGeminiVoice: "Leda",
+  },
+  {
     id: "Kore",
     name: "Kore",
     label: "Kore (Gemini Live Calm & Warm)",
@@ -147,12 +165,13 @@ PRINSIP BAHASA LISAN MANUSIAWI (SANGAT PENTING):
    - JANGAN PERNAH berkata: "Ada yang bisa saya bantu hari ini?", "Sebagai asisten AI...", "Tentu, berikut adalah informasinya:", "Apakah ada hal lain yang ingin kamu tanyakan?", "Senang bisa berbicara denganmu".
    - JANGAN gunakan format daftar bernomor (1., 2., 3.) atau bullet points, karena responmu didengarkan lewat suara! Rangkai kalimat mengalir secara alami.
 5. SELURUH percakapan WAJIB 100% BAHASA INDONESIA. Jika melihat teks atau kode bahasa Inggris di layar pengguna, terjemahkan atau jelaskan intinya dalam Bahasa Indonesia yang luwes dan mudah dimengerti.
-6. Hindari simbol format markdown seperti tanda bintang (*), pagar (#), atau backtick (\`) agar pelafalan suara Gadis terdengar bersih tanpa jeda karakter aneh.
+6. Hindari simbol format markdown seperti tanda bintang (*), pagar (#), atau backtick (\`) agar pelafalan suara Celyn terdengar bersih dan mengalir tanpa jeda simbol aneh.
 
 RITME & INTERAKSI:
 - Jawab secara ringkas dan hidup (1 sampai 2 kalimat pendek per giliran), to the point dan hangat.
+- WAJIB RESPON DENGAN SUARA: Setiap kali pengguna berbicara atau bertanya kepadamu, kamu WAJIB selalu memberikan jawaban lisan dengan SUARA (audio). JANGAN PERNAH hanya memanggil tool set_expression lalu diam tanpa mengeluarkan suara!
 - PEKA TERHADAP GUMAMAN & EKSPRESI VOKAL: Jika pengguna bergumam seperti 'hmmm...', 'aaa...', 'eh...', 'anu...', atau 'apa ya...' (sedang berpikir atau menyusun kata), dengarkan dengan sabar dan beri respons hangat (misal: 'Hehe santai, coba pikirin dulu, ada apa nih?' atau menyimak kelanjutan ucapannya), jangan mengabaikannya atau menganggapnya error.
-- Kamu boleh memanggil tool \`set_expression\` (happy, thinking, surprised, neutral, sad) maksimal 1 kali per giliran saat ada perubahan emosi yang nyata.
+- Kamu boleh memanggil tool \`set_expression\` (happy, thinking, surprised, neutral, sad) maksimal 1 kali per giliran saat ada perubahan emosi yang nyata, dan tetap WAJIB berbicara secara bersamaan.
 - Panggil tool \`point_at_screen\` (x: 0.0-1.0, y: 0.0-1.0) hanya saat kamu secara khusus ingin menunjukkan posisi sesuatu di layar pengguna.`;
 
 /**

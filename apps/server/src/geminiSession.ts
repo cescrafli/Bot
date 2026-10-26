@@ -37,6 +37,7 @@ export class GeminiSession {
   private relaxEmotionTimer: NodeJS.Timeout | null = null;
   private isBargeInMuted = false;
   private backupPcmChunks: string[] = [];
+  private hasPendingToolCall = false;
 
   public stats = {
     audioChunksIn: 0,
@@ -141,7 +142,7 @@ export class GeminiSession {
           },
           onclose: (e: any) => {
             this.state = "CLOSED";
-            console.log("Gemini SDK Session closed:", e);
+            console.log("Gemini SDK Session closed: code", e?.code, "reason:", e?.reason || "clean");
             this.clearTimers();
             this.sendToClient({
               type: "status",
@@ -439,6 +440,15 @@ export class GeminiSession {
     // 2.5 Giliran Model Selesai
     if (data.serverContent?.turnComplete) {
       this.isBargeInMuted = false;
+
+      // Jika baru saja mengeksekusi sub-turn pemanggilan tool, tahan status listening
+      // agar tidak mendahului sub-turn jawaban suara yang akan segera dimulai model
+      if (this.hasPendingToolCall) {
+        this.hasPendingToolCall = false;
+        console.log("⚙️ [Gemini Live] Sub-turn tool call selesai, melanjutkan ke respon suara Celyn...");
+        return;
+      }
+
       console.log("🏁 [Gemini Live] Giliran bicara Celyn selesai.");
       this.isFirstChunkInTurn = true;
       this.explicitEmotionUsedInTurn = false;
@@ -485,6 +495,7 @@ export class GeminiSession {
     if (toolCall?.functionCalls && Array.isArray(toolCall.functionCalls)) {
       for (const fc of toolCall.functionCalls) {
         this.stats.toolCallsHandled++;
+        this.hasPendingToolCall = true;
         console.log(`🔧 [Tool Call] ${fc.name}:`, fc.args);
 
         let sanitizedArgs = fc.args || {};
@@ -506,7 +517,7 @@ export class GeminiSession {
           args: sanitizedArgs,
         });
 
-        // Balas otomatis ke sesi Gemini Live
+        // Balas otomatis ke sesi Gemini Live dengan instruksi tegas untuk langsung menjawab lisan
         if (this.session) {
           try {
             this.session.sendToolResponse({
@@ -514,7 +525,12 @@ export class GeminiSession {
                 {
                   id: fc.id,
                   name: fc.name,
-                  response: { output: { status: "applied" } },
+                  response: {
+                    output: {
+                      status: "applied",
+                      instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung memberikan respon lisanmu dengan suara (audio) dalam Bahasa Indonesia.",
+                    },
+                  },
                 },
               ],
             });

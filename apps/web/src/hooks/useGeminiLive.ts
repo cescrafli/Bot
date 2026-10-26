@@ -57,6 +57,7 @@ export function useGeminiLive({
   const activeTurnSpeakerRef = useRef<"user" | "celyn" | null>(null);
   const backupPcmChunksRef = useRef<string[]>([]);
   const bargeInMutedRef = useRef<boolean>(false);
+  const directHasPendingToolCallRef = useRef<boolean>(false);
   const sessionWarningTimerRef = useRef<number | null>(null);
   const sessionMaxDurationTimerRef = useRef<number | null>(null);
   const disconnectRef = useRef<() => void>(() => {});
@@ -471,6 +472,15 @@ export function useGeminiLive({
 
             if (msg.serverContent?.turnComplete) {
               bargeInMutedRef.current = false;
+
+              // Jika baru saja mengeksekusi sub-turn pemanggilan tool, tahan status listening
+              // agar tidak mendahului sub-turn jawaban suara yang akan segera dimulai model
+              if (directHasPendingToolCallRef.current) {
+                directHasPendingToolCallRef.current = false;
+                console.log("⚙️ [Direct Live] Sub-turn tool call selesai, melanjutkan ke respon suara Celyn...");
+                return;
+              }
+
               directIsFirstChunkRef.current = true;
               directExplicitEmotionRef.current = false;
               activeTurnSpeakerRef.current = null;
@@ -534,6 +544,7 @@ export function useGeminiLive({
               Array.isArray(toolCall.functionCalls)
             ) {
               for (const fc of toolCall.functionCalls) {
+                directHasPendingToolCallRef.current = true;
                 handleServerMessage({
                   type: "tool_call",
                   id: fc.id,
@@ -548,7 +559,12 @@ export function useGeminiLive({
                         {
                           id: fc.id,
                           name: fc.name,
-                          response: { output: { status: "applied" } },
+                          response: {
+                            output: {
+                              status: "applied",
+                              instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung memberikan respon lisanmu dengan suara (audio) dalam Bahasa Indonesia.",
+                            },
+                          },
                         },
                       ],
                     });

@@ -1,5 +1,5 @@
 import React from "react";
-import { X, Sparkles, Check, Volume2, Mic, Play } from "lucide-react";
+import { X, Sparkles, Check, Volume2 } from "lucide-react";
 import { VOICE_OPTIONS, VoiceOption } from "@celyn/shared";
 
 interface VoiceSelectorModalProps {
@@ -15,7 +15,6 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
   selectedVoice,
   onSelectVoice,
   onClose,
-  onTestVoice,
 }) => {
   if (!isOpen) return null;
 
@@ -37,11 +36,11 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
             <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
               <span>Pilih Karakter Suara Celyn</span>
               <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                Multi-Voice
+                HD Native
               </span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Pilih karakter vokal sesuai preferensi Anda (Real-Time Gemini Live Audio)
+              Pilih karakter vokal sesuai preferensi Anda (Google Gemini Live Native Audio)
             </p>
           </div>
         </div>
@@ -67,11 +66,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                       {voice.name}
                     </span>
                     <span
-                      className={`text-[9px] sm:text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                        voice.engine === "native"
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                          : "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
-                      }`}
+                      className="text-[9px] sm:text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-rose-500/20 text-rose-300 border-rose-500/30"
                     >
                       {voice.badge}
                     </span>
@@ -86,23 +81,11 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                     {voice.description}
                   </p>
                   <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                    Engine: {voice.engine === "native" ? "Gemini Live Realtime PCM (200ms)" : "Microsoft Edge Neural SSML"}
+                    Engine: Gemini Live Realtime HD PCM (24kHz)
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0 pt-0.5">
-                  {onTestVoice && voice.engine === "edge" && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTestVoice(voice.id);
-                      }}
-                      className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                      title="Uji coba suara ini"
-                    >
-                      <Play className="w-3.5 h-3.5 text-rose-400" />
-                    </button>
-                  )}
                   <div
                     className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
                       isSelected
@@ -122,10 +105,10 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
         <div className="p-3 sm:p-3.5 rounded-xl bg-slate-800/60 border border-white/5 text-xs text-slate-300 space-y-1">
           <div className="flex items-center gap-1.5 font-semibold text-rose-300 text-xs">
             <Sparkles className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>Karakter Suara Native Gemini</span>
+            <span>Katalog Karakter Suara HD Gemini Live</span>
           </div>
           <p className="text-[10px] sm:text-[11px] leading-relaxed text-slate-400">
-            Pilih <strong>Aoede</strong> untuk karakter ceria, ekspresif, dan tawa spontan. Pilih <strong>Kore</strong> untuk nada bicara yang lebih santai, tenang, dan hangat.
+            Semua suara menggunakan model <strong>Gemini Live Native Audio</strong> secara real-time. Pilih <strong>Aoede</strong> untuk karakter paling natural & tawa spontan, <strong>Zephyr</strong> untuk artikulasi ceria & bersemangat, <strong>Leda</strong> untuk kelembutan suara yang ramah, atau <strong>Kore</strong> untuk nada yang tenang dan hangat.
           </p>
         </div>
       </div>

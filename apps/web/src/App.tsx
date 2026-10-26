@@ -84,6 +84,7 @@ export function App() {
       setSelectedVoice(newVoice);
       localStorage.setItem("celyn_selected_voice", newVoice);
       setIsVoiceModalOpen(false);
+      audioEngine.stopPlayback();
       if (live.isConnected) {
         live.disconnect();
         setTimeout(() => {
@@ -91,8 +92,17 @@ export function App() {
         }, 200);
       }
     },
-    [live]
+    [live, audioEngine]
   );
+
+  // Uji coba suara: Jika live aktif, minta Celyn bicara langsung; jika belum, putar sampel audio
+  const handleTestSpeech = useCallback(() => {
+    if (live.isConnected) {
+      live.sendText("Celyn, halo! Coba sapa aku dengan satu kalimat ramah dan ceria.");
+    } else {
+      audioEngine.triggerTestSpeech();
+    }
+  }, [live, audioEngine]);
 
   // Toggle Koneksi Sesi
   const handleToggleConnection = useCallback(async () => {
@@ -484,7 +494,7 @@ export function App() {
         selectedVoice={live.modelInfo.voice || selectedVoice}
         onSelectVoice={handleSelectVoice}
         onClose={() => setIsVoiceModalOpen(false)}
-        onTestVoice={audioEngine.triggerTestSpeech}
+        onTestVoice={handleTestSpeech}
       />
 
       {/* Modal Pengaturan Companion */}
@@ -501,7 +511,7 @@ export function App() {
         onToggleConnection={handleToggleConnection}
         onOpenShortcuts={() => setIsHelpOpen(true)}
         onOpenCalibration={() => setIsRigPanelOpen(true)}
-        onTriggerTestSpeech={audioEngine.triggerTestSpeech}
+        onTriggerTestSpeech={handleTestSpeech}
         onLogout={handleLogout}
       />
     </div>

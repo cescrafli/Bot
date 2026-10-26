@@ -129,16 +129,19 @@ assert(normalizeEmotion("unknown_random_string") === "neutral", "Fallback emosi 
 async function runTtsTests() {
   console.log("\n--- 5. Uji Katalog Multi-Voice Native Gemini & Sintesis Edge Neural ---");
   assert(
-    VOICE_OPTIONS.length === 2,
-    `Katalog voice memiliki 2 profil suara ultra-natural (${VOICE_OPTIONS.map((v) => v.name).join(", ")})`
+    VOICE_OPTIONS.length === 4,
+    `Katalog voice memiliki 4 profil suara ultra-natural HD (${VOICE_OPTIONS.map((v) => v.name).join(", ")})`
   );
   assert(
     DEFAULT_VOICE_NAME === "Aoede",
     `Default voice rekomendasi Celyn adalah '${DEFAULT_VOICE_NAME}' (Gemini Live Ultra-Natural)`
   );
   assert(
-    isNativeGeminiVoice("Aoede") === true && isNativeGeminiVoice("Kore") === true,
-    "Aoede & Kore teridentifikasi sebagai Native Gemini Voice (Real-Time)"
+    isNativeGeminiVoice("Aoede") === true &&
+      isNativeGeminiVoice("Zephyr") === true &&
+      isNativeGeminiVoice("Leda") === true &&
+      isNativeGeminiVoice("Kore") === true,
+    "Aoede, Zephyr, Leda, & Kore teridentifikasi sebagai Native Gemini Live Voice (Real-Time HD)"
   );
   assert(
     CELYN_SYSTEM_PROMPT.includes("100% BAHASA INDONESIA"),
