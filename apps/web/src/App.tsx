@@ -12,7 +12,19 @@ import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
 import { useAuth } from "./hooks/useAuth";
 import { AuthGate } from "./components/auth/AuthGate";
-import { Bot, Activity, Wifi, Shield, Send, Box, Lock, AlertCircle, Volume2, Settings } from "lucide-react";
+import {
+  Bot,
+  Activity,
+  Wifi,
+  Shield,
+  Send,
+  Box,
+  Lock,
+  AlertCircle,
+  Volume2,
+  Settings,
+  AudioLines,
+} from "lucide-react";
 import { getVoiceOption } from "@celyn/shared";
 
 // Lazy-load Avatar 3D VRM agar initial bundle load ringan di Vercel
@@ -312,28 +324,15 @@ export function App() {
 
           {/* Right: Concise Essential Controls */}
           <div className="flex items-center gap-2 sm:gap-2.5">
-            {/* Minimal Language & Voice Selector */}
+            {/* Voice Changer Selector Button */}
             <button
               onClick={() => setIsVoiceModalOpen(true)}
-              className="luxury-blur-panel px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
-              title={`Suara: ${getVoiceOption(live.modelInfo.voice || selectedVoice).name} (Klik untuk ganti)`}
+              className="h-8 px-2.5 rounded-full luxury-blur-panel flex items-center gap-1.5 text-slate-300 hover:text-white hover:border-white/20 transition-all cursor-pointer group"
+              title={`Karakter Suara: ${getVoiceOption(live.modelInfo.voice || selectedVoice).name} (Klik untuk ganti)`}
             >
-              ID
-            </button>
-
-            {/* Connection Status Button */}
-            <button
-              onClick={handleToggleConnection}
-              className="flex items-center gap-1.5 px-2.5 py-1 luxury-blur-panel rounded-full text-[11px] text-slate-300 hover:border-white/20 transition-colors cursor-pointer"
-              title={live.isConnected ? "Koneksi Aktif (Klik untuk putuskan)" : "Klik untuk sambungkan"}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  live.isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
-                }`}
-              />
-              <span className="hidden sm:inline font-light text-slate-400">
-                {live.isConnected ? "Online" : "Siaga"}
+              <AudioLines className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" />
+              <span className="text-[11px] font-medium tracking-wide">
+                {getVoiceOption(live.modelInfo.voice || selectedVoice).name}
               </span>
             </button>
 
