@@ -544,8 +544,10 @@ export function normalizeSpokenIndonesian(rawText: string): string {
 export function cleanAndEscapeForSsml(rawText: string): string {
   const normalized = normalizeSpokenIndonesian(rawText);
   const cleaned = String(normalized || "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [teks link](url) -> teks link
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`+/g, "")
+    .replace(/^[\s*>-]+/gm, "") // bullet points & quotes
     .replace(/[*_#~]+/g, "")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/\s+/g, " ")

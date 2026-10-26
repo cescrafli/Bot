@@ -29,6 +29,17 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const intervalRef = useRef<number | null>(null);
 
+  const isPausedRef = useRef(isPaused);
+  const onFrameRef = useRef(onFrame);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    onFrameRef.current = onFrame;
+  }, [onFrame]);
+
   // Canvas untuk deteksi perubahan cepat (32x32 thumbnail)
   const diffCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Canvas untuk render frame beresolusi optimal (maks 1024px)
@@ -58,12 +69,13 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
     setVideoElement(null);
     setCaptureMode(null);
     prevThumbRef.current = null;
+    isPausedRef.current = false;
     setIsSharing(false);
     setIsPaused(false);
   }, []);
 
   const captureFrame = useCallback(() => {
-    if (isPaused) return;
+    if (isPausedRef.current) return;
 
     const video = videoRef.current;
     if (!video || video.readyState < 2) return;
@@ -145,9 +157,9 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
     const dataUrl = sendCanvas.toDataURL("image/jpeg", 0.65);
     const b64 = dataUrl.split(",")[1];
     if (b64) {
-      onFrame(b64);
+      onFrameRef.current(b64);
     }
-  }, [isPaused, onFrame]);
+  }, []);
 
   const startScreenShare = useCallback(async () => {
     try {
@@ -236,6 +248,7 @@ export function useScreenCapture({ onFrame, fps = 1 }: UseScreenCaptureOptions) 
   const togglePause = useCallback(() => {
     setIsPaused((prev) => {
       const next = !prev;
+      isPausedRef.current = next;
       if (!next) {
         // Unpausing: trigger captureFrame segera
         setTimeout(captureFrame, 50);

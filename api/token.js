@@ -8,6 +8,15 @@ function isRateLimited(ip) {
   const windowMs = 60 * 1000;
   const maxRequests = 15;
 
+  // Garbage collection: Bersihkan entri kedaluwarsa jika ukuran map > 200
+  if (rateLimitMap.size > 200) {
+    for (const [key, val] of rateLimitMap.entries()) {
+      if (now > val.resetTime) {
+        rateLimitMap.delete(key);
+      }
+    }
+  }
+
   const record = rateLimitMap.get(ip) || { count: 0, resetTime: now + windowMs };
   if (now > record.resetTime) {
     record.count = 1;

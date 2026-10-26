@@ -10,7 +10,7 @@ import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
 import { useAuth } from "./hooks/useAuth";
 import { AuthGate } from "./components/auth/AuthGate";
-import { Bot, Activity, Wifi, Shield, Send, Box, Lock } from "lucide-react";
+import { Bot, Activity, Wifi, Shield, Send, Box, Lock, AlertCircle } from "lucide-react";
 
 // Lazy-load Avatar 3D VRM agar initial bundle load ringan di Vercel
 const AvatarVRM3D = lazy(() =>
@@ -104,6 +104,8 @@ export function App() {
   // Keyboard Shortcuts (M: Mute/Unmute, S: Screen Share, V: Avatar 2D/3D, Spasi: Push-to-Talk)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!auth.isAuthenticated) return;
+
       // Abaikan jika fokus pada input teks
       if (
         document.activeElement?.tagName === "INPUT" ||
@@ -130,6 +132,8 @@ export function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (!auth.isAuthenticated) return;
+
       if (e.code === "Space" && isPushToTalk && live.isConnected) {
         if (audioEngine.isMicActive) {
           e.preventDefault();
@@ -146,6 +150,7 @@ export function App() {
       window.removeEventListener("keyup", handleKeyUp);
     };
   }, [
+    auth.isAuthenticated,
     live.isConnected,
     isPushToTalk,
     audioEngine,
@@ -258,6 +263,14 @@ export function App() {
 
       {/* Main Center Stage: Avatar Rendering Area */}
       <main className="relative flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden px-2">
+        {/* Banner Error Screen/Camera Capture */}
+        {screenCapture.error && (
+          <div className="absolute top-4 z-40 max-w-sm px-4 py-2 rounded-xl bg-rose-600/95 text-white text-xs backdrop-blur-md shadow-2xl flex items-center gap-2 border border-rose-400/40 animate-in fade-in slide-in-from-top-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-white" />
+            <span className="flex-1">{screenCapture.error}</span>
+          </div>
+        )}
+
         {avatarMode === "2d" ? (
           <AvatarCanvas2D
             emotion={live.emotion}

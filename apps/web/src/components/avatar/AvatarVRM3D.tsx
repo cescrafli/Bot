@@ -163,6 +163,7 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
       if (!container) return;
       const w = container.clientWidth;
       const h = container.clientHeight;
+      if (w === 0 || h === 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
@@ -170,9 +171,19 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
 
     window.addEventListener("resize", handleResize);
 
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    resizeObserver.observe(container);
+
     return () => {
       cancelAnimationFrame(animId);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
+      if (vrmRef.current) {
+        VRMUtils.deepDispose(vrmRef.current.scene);
+        vrmRef.current = null;
+      }
       if (renderer.domElement.parentElement) {
         renderer.domElement.parentElement.removeChild(renderer.domElement);
       }
@@ -205,10 +216,11 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.combineSkeletons(gltf.scene);
 
-        // Hapus model lama dari scene jika ada
+        // Hapus model lama dari scene jika ada dan bersihkan VRAM GPU
         if (sceneRef.current) {
           if (vrmRef.current) {
             sceneRef.current.remove(vrmRef.current.scene);
+            VRMUtils.deepDispose(vrmRef.current.scene);
           }
           sceneRef.current.add(vrm.scene);
         }

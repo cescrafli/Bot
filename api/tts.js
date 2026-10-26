@@ -408,8 +408,10 @@ function inferIndonesianProsody(text, emotion) {
 function cleanAndEscapeForSsml(rawText) {
   const normalized = normalizeSpokenIndonesian(rawText);
   const cleaned = String(normalized || "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [teks link](url) -> teks link
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`+/g, "")
+    .replace(/^[\s*>-]+/gm, "") // bullet points & quotes
     .replace(/[*_#~]+/g, "")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/\s+/g, " ")
@@ -698,6 +700,15 @@ function isRateLimited(ip) {
   const windowMs = 60 * 1000;
   const maxRequests = 60;
 
+  // Garbage collection: Bersihkan entri kedaluwarsa jika ukuran map > 200
+  if (rateLimitMap.size > 200) {
+    for (const [key, val] of rateLimitMap.entries()) {
+      if (now > val.resetTime) {
+        rateLimitMap.delete(key);
+      }
+    }
+  }
+
   const record = rateLimitMap.get(ip) || { count: 0, resetTime: now + windowMs };
   if (now > record.resetTime) {
     record.count = 1;
@@ -759,7 +770,16 @@ export default async function handler(req, res) {
     pitch = req.query?.pitch || "";
     volume = req.query?.volume || "";
   } else if (req.method === "POST") {
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    let body = {};
+    if (typeof req.body === "string") {
+      try {
+        body = JSON.parse(req.body || "{}");
+      } catch {
+        return res.status(400).json({ error: "Invalid JSON body" });
+      }
+    } else if (req.body && typeof req.body === "object") {
+      body = req.body;
+    }
     text = body.text || "";
     voice = body.voice || DEFAULT_VOICE;
     emotion = body.emotion || "neutral";

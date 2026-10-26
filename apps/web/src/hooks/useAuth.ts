@@ -7,19 +7,54 @@ const FAILED_ATTEMPTS_KEY = "celyn_auth_failed_attempts";
 const LOCKOUT_KEY = "celyn_auth_lockout_until";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 30 * 1000; // 30 detik
+const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 jam TTL
+
+export function isTokenValid(token: string | null): boolean {
+  if (!token) return false;
+  try {
+    const decoded = atob(token);
+    if (!decoded.startsWith("celyn_auth:")) return false;
+    const parts = decoded.split(":");
+    const timestamp = parseInt(parts[1], 10);
+    if (isNaN(timestamp)) return false;
+    // Cek apakah token telah melebihi masa aktif (12 jam)
+    if (Date.now() - timestamp > TOKEN_TTL_MS) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function getStoredAuthPassword(): string {
-  const token =
-    sessionStorage.getItem(AUTH_STORAGE_KEY) ||
-    localStorage.getItem(AUTH_STORAGE_KEY);
-  return token ? ADMIN_PASSWORD : "";
+  const sessionToken = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (sessionToken && isTokenValid(sessionToken)) {
+    return ADMIN_PASSWORD;
+  }
+  const localToken = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (localToken && isTokenValid(localToken)) {
+    return ADMIN_PASSWORD;
+  }
+  // Jika token invalid atau sudah expired, bersihkan
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  return "";
 }
 
 export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     const sessionToken = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (sessionToken) {
+      if (isTokenValid(sessionToken)) return true;
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    }
     const localToken = localStorage.getItem(AUTH_STORAGE_KEY);
-    return Boolean(sessionToken || localToken);
+    if (localToken) {
+      if (isTokenValid(localToken)) return true;
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+    return false;
   });
 
   const [error, setError] = useState<string | null>(null);

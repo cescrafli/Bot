@@ -34,6 +34,8 @@ export class GeminiSession {
   private currentEmotion: EmotionType = "neutral";
   private explicitEmotionUsedInTurn = false;
   private relaxEmotionTimer: NodeJS.Timeout | null = null;
+  private isBargeInMuted = false;
+  private backupPcmChunks: string[] = [];
 
   public stats = {
     audioChunksIn: 0,
@@ -238,6 +240,7 @@ export class GeminiSession {
   private cancelPendingTts(): void {
     this.ttsTurnId++;
     this.ttsBuffer = "";
+    this.backupPcmChunks = [];
     this.isFirstChunkInTurn = true;
     this.explicitEmotionUsedInTurn = false;
     if (this.relaxEmotionTimer) {
@@ -309,6 +312,22 @@ export class GeminiSession {
             `❌ [Edge Neural TTS] Gagal menyintesis kalimat:`,
             err?.message || err
           );
+          if (
+            this.backupPcmChunks.length > 0 &&
+            turnId === this.ttsTurnId &&
+            this.state === "ACTIVE"
+          ) {
+            const fallbackPcm = this.backupPcmChunks.shift();
+            if (fallbackPcm) {
+              console.warn("⚠️ Mengirim audio cadangan Gemini PCM (Server Fallback)");
+              this.stats.audioChunksOut++;
+              this.sendToClient({
+                type: "audio",
+                data: fallbackPcm,
+                mimeType: "audio/pcm",
+              });
+            }
+          }
         }
       })
       .catch(() => {});
@@ -318,6 +337,7 @@ export class GeminiSession {
     // 1. Interupsi (Barge-in)
     if (data.serverContent?.interrupted) {
       console.log("⚡ [Gemini Live] Interrupted: pengguna memotong bicara Celyn");
+      this.isBargeInMuted = false;
       this.cancelPendingTts();
       this.sendToClient({ type: "interrupted" });
       return;
@@ -325,6 +345,7 @@ export class GeminiSession {
 
     // 2. Transkripsi Suara Pengguna (Input Transcription)
     if (data.serverContent?.inputTranscription?.text) {
+      this.isBargeInMuted = false;
       const userText = data.serverContent.inputTranscription.text.trim();
       if (userText) {
         console.log(`🎙️ [User Speech]: ${userText}`);
@@ -344,16 +365,18 @@ export class GeminiSession {
 
     // 2.1 Transkripsi Suara Celyn (Output Transcription Bahasa Indonesia)
     if (data.serverContent?.outputTranscription?.text) {
-      const celynText = data.serverContent.outputTranscription.text;
-      if (celynText) {
-        this.sendToClient({
-          type: "transcript",
-          speaker: "celyn",
-          text: celynText,
-        });
-        if (this.useEdgeTts) {
-          this.ttsBuffer += celynText;
-          this.flushCompleteSentences(false);
+      if (!this.isBargeInMuted) {
+        const celynText = data.serverContent.outputTranscription.text;
+        if (celynText) {
+          this.sendToClient({
+            type: "transcript",
+            speaker: "celyn",
+            text: celynText,
+          });
+          if (this.useEdgeTts) {
+            this.ttsBuffer += celynText;
+            this.flushCompleteSentences(false);
+          }
         }
       }
     }
@@ -366,8 +389,11 @@ export class GeminiSession {
         if (part.thought) continue;
 
         if (part.inlineData && part.inlineData.mimeType?.startsWith("audio/")) {
+          if (!this.isBargeInMuted) {
+            this.backupPcmChunks.push(part.inlineData.data);
+          }
           // Hanya kirim audio bawaan Gemini jika tidak menggunakan Microsoft Edge Neural TTS
-          if (!this.useEdgeTts) {
+          if (!this.useEdgeTts && !this.isBargeInMuted) {
             this.stats.audioChunksOut++;
             this.sendToClient({
               type: "audio",
@@ -377,6 +403,7 @@ export class GeminiSession {
           }
         }
         if (part.text && !data.serverContent?.outputTranscription?.text) {
+          if (this.isBargeInMuted) continue;
           console.log(`💬 [Celyn AI]: ${part.text}`);
           this.sendToClient({
             type: "transcript",
@@ -393,6 +420,7 @@ export class GeminiSession {
 
     // 2.5 Giliran Model Selesai
     if (data.serverContent?.turnComplete) {
+      this.isBargeInMuted = false;
       console.log("🏁 [Gemini Live] Giliran bicara Celyn selesai.");
       this.isFirstChunkInTurn = true;
       this.explicitEmotionUsedInTurn = false;
@@ -526,7 +554,8 @@ export class GeminiSession {
           turnComplete: true,
         });
       } else if (msg.type === "barge_in") {
-        console.log("⚡ [Client Barge-In] Membatalkan antrean TTS Celyn...");
+        console.log("⚡ [Client Barge-In] Membatalkan antrean TTS Celyn & mengaktifkan guard turn bleed...");
+        this.isBargeInMuted = true;
         this.cancelPendingTts();
       } else if (msg.type === "audio_stream_end") {
         try {

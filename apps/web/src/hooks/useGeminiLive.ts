@@ -56,6 +56,21 @@ export function useGeminiLive({
   const directRelaxTimerRef = useRef<number | null>(null);
   const activeTurnSpeakerRef = useRef<"user" | "celyn" | null>(null);
   const backupPcmChunksRef = useRef<string[]>([]);
+  const bargeInMutedRef = useRef<boolean>(false);
+  const sessionWarningTimerRef = useRef<number | null>(null);
+  const sessionMaxDurationTimerRef = useRef<number | null>(null);
+  const disconnectRef = useRef<() => void>(() => {});
+
+  const clearSessionTimers = useCallback(() => {
+    if (sessionWarningTimerRef.current) {
+      clearTimeout(sessionWarningTimerRef.current);
+      sessionWarningTimerRef.current = null;
+    }
+    if (sessionMaxDurationTimerRef.current) {
+      clearTimeout(sessionMaxDurationTimerRef.current);
+      sessionMaxDurationTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     statusRef.current = status;
@@ -80,6 +95,7 @@ export function useGeminiLive({
         onAudioReceived(msg.data, msg.mimeType);
       } else if (msg.type === "interrupted") {
         console.log("⚡ Interrupted diterima");
+        bargeInMutedRef.current = false;
         directTtsTurnIdRef.current++;
         directTtsBufferRef.current = "";
         backupPcmChunksRef.current = [];
@@ -357,11 +373,13 @@ export function useGeminiLive({
           },
           onmessage: (msg: any) => {
             if (msg.serverContent?.interrupted) {
+              bargeInMutedRef.current = false;
               handleServerMessage({ type: "interrupted" });
               return;
             }
 
             if (msg.serverContent?.inputTranscription?.text) {
+              bargeInMutedRef.current = false;
               const userText = msg.serverContent.inputTranscription.text.trim();
               if (userText) {
                 handleServerMessage({
@@ -378,16 +396,18 @@ export function useGeminiLive({
             }
 
             if (msg.serverContent?.outputTranscription?.text) {
-              const celynText = msg.serverContent.outputTranscription.text;
-              if (celynText) {
-                handleServerMessage({
-                  type: "transcript",
-                  speaker: "celyn",
-                  text: celynText,
-                });
-                if (useEdgeTts) {
-                  directTtsBufferRef.current += celynText;
-                  flushDirectSentences(false);
+              if (!bargeInMutedRef.current) {
+                const celynText = msg.serverContent.outputTranscription.text;
+                if (celynText) {
+                  handleServerMessage({
+                    type: "transcript",
+                    speaker: "celyn",
+                    text: celynText,
+                  });
+                  if (useEdgeTts) {
+                    directTtsBufferRef.current += celynText;
+                    flushDirectSentences(false);
+                  }
                 }
               }
             }
@@ -400,8 +420,10 @@ export function useGeminiLive({
                   part.inlineData &&
                   part.inlineData.mimeType?.startsWith("audio/")
                 ) {
-                  backupPcmChunksRef.current.push(part.inlineData.data);
-                  if (!useEdgeTts) {
+                  if (!bargeInMutedRef.current) {
+                    backupPcmChunksRef.current.push(part.inlineData.data);
+                  }
+                  if (!useEdgeTts && !bargeInMutedRef.current) {
                     handleServerMessage({
                       type: "audio",
                       data: part.inlineData.data,
@@ -410,6 +432,7 @@ export function useGeminiLive({
                   }
                 }
                 if (part.text && !msg.serverContent?.outputTranscription?.text) {
+                  if (bargeInMutedRef.current) continue;
                   handleServerMessage({
                     type: "transcript",
                     speaker: "celyn",
@@ -424,6 +447,7 @@ export function useGeminiLive({
             }
 
             if (msg.serverContent?.turnComplete) {
+              bargeInMutedRef.current = false;
               directIsFirstChunkRef.current = true;
               directExplicitEmotionRef.current = false;
               activeTurnSpeakerRef.current = null;
@@ -518,6 +542,7 @@ export function useGeminiLive({
             );
           },
           onclose: () => {
+            clearSessionTimers();
             directSessionRef.current = null;
             setIsConnected(false);
             setStatus("idle");
@@ -531,6 +556,30 @@ export function useGeminiLive({
       setStatus("listening");
       setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
       flushPendingQueue();
+
+      // Atur timer masa aktif sesi Gemini Live (serverless max ~30 menit)
+      clearSessionTimers();
+      sessionWarningTimerRef.current = window.setTimeout(() => {
+        handleServerMessage({
+          type: "status",
+          status: "listening",
+          message:
+            "⚠️ Sesi Gemini Live mendekati batas 30 menit (tersisa 5 menit). Sesi akan dihentikan otomatis saat batas tercapai.",
+        });
+      }, 25 * 60 * 1000);
+
+      sessionMaxDurationTimerRef.current = window.setTimeout(() => {
+        console.warn(
+          "⏱️ Batas waktu sesi Serverless 30 menit tercapai. Menutup sesi secara bersih..."
+        );
+        handleServerMessage({
+          type: "status",
+          status: "idle",
+          message:
+            "Sesi telah mencapai batas maksimal 30 menit. Silakan sambungkan kembali jika ingin melanjutkan.",
+        });
+        disconnectRef.current();
+      }, 30 * 60 * 1000);
 
       // Kirim sapaan otomatis Celyn saat pertama kali terhubung
       setTimeout(async () => {
@@ -633,15 +682,18 @@ export function useGeminiLive({
 
     ws.onclose = () => {
       clearTimeout(wsTimeout);
+      clearSessionTimers();
       if (opened) {
         setIsConnected(false);
         setStatus("idle");
         setStatusMessage("Koneksi terputus.");
       }
     };
-  }, [handleServerMessage, connectViaServerlessToken, flushPendingQueue]);
+  }, [handleServerMessage, connectViaServerlessToken, flushPendingQueue, clearSessionTimers]);
 
   const disconnect = useCallback(() => {
+    clearSessionTimers();
+    bargeInMutedRef.current = false;
     pendingQueueRef.current = [];
     directTtsTurnIdRef.current++;
     directTtsBufferRef.current = "";
@@ -658,7 +710,11 @@ export function useGeminiLive({
     setIsConnected(false);
     setStatus("idle");
     setStatusMessage("Sesi dihentikan.");
-  }, []);
+  }, [clearSessionTimers]);
+
+  useEffect(() => {
+    disconnectRef.current = disconnect;
+  }, [disconnect]);
 
   const sendMessage = useCallback(async (msg: ClientMessage) => {
     // 1. Jika terhubung via WebSocket Server lokal
@@ -722,6 +778,7 @@ export function useGeminiLive({
   }, [sendMessage]);
 
   const onBargeIn = useCallback(() => {
+    bargeInMutedRef.current = true;
     directTtsTurnIdRef.current++;
     directTtsBufferRef.current = "";
     backupPcmChunksRef.current = [];

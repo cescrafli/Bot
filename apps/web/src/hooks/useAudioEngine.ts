@@ -47,6 +47,7 @@ export function useAudioEngine({
   const lowPassFilterRef = useRef<BiquadFilterNode | null>(null);
   const silentGainRef = useRef<GainNode | null>(null);
   const bargeInStreakRef = useRef<number>(0);
+  const isStartingMicRef = useRef<boolean>(false);
 
   // Human-Voice VAD & Gumaman ("Hmmm / Aaa") Gate State (Frame 64ms / 1024 sample)
   const noiseFloorRef = useRef<number>(0.008);
@@ -69,6 +70,7 @@ export function useAudioEngine({
   // Inisialisasi AudioContext (menggunakan sample rate native perangkat keras sistem)
   const getOrCreateAudioContext = useCallback(() => {
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      workletLoadedRef.current = false;
       const AudioCtxClass =
         window.AudioContext || (window as any).webkitAudioContext;
       const ctx = new AudioCtxClass();
@@ -326,8 +328,16 @@ export function useAudioEngine({
           return;
         }
 
-        const audioBuffer = base64PcmToAudioBuffer(ctx, b64Audio, 24000);
-        scheduleAudioBuffer(ctx, audioBuffer);
+        const epochAtEnqueue = playbackEpochRef.current;
+        decodeChainRef.current = decodeChainRef.current
+          .then(async () => {
+            if (epochAtEnqueue !== playbackEpochRef.current) return;
+            const audioBuffer = base64PcmToAudioBuffer(ctx, b64Audio, 24000);
+            scheduleAudioBuffer(ctx, audioBuffer);
+          })
+          .catch((err) => {
+            console.error("Gagal memainkan chunk audio PCM:", err);
+          });
       } catch (err) {
         console.error("Gagal memainkan chunk audio:", err);
       }
@@ -378,7 +388,16 @@ export function useAudioEngine({
 
   // Mulai menangkap mikrofon
   const startMic = useCallback(async () => {
+    if (isStartingMicRef.current) return;
+    isStartingMicRef.current = true;
+
     try {
+      // Bersihkan stream track lama jika masih tersisa
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+      }
+
       const ctx = getOrCreateAudioContext();
       if (!workletLoadedRef.current) {
         await ctx.audioWorklet.addModule("/audio-processor.js");
@@ -514,6 +533,8 @@ export function useAudioEngine({
     } catch (err) {
       console.error("Gagal mengaktifkan mikrofon:", err);
       throw err;
+    } finally {
+      isStartingMicRef.current = false;
     }
   }, [getOrCreateAudioContext, stopPlayback]);
 

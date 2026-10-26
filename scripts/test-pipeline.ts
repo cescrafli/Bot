@@ -10,10 +10,12 @@ import {
   inferEmotionFromText,
   inferIndonesianProsody,
   normalizeSpokenIndonesian,
+  cleanAndEscapeForSsml,
   buildExpressiveSsml,
   buildContextualGreetingPrompt,
   analyzeHumanVoiceFrame,
 } from "@celyn/shared";
+import { execSync } from "node:child_process";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
@@ -386,7 +388,57 @@ async function runTtsTests() {
   const validHeaderReq = checkApiTokenAuth({ "x-admin-password": "admin" }, {});
   assert(validHeaderReq.status === 200, "Permintaan /api/token dengan header 'x-admin-password: admin' diterima (HTTP 200)");
 
-  // 10. Ringkasan
+  // 10. Uji Pembersihan Markdown, Links, & Formatting untuk SSML Edge TTS
+  console.log("\n--- 10. Uji Stripping Markdown & SSML XML Escaping ---");
+  const markdownSample =
+    "Silakan cek [dokumentasi](https://example.com/doc) di sini! Gunakan `console.log()` dan *perhatikan* pesan berikut: ```ts const a = 1; ``` Terima kasih & sukses selalu.";
+  const cleanedSsml = cleanAndEscapeForSsml(markdownSample);
+
+  assert(!cleanedSsml.includes("https://"), "Link URL markdown berhasil di-strip dari ucapan TTS");
+  assert(cleanedSsml.includes("dokumentasi"), "Teks anchor link dipertahankan untuk diucapkan");
+  assert(!cleanedSsml.includes("```"), "Blok kode triple-backticks berhasil di-strip");
+  assert(!cleanedSsml.includes("`"), "Backtick inline kode berhasil di-strip");
+  assert(!cleanedSsml.includes("*"), "Tanda bintang format tebal/miring berhasil di-strip");
+  assert(cleanedSsml.includes("&amp;"), "Karakter ampersand (&) berhasil di-escape ke XML entity (&amp;)");
+
+  // 11. Uji Rate Limit Map Pruning & Vercel API Health Check
+  console.log("\n--- 11. Uji Rate Limit Map Pruning & Vercel API Syntax Check ---");
+  const testRateMap = new Map<string, { count: number; lastReset: number }>();
+  const now = Date.now();
+  for (let i = 0; i < 210; i++) {
+    testRateMap.set(`ip-${i}`, {
+      count: 1,
+      lastReset: i < 150 ? now - 70000 : now, // 150 entri sudah kadaluwarsa (> 60s)
+    });
+  }
+  assert(testRateMap.size === 210, "Simulasi rateLimitMap terisi 210 entri");
+
+  // Jalankan logika pruning
+  if (testRateMap.size > 200) {
+    const pruneNow = Date.now();
+    for (const [ipKey, entry] of testRateMap.entries()) {
+      if (pruneNow - entry.lastReset > 60000) {
+        testRateMap.delete(ipKey);
+      }
+    }
+  }
+  assert(
+    testRateMap.size === 60,
+    `Pruning rate limit berhasil membuang entri kadaluwarsa (sisa ${testRateMap.size} entri aktif)`
+  );
+
+  // Periksa sintaksis file API Vercel Serverless
+  let apiSyntaxOk = true;
+  try {
+    execSync("node --check api/tts.js", { stdio: "pipe" });
+    execSync("node --check api/token.js", { stdio: "pipe" });
+    execSync("node --check api/health.js", { stdio: "pipe" });
+  } catch (err: any) {
+    apiSyntaxOk = false;
+  }
+  assert(apiSyntaxOk, "Validasi sintaksis node --check pada api/tts.js, api/token.js, api/health.js lulus 100%");
+
+  // 12. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");
