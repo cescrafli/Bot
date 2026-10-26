@@ -6,12 +6,13 @@ import { SubtitleOverlay } from "./components/transcript/SubtitleOverlay";
 import { TranscriptDrawer } from "./components/chat/TranscriptDrawer";
 import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { VoiceSelectorModal } from "./components/modals/VoiceSelectorModal";
+import { SettingsModal } from "./components/modals/SettingsModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
 import { useAuth } from "./hooks/useAuth";
 import { AuthGate } from "./components/auth/AuthGate";
-import { Bot, Activity, Wifi, Shield, Send, Box, Lock, AlertCircle, Volume2 } from "lucide-react";
+import { Bot, Activity, Wifi, Shield, Send, Box, Lock, AlertCircle, Volume2, Settings } from "lucide-react";
 import { getVoiceOption } from "@celyn/shared";
 
 // Lazy-load Avatar 3D VRM agar initial bundle load ringan di Vercel
@@ -28,6 +29,9 @@ export function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isRigPanelOpen, setIsRigPanelOpen] = useState(false);
+  const [isTextInputOpen, setIsTextInputOpen] = useState(false);
   const [inputText, setInputText] = useState("");
   const [selectedVoice, setSelectedVoice] = useState<string>(() => {
     return localStorage.getItem("celyn_selected_voice") || "Aoede";
@@ -219,192 +223,247 @@ export function App() {
   }
 
   return (
-    <div className="relative w-full h-[100dvh] flex flex-col justify-between bg-mesh overflow-hidden select-none safe-top safe-bottom safe-left safe-right">
-      {/* Top Header Navbar */}
-      <header className="relative z-20 flex items-center justify-between px-3 sm:px-6 lg:px-8 py-2 sm:py-3 border-b border-white/5 bg-slate-950/40 backdrop-blur-md">
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <div className="relative flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-500 shadow-lg shadow-rose-500/25 shrink-0">
-            <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-            <span
-              className={`absolute -top-1 -right-1 w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full border-2 border-slate-900 transition-colors ${
-                live.isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
-              }`}
-            />
-          </div>
-          <div>
-            <h1 className="text-sm sm:text-base font-bold tracking-tight text-white flex items-center gap-1.5 sm:gap-2">
-              <span>Celyn AI</span>
-              <span className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 sm:px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                Live Vision
+    <div className="relative w-full h-[100dvh] flex flex-col justify-between bg-[#08080d] text-slate-200 overflow-hidden select-none safe-top safe-bottom safe-left safe-right">
+      {/* Subtle Luxury Ambient Background */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[850px] h-[850px] ambient-halo blur-[110px] animate-soft-aura z-0"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[350px] ambient-halo-back blur-[90px] z-0"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(#ffffff05_1px,transparent_1px)] [background-size:32px_32px] opacity-40 z-0"
+      />
+
+      {/* Main Viewport Shell */}
+      <div className="relative z-10 flex flex-col justify-between h-full p-3 sm:p-5 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+        {/* Minimalist Header Bar (h-12) */}
+        <header className="flex items-center justify-between w-full h-12 shrink-0">
+          {/* Left: Refined Minimal Logo */}
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500/80 to-violet-500/80 p-[1px] shadow-sm shadow-rose-500/20">
+              <div className="w-full h-full rounded-full bg-[#08080d]/90 flex items-center justify-center">
+                <span className="w-2 h-2 rounded-full bg-rose-400" />
+              </div>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="font-medium tracking-tight text-white text-sm md:text-base">
+                Celyn AI
               </span>
-            </h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <button
-                onClick={() => setIsVoiceModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 border border-white/10 text-[10px] sm:text-xs text-slate-300 transition-colors cursor-pointer"
-                title="Pilih karakter suara Celyn"
-              >
-                <Volume2 className="w-3 h-3 text-rose-400" />
-                <span className="font-semibold text-white">
-                  {getVoiceOption(live.modelInfo.voice || selectedVoice).name}
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                  {getVoiceOption(live.modelInfo.voice || selectedVoice).badge}
-                </span>
-              </button>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-emerald-400/90 font-medium ml-1">
-                <Shield className="w-3 h-3" /> Bahasa Indonesia
+              <span className="text-[10px] tracking-widest uppercase text-slate-400 font-light">
+                Companion
               </span>
             </div>
           </div>
-        </div>
 
-        {/* Status Pills & Tombol Kunci Sesi */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5">
-          <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full glass-pill text-[11px] sm:text-xs text-slate-300 border border-white/10">
-            <Activity
-              className={`w-3.5 h-3.5 ${
-                live.isConnected
-                  ? effectiveStatus === "speaking"
-                    ? "text-rose-400 animate-pulse"
-                    : "text-emerald-400 animate-pulse"
-                  : "text-slate-500"
-              }`}
-            />
-            <span className="capitalize font-medium">
-              {live.isConnected ? effectiveStatus : "Offline"}
+          {/* Center: Clean Status & Audio Presence */}
+          <div className="luxury-blur-panel px-3 sm:px-4 py-1.5 rounded-full flex items-center gap-2 sm:gap-2.5 transition-all">
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${
+                  live.isConnected ? "bg-rose-400" : "bg-slate-500"
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  live.isConnected ? "bg-rose-500" : "bg-slate-400"
+                }`}
+              />
             </span>
+            <span className="text-[11px] sm:text-xs font-normal text-slate-300 tracking-wide truncate max-w-[130px] sm:max-w-none">
+              {!live.isConnected
+                ? "Siaga • Siap Berbicara"
+                : effectiveStatus === "speaking"
+                ? "Berbicara • Merespons Anda"
+                : effectiveStatus === "thinking"
+                ? "Menyimak • Merangkai Jawaban"
+                : "Siaga • Siap Berbicara"}
+            </span>
+            {/* Delicate Waveform Bars */}
+            <div className="flex items-center gap-0.5 h-3 pl-1.5 border-l border-white/10 shrink-0">
+              <span
+                className={`w-[2px] rounded-full transition-all ${
+                  audioEngine.isPlaying || effectiveStatus === "speaking"
+                    ? "h-3 bg-rose-400 animate-bar-wave"
+                    : "h-1.5 bg-rose-400/80"
+                }`}
+              />
+              <span
+                className={`w-[2px] rounded-full transition-all ${
+                  audioEngine.isPlaying || effectiveStatus === "speaking"
+                    ? "h-4 bg-violet-400 animate-bar-wave"
+                    : "h-3 bg-violet-400/80"
+                }`}
+                style={{ animationDelay: "0.2s" }}
+              />
+              <span
+                className={`w-[2px] rounded-full transition-all ${
+                  audioEngine.isPlaying || effectiveStatus === "speaking"
+                    ? "h-2.5 bg-slate-300 animate-bar-wave"
+                    : "h-2 bg-slate-300/80"
+                }`}
+                style={{ animationDelay: "0.4s" }}
+              />
+            </div>
           </div>
 
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-pill text-xs text-slate-400 border border-white/10">
-            <Wifi className={`w-3.5 h-3.5 ${live.isConnected ? "text-emerald-400" : "text-slate-600"}`} />
-            <span>{live.isConnected ? live.connectionLabel : "Offline"}</span>
+          {/* Right: Concise Essential Controls */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Minimal Language & Voice Selector */}
+            <button
+              onClick={() => setIsVoiceModalOpen(true)}
+              className="luxury-blur-panel px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
+              title={`Suara: ${getVoiceOption(live.modelInfo.voice || selectedVoice).name} (Klik untuk ganti)`}
+            >
+              ID
+            </button>
+
+            {/* Connection Status Button */}
+            <button
+              onClick={handleToggleConnection}
+              className="flex items-center gap-1.5 px-2.5 py-1 luxury-blur-panel rounded-full text-[11px] text-slate-300 hover:border-white/20 transition-colors cursor-pointer"
+              title={live.isConnected ? "Koneksi Aktif (Klik untuk putuskan)" : "Klik untuk sambungkan"}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  live.isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
+                }`}
+              />
+              <span className="hidden sm:inline font-light text-slate-400">
+                {live.isConnected ? "Online" : "Siaga"}
+              </span>
+            </button>
+
+            {/* Settings Icon Button */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="w-8 h-8 rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
+              title="Pengaturan"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
           </div>
+        </header>
 
-          {/* Tombol Kunci Sesi (Logout) */}
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full glass-pill text-[11px] sm:text-xs text-rose-300 hover:text-white border border-rose-500/25 hover:border-rose-500/60 hover:bg-rose-500/10 transition-all shadow-md active:scale-95 cursor-pointer"
-            title="Kunci Sesi AI (Keluar)"
-          >
-            <Lock className="w-3.5 h-3.5 text-rose-400" />
-            <span className="hidden xs:inline sm:inline">Kunci</span>
-          </button>
-        </div>
-      </header>
+        {/* Center Character Stage (Uncluttered, Breathing Room) */}
+        <main
+          className="relative flex-1 flex flex-col items-center justify-center my-auto min-h-0 w-full"
+          data-purpose="central-avatar-stage"
+        >
+          {/* Banner Error Screen/Camera Capture */}
+          {screenCapture.error && (
+            <div className="absolute top-2 z-40 max-w-sm px-4 py-2 rounded-xl bg-rose-600/95 text-white text-xs backdrop-blur-md shadow-2xl flex items-center gap-2 border border-rose-400/40 animate-in fade-in slide-in-from-top-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-white" />
+              <span className="flex-1">{screenCapture.error}</span>
+            </div>
+          )}
 
-      {/* Main Center Stage: Avatar Rendering Area */}
-      <main className="relative flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden px-2">
-        {/* Banner Error Screen/Camera Capture */}
-        {screenCapture.error && (
-          <div className="absolute top-4 z-40 max-w-sm px-4 py-2 rounded-xl bg-rose-600/95 text-white text-xs backdrop-blur-md shadow-2xl flex items-center gap-2 border border-rose-400/40 animate-in fade-in slide-in-from-top-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-white" />
-            <span className="flex-1">{screenCapture.error}</span>
-          </div>
-        )}
-
-        {avatarMode === "2d" ? (
-          <AvatarCanvas2D
-            emotion={live.emotion}
-            mouthOpen={audioEngine.volume}
-            isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
-            lookAt={live.lookAt}
-          />
-        ) : (
-          <Suspense
-            fallback={
-              <div className="flex flex-col items-center justify-center gap-2.5 text-cyan-300 text-xs animate-pulse p-8 rounded-2xl glass-panel border border-cyan-500/20">
-                <Box className="w-8 h-8 animate-spin" />
-                <span>Memuat Engine 3D VRM...</span>
-              </div>
-            }
-          >
-            <AvatarVRM3D
+          {avatarMode === "2d" ? (
+            <AvatarCanvas2D
               emotion={live.emotion}
               mouthOpen={audioEngine.volume}
               isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
               lookAt={live.lookAt}
+              isRigPanelOpen={isRigPanelOpen}
+              onToggleRigPanel={() => setIsRigPanelOpen((prev) => !prev)}
             />
-          </Suspense>
-        )}
-
-        {/* Floating Screen Preview jika sedang sharing */}
-        {screenCapture.isSharing && (
-          <ScreenPreview
-            videoElement={screenCapture.videoElement}
-            captureMode={screenCapture.captureMode}
-            lookAt={live.lookAt}
-            stats={screenCapture.stats}
-            isPaused={screenCapture.isPaused}
-            onTogglePause={screenCapture.togglePause}
-            onClose={screenCapture.stopScreenShare}
-          />
-        )}
-      </main>
-
-      {/* Bottom Floating Area: Subtitles & Control Bar */}
-      <footer className="relative z-30 pb-2 sm:pb-5 pt-1 sm:pt-2 flex flex-col items-center gap-2 sm:gap-3 px-2 sm:px-4 w-full">
-        <SubtitleOverlay
-          transcripts={live.transcripts}
-          statusMessage={effectiveStatusMessage}
-          status={effectiveStatus}
-        />
-
-        {/* Quick Text Input Form (Anti iOS Safari Auto-Zoom: text-base sm:text-xs) */}
-        {live.isConnected && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!inputText.trim()) return;
-              live.sendText(inputText.trim());
-              setInputText("");
-            }}
-            className="w-full max-w-md flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl glass-panel border border-white/10 shadow-lg animate-in fade-in"
-          >
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Bicara atau ketik pesan..."
-              className="flex-1 bg-transparent text-base sm:text-xs text-white placeholder-slate-400 focus:outline-none px-2 py-1 min-w-0"
-            />
-            <button
-              type="submit"
-              disabled={!inputText.trim()}
-              className="p-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 disabled:opacity-40 text-white transition-colors shrink-0"
-              title="Kirim pesan"
+          ) : (
+            <Suspense
+              fallback={
+                <div className="flex flex-col items-center justify-center gap-2.5 text-cyan-300 text-xs animate-pulse p-8 rounded-2xl luxury-blur-panel border border-cyan-500/20">
+                  <Box className="w-8 h-8 animate-spin" />
+                  <span>Memuat Engine 3D VRM...</span>
+                </div>
+              }
             >
-              <Send className="w-3.5 h-3.5" />
-            </button>
-          </form>
-        )}
+              <AvatarVRM3D
+                emotion={live.emotion}
+                mouthOpen={audioEngine.volume}
+                isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
+                lookAt={live.lookAt}
+              />
+            </Suspense>
+          )}
 
-        <ControlBar
-          isConnected={live.isConnected}
-          isMicActive={audioEngine.isMicActive}
-          isScreenSharing={screenCapture.isSharing}
-          isPushToTalk={isPushToTalk}
-          avatarMode={avatarMode}
-          volume={audioEngine.volume}
-          onToggleConnection={handleToggleConnection}
-          onToggleMic={handleToggleMic}
-          onToggleScreenShare={handleToggleScreenShare}
-          onTogglePushToTalk={() => setIsPushToTalk((prev) => !prev)}
-          onToggleAvatarMode={() =>
-            setAvatarMode((prev) => (prev === "2d" ? "3d" : "2d"))
-          }
-          onToggleVoiceSelector={() => setIsVoiceModalOpen(true)}
-          onToggleHistory={() => setIsHistoryOpen(true)}
-          onToggleHelp={() => setIsHelpOpen(true)}
-          onTriggerTestSpeech={audioEngine.triggerTestSpeech}
-          onPttHoldStart={() => {
-            if (!audioEngine.isMicActive) audioEngine.startMic();
-          }}
-          onPttHoldEnd={() => {
-            if (audioEngine.isMicActive) audioEngine.stopMic();
-          }}
-        />
-      </footer>
+          {/* Floating Screen Preview jika sedang sharing */}
+          {screenCapture.isSharing && (
+            <ScreenPreview
+              videoElement={screenCapture.videoElement}
+              captureMode={screenCapture.captureMode}
+              lookAt={live.lookAt}
+              stats={screenCapture.stats}
+              isPaused={screenCapture.isPaused}
+              onTogglePause={screenCapture.togglePause}
+              onClose={screenCapture.stopScreenShare}
+            />
+          )}
+        </main>
+
+        {/* Floating Subtitle & Ultra-Clean Control Dock */}
+        <footer className="w-full flex flex-col items-center pb-2 shrink-0 gap-3">
+          {/* Floating Elegant Speech Subtitle (Companion Dialogue) */}
+          <SubtitleOverlay
+            transcripts={live.transcripts}
+            statusMessage={effectiveStatusMessage}
+            status={effectiveStatus}
+          />
+
+          {/* Toggleable Luxury Text Input Form */}
+          {isTextInputOpen && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!inputText.trim()) return;
+                live.sendText(inputText.trim());
+                setInputText("");
+              }}
+              className="w-full max-w-md flex items-center gap-2 px-3 py-1.5 rounded-2xl luxury-blur-panel border border-white/10 shadow-2xl animate-in fade-in slide-in-from-bottom-2"
+            >
+              <input
+                type="text"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="Ketik pesan untuk Celyn..."
+                className="flex-1 bg-transparent text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none px-2 py-1 min-w-0"
+                autoFocus
+              />
+              <button
+                type="submit"
+                disabled={!inputText.trim()}
+                className="p-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 disabled:opacity-30 text-white transition-colors cursor-pointer shrink-0"
+                title="Kirim pesan"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          )}
+
+          {/* Ultra-Clean 5-Button Dock */}
+          <ControlBar
+            isConnected={live.isConnected}
+            isMicActive={audioEngine.isMicActive}
+            isScreenSharing={screenCapture.isSharing}
+            isPushToTalk={isPushToTalk}
+            isTextInputOpen={isTextInputOpen}
+            volume={audioEngine.volume}
+            onToggleConnection={handleToggleConnection}
+            onToggleMic={handleToggleMic}
+            onToggleScreenShare={handleToggleScreenShare}
+            onToggleVoiceSelector={() => setIsVoiceModalOpen(true)}
+            onToggleTextInput={() => setIsTextInputOpen((prev) => !prev)}
+            onToggleHistory={() => setIsHistoryOpen(true)}
+            onPttHoldStart={() => {
+              if (!audioEngine.isMicActive) audioEngine.startMic();
+            }}
+            onPttHoldEnd={() => {
+              if (audioEngine.isMicActive) audioEngine.stopMic();
+            }}
+          />
+        </footer>
+      </div>
 
       {/* Riwayat Percakapan Drawer */}
       <TranscriptDrawer
@@ -427,6 +486,24 @@ export function App() {
         onSelectVoice={handleSelectVoice}
         onClose={() => setIsVoiceModalOpen(false)}
         onTestVoice={audioEngine.triggerTestSpeech}
+      />
+
+      {/* Modal Pengaturan Companion */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        avatarMode={avatarMode}
+        onToggleAvatarMode={() =>
+          setAvatarMode((prev) => (prev === "2d" ? "3d" : "2d"))
+        }
+        isPushToTalk={isPushToTalk}
+        onTogglePushToTalk={() => setIsPushToTalk((prev) => !prev)}
+        isConnected={live.isConnected}
+        onToggleConnection={handleToggleConnection}
+        onOpenShortcuts={() => setIsHelpOpen(true)}
+        onOpenCalibration={() => setIsRigPanelOpen(true)}
+        onTriggerTestSpeech={audioEngine.triggerTestSpeech}
+        onLogout={handleLogout}
       />
     </div>
   );

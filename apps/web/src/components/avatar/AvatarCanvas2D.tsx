@@ -12,6 +12,8 @@ interface AvatarCanvas2DProps {
   mouthOpen: number; // 0.0 - 1.0 (RMS amplitude)
   isSpeaking: boolean;
   lookAt: LookAtTarget | null;
+  isRigPanelOpen?: boolean;
+  onToggleRigPanel?: () => void;
 }
 
 export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
@@ -19,6 +21,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   mouthOpen,
   isSpeaking,
   lookAt,
+  isRigPanelOpen: externalRigPanelOpen,
+  onToggleRigPanel,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const torsoContainerRef = useRef<HTMLDivElement>(null);
@@ -44,9 +48,20 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     return DEFAULT_RIG_CONFIG;
   });
 
-  const [isRigPanelOpen, setIsRigPanelOpen] = useState(() => {
+  const [internalRigPanelOpen, setInternalRigPanelOpen] = useState(() => {
     return window.location.search.includes("debugRig=1");
   });
+
+  const isRigPanelOpen =
+    externalRigPanelOpen !== undefined ? externalRigPanelOpen : internalRigPanelOpen;
+
+  const toggleRigPanel = () => {
+    if (onToggleRigPanel) {
+      onToggleRigPanel();
+    } else {
+      setInternalRigPanelOpen((prev) => !prev);
+    }
+  };
 
   const handleRigChange = (newConfig: RigConfig) => {
     setRigConfig(newConfig);
@@ -63,12 +78,12 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && e.code === "KeyR") {
         e.preventDefault();
-        setIsRigPanelOpen((prev) => !prev);
+        toggleRigPanel();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [toggleRigPanel]);
 
   // Simpan props & config terbaru dalam ref agar loop 60 FPS membacanya langsung tanpa re-render React
   const propsRef = useRef({ emotion, mouthOpen, isSpeaking, lookAt, rigConfig });
@@ -305,25 +320,18 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       ref={containerRef}
       className="relative flex flex-col items-center justify-center w-full h-full select-none overflow-hidden"
     >
-      {/* Tombol Pintas Kalibrasi Rig (Pojok Kiri Atas Mobile & Desktop) */}
-      <button
-        onClick={() => setIsRigPanelOpen((prev) => !prev)}
-        className="absolute top-2.5 left-2.5 sm:top-5 sm:left-6 z-40 flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full glass-pill border border-white/10 hover:border-rose-500/40 text-slate-400 hover:text-white text-[11px] sm:text-xs font-medium transition-all shadow-lg hover:scale-105"
-        title="Buka Panel Kalibrasi Rig 2D (Alt+R)"
-      >
-        <Sliders className="w-3.5 h-3.5 text-rose-400" />
-        <span className="hidden xs:inline sm:inline">Kalibrasi</span>
-      </button>
-
-      {/* Panel Kalibrasi Rig Interaktif */}
+      {/* Panel Kalibrasi Rig Interaktif (Dibuka via Pengaturan Gear atau Alt+R) */}
       {isRigPanelOpen && (
         <RigCalibrationPanel
           config={rigConfig}
           onChange={handleRigChange}
           onReset={handleRigReset}
-          onClose={() => setIsRigPanelOpen(false)}
+          onClose={() => (onToggleRigPanel ? onToggleRigPanel() : setInternalRigPanelOpen(false))}
         />
       )}
+
+      {/* Gentle Backdrop Glow Halo behind Avatar */}
+      <div className="absolute w-[420px] md:w-[500px] h-[520px] rounded-full bg-rose-500/10 blur-[85px] pointer-events-none z-0" />
 
       {/* Halo gelombang suara saat Celyn berbicara (Responsif Layar HP & Desktop) */}
       <div
@@ -345,26 +353,15 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       {/* Aura Cahaya Halus di Belakang Celyn */}
       <div
         ref={auraGlowRef}
-        className="absolute w-[70vw] max-w-[420px] aspect-square rounded-full blur-3xl transition-opacity duration-500 pointer-events-none will-change-transform"
+        className="absolute w-[70vw] max-w-[420px] aspect-square rounded-full blur-3xl transition-opacity duration-500 pointer-events-none will-change-transform z-0"
         style={{
           background: emotionConfig.glowColor,
           opacity: isSpeaking ? 0.9 : 0.45,
         }}
       />
 
-      {/* Badge Status Emosi (Responsif: Kanan Atas di Mobile, Tengah Atas di Desktop) */}
-      <div
-        className={`absolute top-2.5 right-2.5 sm:right-auto sm:top-5 sm:left-1/2 sm:-translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full glass-pill border ${emotionConfig.borderColor} shadow-xl text-[11px] sm:text-xs font-medium text-slate-200 transition-colors duration-300`}
-      >
-        <EmotionIcon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${emotionConfig.textColor} animate-pulse`} />
-        <span>Celyn:</span>
-        <span className={`font-semibold ${emotionConfig.textColor}`}>
-          {emotionConfig.label}
-        </span>
-      </div>
-
-      {/* STAGE UTAMA AVATAR CELYN: Terkunci pada Rasio 3:4 Gambar Asli (768x1024) Tanpa Distorsi Mobile */}
-      <div className="relative z-10 w-[min(90vw,calc(62dvh*0.75))] sm:w-[min(85vw,calc(70dvh*0.75))] max-w-[435px] aspect-[3/4] flex items-end justify-center pointer-events-none select-none">
+      {/* STAGE UTAMA AVATAR CELYN: Uncluttered Breathing Room dengan animate-float-avatar */}
+      <div className="relative z-10 w-[min(90vw,calc(65dvh*0.75))] sm:w-[min(85vw,calc(72dvh*0.75))] max-w-[440px] aspect-[3/4] flex items-end justify-center pointer-events-none select-none transition-transform duration-700 animate-float-avatar">
         
         {/* KONTAINER UTAMA DENGAN GERAK NAPAS & GESTUR BADAN/TANGAN (Poros di panggul) */}
         <div
@@ -486,6 +483,9 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             </div>
           )}
         </div>
+
+        {/* Seamless Soft Vignette at Base */}
+        <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-[#08080d] via-transparent to-transparent opacity-90 z-35" />
       </div>
 
       {/* Indikator Reticle LookAt jika sedang fokus pada elemen layar */}
