@@ -38,6 +38,7 @@ export class GeminiSession {
   private isBargeInMuted = false;
   private backupPcmChunks: string[] = [];
   private hasPendingToolCall = false;
+  private hasUserInitiatedTurn = false;
 
   public stats = {
     audioChunksIn: 0,
@@ -179,9 +180,9 @@ export class GeminiSession {
         }
       }
 
-      // Picu sapaan ramah pembuka Celyn secara otomatis saat pertama kali tersambung
+      // Picu sapaan ramah pembuka Celyn secara otomatis HANYA jika pengguna belum mengirim pesan/suara
       setTimeout(async () => {
-        if (this.session && this.state === "ACTIVE") {
+        if (!this.hasUserInitiatedTurn && this.session && this.state === "ACTIVE") {
           try {
             console.log("👋 [Gemini Live] Mengirim trigger sapaan pembuka Celyn...");
             await this.session.sendClientContent({
@@ -200,6 +201,8 @@ export class GeminiSession {
           } catch (e) {
             console.warn("Gagal auto-greeting:", e);
           }
+        } else if (this.hasUserInitiatedTurn) {
+          console.log("ℹ️ [Gemini Live] Auto-greeting dilewati karena pengguna telah mengirim pesan pertama.");
         }
       }, 500);
 
@@ -568,6 +571,7 @@ export class GeminiSession {
     try {
       if (msg.type === "audio") {
         this.stats.audioChunksIn++;
+        this.hasUserInitiatedTurn = true;
         await this.session.sendRealtimeInput({
           audio: {
             mimeType: "audio/pcm;rate=16000",
@@ -584,7 +588,15 @@ export class GeminiSession {
         });
       } else if (msg.type === "text") {
         console.log(`👤 [User Text]: "${msg.text}"`);
+        this.hasUserInitiatedTurn = true;
+        this.isBargeInMuted = false;
+        this.hasPendingToolCall = false;
         this.cancelPendingTts();
+        this.sendToClient({
+          type: "status",
+          status: "thinking",
+          message: "Celyn sedang menyimak & merangkai jawaban...",
+        });
         await this.session.sendClientContent({
           turns: [{ role: "user", parts: [{ text: msg.text }] }],
           turnComplete: true,

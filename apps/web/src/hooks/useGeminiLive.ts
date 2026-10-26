@@ -58,6 +58,7 @@ export function useGeminiLive({
   const backupPcmChunksRef = useRef<string[]>([]);
   const bargeInMutedRef = useRef<boolean>(false);
   const directHasPendingToolCallRef = useRef<boolean>(false);
+  const hasUserInitiatedTurnRef = useRef<boolean>(false);
   const sessionWarningTimerRef = useRef<number | null>(null);
   const sessionMaxDurationTimerRef = useRef<number | null>(null);
   const disconnectRef = useRef<() => void>(() => {});
@@ -622,9 +623,9 @@ export function useGeminiLive({
         disconnectRef.current();
       }, 30 * 60 * 1000);
 
-      // Kirim sapaan otomatis Celyn saat pertama kali terhubung
+      // Kirim sapaan otomatis Celyn saat pertama kali terhubung HANYA jika pengguna belum mengirim pesan
       setTimeout(async () => {
-        if (directSessionRef.current) {
+        if (!hasUserInitiatedTurnRef.current && directSessionRef.current) {
           try {
             await directSessionRef.current.sendClientContent({
               turns: [
@@ -738,6 +739,7 @@ export function useGeminiLive({
 
   const disconnect = useCallback(() => {
     clearSessionTimers();
+    hasUserInitiatedTurnRef.current = false;
     bargeInMutedRef.current = false;
     pendingQueueRef.current = [];
     directTtsTurnIdRef.current++;
@@ -795,9 +797,17 @@ export function useGeminiLive({
             },
           });
         } else if (msg.type === "text") {
+          hasUserInitiatedTurnRef.current = true;
+          bargeInMutedRef.current = false;
+          directHasPendingToolCallRef.current = false;
           directTtsTurnIdRef.current++;
           directTtsBufferRef.current = "";
           backupPcmChunksRef.current = [];
+          handleServerMessage({
+            type: "status",
+            status: "thinking",
+            message: "Celyn sedang menyimak & merangkai jawaban...",
+          });
           await session.sendClientContent({
             turns: [{ role: "user", parts: [{ text: msg.text }] }],
             turnComplete: true,
@@ -809,14 +819,14 @@ export function useGeminiLive({
       return;
     }
 
-    // 3. Jika status masih connecting, simpan ke antrean sementara (ring buffer maks 25 pesan)
-    if (statusRef.current === "connecting") {
+    // 3. Jika koneksi belum terbuka, antrekan paket pesan (khususnya pesan teks WAJIB diantrekan agar tidak hilang)
+    if (statusRef.current === "connecting" || msg.type === "text") {
       pendingQueueRef.current.push(msg);
       if (pendingQueueRef.current.length > 25) {
         pendingQueueRef.current.shift();
       }
     }
-  }, []);
+  }, [handleServerMessage]);
 
   useEffect(() => {
     sendMessageRef.current = sendMessage;
@@ -854,6 +864,15 @@ export function useGeminiLive({
 
   const sendText = useCallback(
     (text: string) => {
+      hasUserInitiatedTurnRef.current = true;
+      bargeInMutedRef.current = false;
+      directHasPendingToolCallRef.current = false;
+      activeTurnSpeakerRef.current = "user";
+
+      // Berikan visual feedback seketika bahwa pesan sedang disimak
+      setStatus("thinking");
+      setStatusMessage("Celyn sedang menyimak & merangkai jawaban...");
+
       const time = new Date().toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",

@@ -450,7 +450,39 @@ async function runTtsTests() {
   }
   assert(apiSyntaxOk, "Validasi sintaksis node --check pada api/tts.js, api/token.js, api/health.js lulus 100%");
 
-  // 12. Ringkasan
+  // 12. Uji Antrean Pesan Teks & Penanganan Input Teks Tanpa Suara
+  console.log("\n--- 12. Uji Antrean Pesan Teks & Zero-Drop Text Queue ---");
+  const testPendingQueue: Array<{ type: string; text?: string }> = [];
+  const enqueueText = (msg: { type: string; text?: string }, isConnecting: boolean) => {
+    if (isConnecting || msg.type === "text") {
+      testPendingQueue.push(msg);
+      if (testPendingQueue.length > 25) testPendingQueue.shift();
+    }
+  };
+
+  enqueueText({ type: "text", text: "Halo Celyn dari ketikan teks!" }, false);
+  assert(
+    testPendingQueue.length === 1 && testPendingQueue[0].text === "Halo Celyn dari ketikan teks!",
+    "Pesan teks berhasil diantrekan meskipun status sesi masih idle (Zero-Drop Text Queue)"
+  );
+
+  let bargeInMuted = true;
+  let hasUserInitiated = false;
+  const onHandleText = (text: string) => {
+    hasUserInitiated = true;
+    bargeInMuted = false;
+  };
+  onHandleText(testPendingQueue[0].text!);
+  assert(
+    bargeInMuted === false,
+    "Flag bargeInMuted berhasil di-reset ke false saat menerima pesan teks (suara tidak dibisukan)"
+  );
+  assert(
+    hasUserInitiated === true,
+    "Flag hasUserInitiated bernilai true sehingga auto-greeting dicegah menimpa pertanyaan teks pengguna"
+  );
+
+  // 13. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

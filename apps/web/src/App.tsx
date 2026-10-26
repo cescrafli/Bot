@@ -104,6 +104,29 @@ export function App() {
     }
   }, [live, audioEngine]);
 
+  // Kirim Pesan Teks (dengan auto-connect jika belum tersambung, tanpa menyalakan mic)
+  const handleSendText = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      // ⚡ Buka kunci AudioContext secara sinkron saat user gesture submit (wajib untuk pemutaran audio browser)
+      audioEngine.unlockAudio();
+
+      // Hentikan pemutaran audio sebelumnya jika Celyn sedang bicara
+      audioEngine.stopPlayback();
+
+      // Jika belum terhubung, hubungkan otomatis ke Celyn TANPA menyalakan mikrofon
+      if (!live.isConnected) {
+        live.connect(selectedVoice);
+      }
+
+      live.sendText(trimmed);
+      setInputText("");
+    },
+    [audioEngine, live, selectedVoice]
+  );
+
   // Toggle Koneksi Sesi
   const handleToggleConnection = useCallback(async () => {
     // ⚡ Buka kunci AudioContext secara sinkron saat user gesture (wajib untuk iOS Safari & Android Chrome)
@@ -425,9 +448,7 @@ export function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!inputText.trim()) return;
-                live.sendText(inputText.trim());
-                setInputText("");
+                handleSendText(inputText);
               }}
               className="w-full max-w-md flex items-center gap-2 px-3 py-1.5 rounded-2xl luxury-blur-panel border border-white/10 shadow-2xl animate-in fade-in slide-in-from-bottom-2"
             >
