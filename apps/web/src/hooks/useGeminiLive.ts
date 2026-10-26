@@ -28,7 +28,7 @@ export function useGeminiLive({
   const [status, setStatus] = useState<
     "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error"
   >("idle");
-  const [statusMessage, setStatusMessage] = useState<string>("Siap terhubung");
+  const [statusMessage, setStatusMessage] = useState<string>("Siaga • Siap Berbicara");
   const [modelInfo, setModelInfo] = useState<{ model: string; voice: string }>({
     model: "gemini-3.8-live",
     voice: DEFAULT_VOICE_NAME,
@@ -596,7 +596,7 @@ export function useGeminiLive({
       directSessionRef.current = session;
       setIsConnected(true);
       setStatus("listening");
-      setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
+      setStatusMessage("Siaga • Siap Berbicara");
 
       // ⚡ Priming Audio Pipeline: Kirim 1 frame silence PCM 16kHz (64ms = 2048 bytes)
       try {
@@ -713,7 +713,7 @@ export function useGeminiLive({
       setConnectionLabel(wsUrl);
       setIsConnected(true);
       setStatus("listening");
-      setStatusMessage("Terhubung! Celyn sedang mendengarkan...");
+      setStatusMessage("Siaga • Siap Berbicara");
       flushPendingQueue();
     };
 

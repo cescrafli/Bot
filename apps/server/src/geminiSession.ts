@@ -181,7 +181,7 @@ export class GeminiSession {
       this.sendToClient({
         type: "status",
         status: "listening",
-        message: "Celyn aktif dan siap mendengarkan ucapanmu!",
+        message: "Siaga • Siap Berbicara",
       });
 
       // Flush paket yang sempat masuk saat CONNECTING

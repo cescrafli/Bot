@@ -230,18 +230,26 @@ export function App() {
     handleToggleScreenShare,
   ]);
 
-  // Status sinkron dengan pemutaran audio riil di browser
+  // Status sinkron dengan pemutaran audio riil dan mikrofon di browser
   const effectiveStatus = !live.isConnected
     ? "idle"
     : audioEngine.isPlaying
     ? "speaking"
+    : live.status === "thinking"
+    ? "thinking"
+    : !audioEngine.isMicActive
+    ? "idle"
     : live.status;
 
   const effectiveStatusMessage = !live.isConnected
-    ? live.statusMessage
+    ? "Siaga • Siap Berbicara"
     : audioEngine.isPlaying
-    ? "Celyn sedang berbicara..."
-    : live.statusMessage;
+    ? "Berbicara • Merespons Anda"
+    : effectiveStatus === "thinking"
+    ? "Menyimak • Merangkai Jawaban"
+    : !audioEngine.isMicActive
+    ? "Siaga • Siap Berbicara"
+    : "Mendengarkan • Silakan Bicara";
 
   // Handler Logout / Kunci Sesi
   const handleLogout = useCallback(() => {
@@ -321,23 +329,23 @@ export function App() {
             <span className="relative flex h-2 w-2 shrink-0">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${
-                  live.isConnected ? "bg-rose-400" : "bg-slate-500"
+                  audioEngine.isPlaying || (live.isConnected && audioEngine.isMicActive)
+                    ? "bg-rose-400"
+                    : "hidden"
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-2 w-2 ${
-                  live.isConnected ? "bg-rose-500" : "bg-slate-400"
+                  audioEngine.isPlaying || (live.isConnected && audioEngine.isMicActive)
+                    ? "bg-rose-500"
+                    : live.isConnected
+                    ? "bg-rose-400/80"
+                    : "bg-slate-400"
                 }`}
               />
             </span>
             <span className="text-[11px] sm:text-xs font-normal text-slate-300 tracking-wide truncate max-w-[130px] sm:max-w-none">
-              {!live.isConnected
-                ? "Siaga • Siap Berbicara"
-                : effectiveStatus === "speaking"
-                ? "Berbicara • Merespons Anda"
-                : effectiveStatus === "thinking"
-                ? "Menyimak • Merangkai Jawaban"
-                : "Siaga • Siap Berbicara"}
+              {effectiveStatusMessage}
             </span>
             {/* Delicate Waveform Bars */}
             <div className="flex items-center gap-0.5 h-3 pl-1.5 border-l border-white/10 shrink-0">
