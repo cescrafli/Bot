@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Lock, Eye, EyeOff, ShieldCheck, Sparkles, AlertCircle, Clock } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 
 interface AuthGateProps {
   error: string | null;
@@ -18,11 +18,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 }) => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus input saat mount
+  // Auto-focus input saat halaman dibuka
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -40,7 +39,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     e.preventDefault();
     if (!password.trim() || isLocked) return;
 
-    const success = onLogin(password, rememberMe);
+    const success = onLogin(password, true);
     if (!success) {
       setPassword("");
       inputRef.current?.focus();
@@ -48,134 +47,82 @@ export const AuthGate: React.FC<AuthGateProps> = ({
   };
 
   return (
-    <div className="relative flex items-center justify-center min-h-[100dvh] w-full bg-slate-950 px-4 select-none overflow-hidden font-sans">
-      {/* Background Ambient Aura Glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[340px] sm:w-[500px] h-[340px] sm:h-[500px] bg-rose-600/20 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-1/4 left-1/3 w-[260px] sm:w-[400px] h-[260px] sm:h-[400px] bg-cyan-600/15 rounded-full blur-[100px] pointer-events-none" />
-
-      {/* Main Glassmorphic Card */}
+    <div className="relative flex items-center justify-center min-h-[100dvh] w-full bg-[#0b0f17] px-4 py-8 select-none font-sans overflow-hidden">
+      {/* Kartu Utama Minimalis Versi Dark Mode Sesuai Desain Referensi */}
       <div
-        className={`relative z-10 w-full max-w-md glass-panel border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-2xl transition-transform duration-200 ${
+        className={`w-full max-w-4xl min-h-[440px] sm:min-h-[520px] bg-[#121824] border border-slate-800/80 rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col items-center justify-center px-6 py-12 sm:px-16 sm:py-20 transition-all duration-200 ${
           isShaking ? "animate-shake" : ""
         }`}
       >
-        {/* Header Icon & Badges */}
-        <div className="flex flex-col items-center text-center mb-6">
-          <div className="relative mb-4">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-tr from-rose-500/20 via-pink-500/20 to-cyan-500/20 border border-white/15 flex items-center justify-center shadow-lg shadow-rose-500/10 backdrop-blur-md">
-              <Lock className="w-8 h-8 sm:w-9 sm:h-9 text-rose-400 animate-pulse" />
-            </div>
-            <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
-            </div>
-          </div>
+        {/* Judul Halaman */}
+        <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight text-center mb-6 sm:mb-7">
+          Protected Page
+        </h1>
 
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full glass-pill border border-rose-500/30 text-rose-300 text-[11px] sm:text-xs font-medium mb-2.5">
-            <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-            <span>Akses Terbatas — Otorisasi Admin</span>
-          </div>
+        {/* Label Password */}
+        <label
+          htmlFor="protected-password-input"
+          className="text-xs sm:text-sm font-medium text-slate-400 text-center mb-2.5 sm:mb-3 block"
+        >
+          Password
+        </label>
 
-          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-            Celyn AI BOT
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1.5 max-w-xs leading-relaxed">
-            Masukkan kata sandi otorisasi untuk memulai percakapan interaktif dengan Celyn.
-          </p>
-        </div>
-
-        {/* Form Login */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label
-              htmlFor="celyn-password-input"
-              className="block text-xs font-medium text-slate-300 ml-1"
+        {/* Form Input & Submit */}
+        <form
+          onSubmit={handleSubmit}
+          className="w-full max-w-[280px] sm:max-w-[320px] flex flex-col items-center"
+        >
+          <div className="relative w-full mb-3">
+            <input
+              ref={inputRef}
+              id="protected-password-input"
+              type={showPassword ? "text" : "password"}
+              value={password}
+              disabled={isLocked}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) onClearError();
+              }}
+              placeholder={isLocked ? "Terkunci sementara..." : "Enter your password"}
+              className="w-full px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#0b0f17] border border-slate-700/80 focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/20 text-white placeholder-slate-500 text-xs sm:text-sm outline-none transition-all pr-9 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              tabIndex={-1}
+              disabled={isLocked}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40"
+              title={showPassword ? "Hide password" : "Show password"}
             >
-              Kata Sandi Otorisasi
-            </label>
-            <div className="relative flex items-center">
-              <input
-                ref={inputRef}
-                id="celyn-password-input"
-                type={showPassword ? "text" : "password"}
-                value={password}
-                disabled={isLocked}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  if (error) onClearError();
-                }}
-                placeholder={isLocked ? "Terkunci sementara..." : "Masukkan kata sandi (admin)..."}
-                className="w-full bg-slate-900/80 border border-white/15 focus:border-rose-500/60 rounded-xl px-3.5 py-2.5 sm:py-3 pr-11 text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/20 transition-all shadow-inner disabled:opacity-50 disabled:cursor-not-allowed"
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                tabIndex={-1}
-                disabled={isLocked}
-                className="absolute right-3 p-1 rounded-lg text-slate-400 hover:text-white transition-colors disabled:opacity-40"
-                title={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
-              >
-                {showPassword ? (
-                  <EyeOff className="w-4 h-4" />
-                ) : (
-                  <Eye className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Opsi Ingat Sesi */}
-          <div className="flex items-center justify-between text-xs px-1">
-            <label className="flex items-center gap-2 cursor-pointer text-slate-400 hover:text-slate-300 transition-colors">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                disabled={isLocked}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-white/20 bg-slate-900/60 text-rose-500 focus:ring-rose-500/30 cursor-pointer"
-              />
-              <span>Ingat sesi di perangkat ini</span>
-            </label>
-            <span className="text-[11px] text-slate-500">
-              Default: <code className="text-rose-300 font-mono">admin</code>
-            </span>
-          </div>
-
-          {/* Error / Lockout Alert */}
-          {error && (
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs animate-in fade-in">
-              {isLocked ? (
-                <Clock className="w-4 h-4 shrink-0 text-rose-400 mt-0.5 animate-spin" />
+              {showPassword ? (
+                <EyeOff className="w-3.5 h-3.5" />
               ) : (
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                <Eye className="w-3.5 h-3.5" />
               )}
-              <div className="flex-1 leading-relaxed">
-                <span>{error}</span>
-                {isLocked && (
-                  <span className="block font-semibold mt-0.5 text-rose-200">
-                    Sisa waktu: {lockoutSeconds} detik
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
+            </button>
+          </div>
 
-          {/* Tombol Submit */}
           <button
             type="submit"
             disabled={!password.trim() || isLocked}
-            className="w-full mt-2 py-3 px-4 rounded-xl bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 active:scale-[0.98] text-white text-sm font-semibold shadow-lg shadow-rose-500/25 transition-all duration-150 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+            className="w-full py-2 sm:py-2.5 px-4 rounded-lg sm:rounded-xl bg-[#1d64d8] hover:bg-[#1a5bc4] active:scale-[0.98] text-white text-xs sm:text-sm font-medium transition-all shadow-md shadow-blue-900/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
-            <span>Masuk ke Celyn AI</span>
-            <Sparkles className="w-4 h-4 text-rose-200" />
+            Submit
           </button>
-        </form>
 
-        {/* Footer Info */}
-        <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400/70" />
-          <span>Koneksi aman terenkripsi ke Gemini Live & Edge Neural TTS</span>
-        </div>
+          {/* Notifikasi Error / Cooldown */}
+          {error && (
+            <div className="mt-3.5 text-center text-xs text-rose-400 font-medium animate-shake max-w-xs">
+              {error}
+              {isLocked && (
+                <span className="block text-[11px] text-slate-400 mt-1">
+                  Harap tunggu {lockoutSeconds} detik
+                </span>
+              )}
+            </div>
+          )}
+        </form>
       </div>
     </div>
   );
