@@ -157,6 +157,20 @@ export class GeminiSession {
       this.state = "ACTIVE";
       console.log("✅ [Gemini Live SDK] Sesi Celyn berhasil tersambung dan siap merespons!");
 
+      // ⚡ Priming Audio Pipeline: Kirim 1 frame silence PCM 16kHz (64ms = 2048 bytes)
+      // agar subsistem audio decoder Gemini Live selalu aktif meskipun pengguna belum menyalakan mic
+      try {
+        const primingSilence = Buffer.alloc(2048).toString("base64");
+        await this.session.sendRealtimeInput({
+          audio: {
+            mimeType: "audio/pcm;rate=16000",
+            data: primingSilence,
+          },
+        });
+      } catch (e: any) {
+        console.warn("Priming audio warning:", e?.message);
+      }
+
       // Kirim informasi model aktif ke klien
       this.sendToClient({
         type: "session_info",
@@ -597,8 +611,10 @@ export class GeminiSession {
           status: "thinking",
           message: "Celyn sedang menyimak & merangkai jawaban...",
         });
+        // Sertakan direktif verbal eksplisit agar model native audio selalu menghasilkan jawaban suara lisan
+        const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;
         await this.session.sendClientContent({
-          turns: [{ role: "user", parts: [{ text: msg.text }] }],
+          turns: [{ role: "user", parts: [{ text: textPrompt }] }],
           turnComplete: true,
         });
       } else if (msg.type === "barge_in") {

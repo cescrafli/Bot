@@ -113,8 +113,10 @@ export function App() {
       // ⚡ Buka kunci AudioContext secara sinkron saat user gesture submit (wajib untuk pemutaran audio browser)
       audioEngine.unlockAudio();
 
-      // Hentikan pemutaran audio sebelumnya jika Celyn sedang bicara
-      audioEngine.stopPlayback();
+      // Hentikan pemutaran audio sebelumnya HANYA jika Celyn sedang aktif berbicara
+      if (audioEngine.isPlaying) {
+        audioEngine.stopPlayback();
+      }
 
       // Jika belum terhubung, hubungkan otomatis ke Celyn TANPA menyalakan mikrofon
       if (!live.isConnected) {
@@ -254,6 +256,16 @@ export function App() {
     auth.logout();
   }, [live, audioEngine, screenCapture, auth]);
 
+  // Handler Login dengan Auto-Unlock AudioContext (User Gesture Sah Browser)
+  const handleLogin = useCallback(
+    (password: string) => {
+      // ⚡ Buka kunci AudioContext seketika saat klik Login agar browser mengizinkan audio out tanpa open mic
+      audioEngine.unlockAudio();
+      return auth.login(password);
+    },
+    [audioEngine, auth]
+  );
+
   // Gerbang Autentikasi: Tahan seluruh tampilan AI jika belum memasukkan password 'admin'
   if (!auth.isAuthenticated) {
     return (
@@ -261,7 +273,7 @@ export function App() {
         error={auth.error}
         isLocked={auth.isLocked}
         lockoutSeconds={auth.lockoutSeconds}
-        onLogin={auth.login}
+        onLogin={handleLogin}
         onClearError={auth.clearError}
       />
     );

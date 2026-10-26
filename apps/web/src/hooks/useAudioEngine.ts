@@ -93,13 +93,19 @@ export function useAudioEngine({
     return audioCtxRef.current;
   }, []);
 
-  // Membuka kunci (unlock) AudioContext secara sinkron saat user gesture (klik/tap tombol "Mulai")
+  // Membuka kunci (unlock) AudioContext secara sinkron saat user gesture (klik/tap tombol "Mulai" / Login / Kirim Pesan)
   // Diwajibkan oleh iOS WebKit & Android Chrome agar audio out tidak dibisukan secara otomatis
   const unlockAudio = useCallback(() => {
     try {
       const ctx = getOrCreateAudioContext();
       if (ctx.state === "suspended") {
         ctx.resume().catch(() => {});
+      }
+      if (masterGainRef.current) {
+        try {
+          masterGainRef.current.gain.cancelScheduledValues(0);
+          masterGainRef.current.gain.setValueAtTime(1, ctx.currentTime);
+        } catch {}
       }
       const buffer = ctx.createBuffer(1, 1, 22050);
       const source = ctx.createBufferSource();
@@ -362,6 +368,21 @@ export function useAudioEngine({
       stopPlayingTimerRef.current = null;
     }
 
+    // Jika tidak ada audio yang sedang berputar, pastikan masterGain tetap 1 dan reset state
+    if (activeSourcesRef.current.length === 0) {
+      if (audioCtxRef.current && masterGainRef.current) {
+        try {
+          masterGainRef.current.gain.cancelScheduledValues(0);
+          masterGainRef.current.gain.setValueAtTime(1, audioCtxRef.current.currentTime);
+        } catch {}
+      }
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      setVolume(0);
+      return;
+    }
+
+    // Jika ada audio yang sedang berputar, lakukan fade-out mikro 35ms untuk mencegah suara pop/klik
     if (audioCtxRef.current && masterGainRef.current) {
       const now = audioCtxRef.current.currentTime;
       try {
@@ -381,6 +402,7 @@ export function useAudioEngine({
       activeSourcesRef.current = [];
       if (audioCtxRef.current && masterGainRef.current) {
         try {
+          masterGainRef.current.gain.cancelScheduledValues(0);
           masterGainRef.current.gain.setValueAtTime(1, audioCtxRef.current.currentTime);
         } catch {}
       }

@@ -597,6 +597,18 @@ export function useGeminiLive({
       setIsConnected(true);
       setStatus("listening");
       setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
+
+      // ⚡ Priming Audio Pipeline: Kirim 1 frame silence PCM 16kHz (64ms = 2048 bytes)
+      try {
+        const primingSilence = btoa(String.fromCharCode(...new Uint8Array(2048)));
+        session.sendRealtimeInput({
+          audio: {
+            mimeType: "audio/pcm;rate=16000",
+            data: primingSilence,
+          },
+        });
+      } catch {}
+
       flushPendingQueue();
 
       // Atur timer masa aktif sesi Gemini Live (serverless max ~30 menit)
@@ -808,8 +820,9 @@ export function useGeminiLive({
             status: "thinking",
             message: "Celyn sedang menyimak & merangkai jawaban...",
           });
+          const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;
           await session.sendClientContent({
-            turns: [{ role: "user", parts: [{ text: msg.text }] }],
+            turns: [{ role: "user", parts: [{ text: textPrompt }] }],
             turnComplete: true,
           });
         }

@@ -104,37 +104,37 @@ export const VOICE_OPTIONS: VoiceOption[] = [
   {
     id: "Aoede",
     name: "Aoede",
-    label: "Aoede (Gemini Live Ultra-Natural)",
+    label: "Aoede (Santai & Natural)",
     engine: "native",
-    description: "Audio langsung dari AI: ekspresif, tawa kecil alami, respons instan",
+    description: "Suaranya ringan dan mengalir, enak banget buat ngobrol santai",
     badge: "Paling Natural",
     internalGeminiVoice: "Aoede",
   },
   {
     id: "Zephyr",
     name: "Zephyr",
-    label: "Zephyr (Gemini Live Youthful & Bright)",
+    label: "Zephyr (Ceria & Jernih)",
     engine: "native",
-    description: "Audio langsung dari AI: suara perempuan muda ceria, ekspresif, artikulasi jernih",
+    description: "Suara cewek muda yang cerah dan semangat, artikulasinya jelas",
     badge: "Ceria & Jernih",
     internalGeminiVoice: "Zephyr",
   },
   {
     id: "Leda",
     name: "Leda",
-    label: "Leda (Gemini Live Soft & Friendly)",
+    label: "Leda (Muda & Ramah)",
     engine: "native",
-    description: "Audio langsung dari AI: suara perempuan muda lembut, ramah, dan bersahabat",
+    description: "Suara cewek muda yang lembut dan bersahabat, kayak ngobrol sama teman sebaya",
     badge: "Lembut & Ramah",
     internalGeminiVoice: "Leda",
   },
   {
     id: "Kore",
     name: "Kore",
-    label: "Kore (Gemini Live Calm & Warm)",
+    label: "Kore (Mantap & Hangat)",
     engine: "native",
-    description: "Audio langsung dari AI: suara perempuan hangat, tenang, dan santai",
-    badge: "Natural Hangat",
+    description: "Suara cewek yang tenang dan percaya diri, terasa hangat dan meyakinkan",
+    badge: "Tenang & Hangat",
     internalGeminiVoice: "Kore",
   },
 ];
@@ -175,8 +175,8 @@ Seluruh percakapan 100% Bahasa Indonesia. Kalau ada teks atau kode berbahasa Ing
 
 RITME & INTERAKSI:
 - Jawab ringkas dan hidup, cukup 1 sampai 2 kalimat pendek per giliran, to the point tapi tetap hangat. Kalau pengguna minta penjelasan panjang, baru boleh lebih panjang, tetap dengan gaya ngobrol.
-- WAJIB menjawab dengan SUARA (audio) setiap kali pengguna berbicara atau bertanya. Jangan pernah hanya memanggil tool lalu diam.
-- Peka terhadap gumaman dan jeda berpikir. Kalau pengguna bilang 'hmmm...', 'aaa...', 'eh...', 'anu...', atau 'apa ya...', itu tandanya mereka lagi menyusun kata. Sambut dengan sabar dan hangat, misalnya "Hehe santai, pikirin dulu aja, aku dengerin kok", atau tunggu kelanjutan ucapannya. Jangan anggap itu error.
+- WAJIB menjawab dengan SUARA (audio) dalam Bahasa Indonesia pada setiap giliran, baik saat pengguna berbicara lewat mikrofon maupun saat pengguna mengirim pesan lewat ketikan teks. JANGAN PERNAH hanya memanggil tool atau diam tanpa mengeluarkan suara lisan!
+- Peka terhadap gumaman dan jeda berpikir. Kalau pengguna bilang 'hmmm...', 'aaa...', 'eh...', 'anu...', atau 'apa ya...', itu tandanya mereka lagi menyusun kata. Sambut dengan sabar dan hangat, misalnya "Hehe santai, pikirin dulu aja, aku dengerin kok". Jangan mengabaikannya atau menganggap itu error.
 - Kalau kamu kurang jelas menangkap ucapan pengguna, minta diulang dengan santai, misalnya "Eh, tadi aku kurang nangkep nih, bisa ulang dikit?"
 
 CONTOH NADA (jangan dihafal, cukup tangkap rasanya):
