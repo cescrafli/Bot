@@ -87,11 +87,73 @@ export interface AvatarController {
   getState(): AvatarState;
 }
 
-export const DEFAULT_VOICE_NAME = "id-ID-GadisNeural";
-export const DEFAULT_VOICE_LABEL = "Microsoft Edge Neural - id-ID-GadisNeural (Gadis)";
+export const DEFAULT_VOICE_NAME = "Aoede";
+export const DEFAULT_VOICE_LABEL = "Gemini Live Native - Aoede (Ultra-Natural)";
+
+export interface VoiceOption {
+  id: string;
+  name: string;
+  label: string;
+  engine: "native" | "edge";
+  description: string;
+  badge: string;
+  internalGeminiVoice: string;
+}
+
+export const VOICE_OPTIONS: VoiceOption[] = [
+  {
+    id: "Aoede",
+    name: "Aoede",
+    label: "Aoede (Gemini Live Ultra-Natural)",
+    engine: "native",
+    description: "Audio langsung dari AI: ekspresif, tawa kecil alami, respons instan",
+    badge: "Paling Natural",
+    internalGeminiVoice: "Aoede",
+  },
+  {
+    id: "Kore",
+    name: "Kore",
+    label: "Kore (Gemini Live Calm & Warm)",
+    engine: "native",
+    description: "Audio langsung dari AI: suara perempuan hangat, tenang, dan santai",
+    badge: "Natural Hangat",
+    internalGeminiVoice: "Kore",
+  },
+  {
+    id: "id-ID-GadisNeural",
+    name: "Gadis",
+    label: "Gadis (Edge Neural Indonesia)",
+    engine: "edge",
+    description: "Microsoft Edge TTS: pelafalan Bahasa Indonesia baku dan jernih",
+    badge: "Artikulasi Jernih",
+    internalGeminiVoice: "Aoede",
+  },
+  {
+    id: "en-US-AvaMultilingualNeural",
+    name: "Ava",
+    label: "Ava (Edge Multilingual Conversational)",
+    engine: "edge",
+    description: "Microsoft Neural generasi baru: gaya obrolan luwes berbahasa Indonesia",
+    badge: "Conversational",
+    internalGeminiVoice: "Aoede",
+  },
+];
+
+export function isNativeGeminiVoice(voiceId?: string): boolean {
+  if (!voiceId) return true; // Default Aoede is native
+  const match = VOICE_OPTIONS.find((v) => v.id.toLowerCase() === voiceId.toLowerCase());
+  if (match) return match.engine === "native";
+  return !voiceId.includes("Neural") && !voiceId.startsWith("id-ID");
+}
+
+export function getVoiceOption(voiceId?: string): VoiceOption {
+  const found = VOICE_OPTIONS.find(
+    (v) => v.id.toLowerCase() === (voiceId || "").toLowerCase()
+  );
+  return found || VOICE_OPTIONS[0];
+}
 
 export const CELYN_SYSTEM_PROMPT = `Kamu adalah Celyn, teman ngobrol visual perempuan muda Indonesia (sekitar 21-23 tahun) yang cerdas, hangat, santai, dan ekspresif.
-Suaramu disintesis secara langsung menggunakan Microsoft Edge Neural Bahasa Indonesia (id-ID-GadisNeural / Gadis).
 
 PRINSIP BAHASA LISAN MANUSIAWI (SANGAT PENTING):
 1. Bicara layaknya teman akrab atau rekan kerja perempuan Indonesia di kehidupan nyata — bukan seperti robot chatbot atau asisten virtual kaku.

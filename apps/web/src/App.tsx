@@ -5,12 +5,14 @@ import { ScreenPreview } from "./components/screen/ScreenPreview";
 import { SubtitleOverlay } from "./components/transcript/SubtitleOverlay";
 import { TranscriptDrawer } from "./components/chat/TranscriptDrawer";
 import { ShortcutsModal } from "./components/modals/ShortcutsModal";
+import { VoiceSelectorModal } from "./components/modals/VoiceSelectorModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
 import { useAuth } from "./hooks/useAuth";
 import { AuthGate } from "./components/auth/AuthGate";
-import { Bot, Activity, Wifi, Shield, Send, Box, Lock, AlertCircle } from "lucide-react";
+import { Bot, Activity, Wifi, Shield, Send, Box, Lock, AlertCircle, Volume2 } from "lucide-react";
+import { getVoiceOption } from "@celyn/shared";
 
 // Lazy-load Avatar 3D VRM agar initial bundle load ringan di Vercel
 const AvatarVRM3D = lazy(() =>
@@ -25,7 +27,11 @@ export function App() {
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   const [inputText, setInputText] = useState("");
+  const [selectedVoice, setSelectedVoice] = useState<string>(() => {
+    return localStorage.getItem("celyn_selected_voice") || "Aoede";
+  });
 
   // Hook Audio Capture & Playback
   const audioEngine = useAudioEngine({
@@ -57,6 +63,21 @@ export function App() {
     },
   });
 
+  const handleSelectVoice = useCallback(
+    (newVoice: string) => {
+      setSelectedVoice(newVoice);
+      localStorage.setItem("celyn_selected_voice", newVoice);
+      setIsVoiceModalOpen(false);
+      if (live.isConnected) {
+        live.disconnect();
+        setTimeout(() => {
+          live.connect(newVoice);
+        }, 200);
+      }
+    },
+    [live]
+  );
+
   // Toggle Koneksi Sesi
   const handleToggleConnection = useCallback(async () => {
     // ⚡ Buka kunci AudioContext secara sinkron saat user gesture (wajib untuk iOS Safari & Android Chrome)
@@ -68,7 +89,7 @@ export function App() {
       audioEngine.stopPlayback();
       live.disconnect();
     } else {
-      live.connect();
+      live.connect(selectedVoice);
       try {
         if (!isPushToTalk) {
           await audioEngine.startMic();
@@ -77,7 +98,7 @@ export function App() {
         console.warn("Gagal membuka mic otomatis saat connect:", err);
       }
     }
-  }, [live, screenCapture, audioEngine, isPushToTalk]);
+  }, [live, screenCapture, audioEngine, isPushToTalk, selectedVoice]);
 
   // Toggle Mikrofon
   const handleToggleMic = useCallback(async () => {
@@ -217,13 +238,24 @@ export function App() {
                 Live Vision
               </span>
             </h1>
-            <p className="text-[10px] sm:text-xs text-slate-400 flex items-center gap-1 sm:gap-1.5">
-              <span>Suara: {live.modelInfo.voice === "id-ID-GadisNeural" ? "Gadis (id-ID-GadisNeural)" : live.modelInfo.voice}</span>
-              <span className="hidden sm:inline">•</span>
-              <span className="hidden sm:inline-flex items-center gap-1 text-emerald-400/90 font-medium">
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <button
+                onClick={() => setIsVoiceModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 border border-white/10 text-[10px] sm:text-xs text-slate-300 transition-colors cursor-pointer"
+                title="Pilih karakter suara Celyn"
+              >
+                <Volume2 className="w-3 h-3 text-rose-400" />
+                <span className="font-semibold text-white">
+                  {getVoiceOption(live.modelInfo.voice || selectedVoice).name}
+                </span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  {getVoiceOption(live.modelInfo.voice || selectedVoice).badge}
+                </span>
+              </button>
+              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-emerald-400/90 font-medium ml-1">
                 <Shield className="w-3 h-3" /> Bahasa Indonesia
               </span>
-            </p>
+            </div>
           </div>
         </div>
 
@@ -361,6 +393,7 @@ export function App() {
           onToggleAvatarMode={() =>
             setAvatarMode((prev) => (prev === "2d" ? "3d" : "2d"))
           }
+          onToggleVoiceSelector={() => setIsVoiceModalOpen(true)}
           onToggleHistory={() => setIsHistoryOpen(true)}
           onToggleHelp={() => setIsHelpOpen(true)}
           onTriggerTestSpeech={audioEngine.triggerTestSpeech}
@@ -385,6 +418,15 @@ export function App() {
       <ShortcutsModal
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
+      />
+
+      {/* Modal Pemilih Suara Multi-Voice */}
+      <VoiceSelectorModal
+        isOpen={isVoiceModalOpen}
+        selectedVoice={live.modelInfo.voice || selectedVoice}
+        onSelectVoice={handleSelectVoice}
+        onClose={() => setIsVoiceModalOpen(false)}
+        onTestVoice={audioEngine.triggerTestSpeech}
       />
     </div>
   );

@@ -174,13 +174,17 @@ export function useGeminiLive({
    * Mengambil token sekali pakai dari /api/token lalu membuka sesi Gemini Live
    * langsung dari browser tanpa perlu server WebSocket persisten port 3001.
    */
-  const connectViaServerlessToken = useCallback(async () => {
+  const connectViaServerlessToken = useCallback(async (voicePreference?: string) => {
     try {
       setStatus("connecting");
       setStatusMessage("Meminta token sesi aman dari Vercel Serverless...");
 
       const authPass = getStoredAuthPassword() || "admin";
-      const res = await fetch("/api/token", {
+      const queryParams = new URLSearchParams();
+      if (voicePreference) queryParams.set("voice", voicePreference);
+      const queryStr = queryParams.toString() ? `?${queryParams.toString()}` : "";
+
+      const res = await fetch(`/api/token${queryStr}`, {
         headers: {
           "x-admin-password": authPass,
         },
@@ -195,7 +199,7 @@ export function useGeminiLive({
       }
 
       const activeModel = data.model || "gemini-3.8-live";
-      const activeVoice = data.voice || DEFAULT_VOICE_NAME;
+      const activeVoice = voicePreference || data.voice || DEFAULT_VOICE_NAME;
       const useEdgeTts =
         activeVoice.includes("Neural") || activeVoice.startsWith("id-ID");
       const internalGeminiVoice = useEdgeTts ? "Aoede" : activeVoice;
@@ -248,10 +252,10 @@ export function useGeminiLive({
                   mimeType: ttsData.mimeType || "audio/mp3",
                 });
               } else if (backupPcmChunksRef.current.length > 0) {
-                // Fallback otomatis jika Edge TTS error / timeout: putar audio cadangan Gemini PCM agar Celyn tidak membisu
-                const pcm = backupPcmChunksRef.current.shift();
-                if (pcm) {
-                  console.warn("⚠️ Menggunakan audio cadangan native Gemini (Edge TTS fallback)");
+                // Fallback otomatis jika Edge TTS error / timeout: putar seluruh audio cadangan Gemini PCM
+                const allPcm = backupPcmChunksRef.current.splice(0);
+                console.warn(`⚠️ Menggunakan ${allPcm.length} audio cadangan native Gemini (Edge TTS fallback)`);
+                for (const pcm of allPcm) {
                   handleServerMessage({
                     type: "audio",
                     data: pcm,
@@ -380,6 +384,7 @@ export function useGeminiLive({
 
             if (msg.serverContent?.inputTranscription?.text) {
               bargeInMutedRef.current = false;
+              backupPcmChunksRef.current = [];
               const userText = msg.serverContent.inputTranscription.text.trim();
               if (userText) {
                 handleServerMessage({
@@ -404,6 +409,24 @@ export function useGeminiLive({
                     speaker: "celyn",
                     text: celynText,
                   });
+
+                  // Auto-emotion inference di semua mode suara (Edge TTS maupun Native Gemini Live)
+                  if (!directExplicitEmotionRef.current) {
+                    const detected = inferEmotionFromText(celynText);
+                    if (
+                      detected !== "neutral" &&
+                      detected !== directCurrentEmotionRef.current
+                    ) {
+                      directCurrentEmotionRef.current = detected;
+                      handleServerMessage({
+                        type: "tool_call",
+                        id: "auto_expression",
+                        name: "set_expression",
+                        args: { emotion: detected },
+                      });
+                    }
+                  }
+
                   if (useEdgeTts) {
                     directTtsBufferRef.current += celynText;
                     flushDirectSentences(false);
@@ -483,6 +506,7 @@ export function useGeminiLive({
                 flushDirectSentences(true);
                 const turnAtComplete = directTtsTurnIdRef.current;
                 directTtsChainRef.current.then(() => {
+                  backupPcmChunksRef.current = [];
                   if (
                     directTtsTurnIdRef.current === turnAtComplete &&
                     directSessionRef.current
@@ -495,6 +519,7 @@ export function useGeminiLive({
                   }
                 });
               } else {
+                backupPcmChunksRef.current = [];
                 handleServerMessage({
                   type: "status",
                   status: "listening",
@@ -608,7 +633,7 @@ export function useGeminiLive({
     }
   }, [handleServerMessage]);
 
-  const connect = useCallback(() => {
+  const connect = useCallback((selectedVoice?: string) => {
     if (
       (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) ||
       directSessionRef.current
@@ -623,7 +648,7 @@ export function useGeminiLive({
 
     // Jika berjalan di Vercel / domain produksi tanpa VITE_WS_URL, langsung gunakan mode Serverless Ephemeral Token
     if (!envWs && !isLocalhost) {
-      connectViaServerlessToken();
+      connectViaServerlessToken(selectedVoice);
       return;
     }
 
@@ -631,7 +656,11 @@ export function useGeminiLive({
     setStatusMessage("Menghubungkan ke server backend...");
 
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = envWs || `${wsProtocol}//${window.location.hostname}:3001`;
+    const authPass = getStoredAuthPassword() || "admin";
+    const voiceQuery = selectedVoice ? `&voice=${encodeURIComponent(selectedVoice)}` : "";
+    const wsUrl =
+      envWs ||
+      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}${voiceQuery}`;
 
     let opened = false;
     const ws = new WebSocket(wsUrl);
@@ -645,7 +674,7 @@ export function useGeminiLive({
           ws.close();
         } catch {}
         wsRef.current = null;
-        connectViaServerlessToken();
+        connectViaServerlessToken(selectedVoice);
       }
     }, 2500);
 
@@ -673,7 +702,7 @@ export function useGeminiLive({
       console.warn("WebSocket error, memeriksa fallback Serverless...", err);
       if (!opened) {
         wsRef.current = null;
-        connectViaServerlessToken();
+        connectViaServerlessToken(selectedVoice);
       } else {
         setStatus("error");
         setStatusMessage("Koneksi ke backend terputus.");

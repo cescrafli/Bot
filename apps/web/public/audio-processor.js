@@ -18,10 +18,10 @@ class GeminiAudioRecorderProcessor extends AudioWorkletProcessor {
     const inputChannel = input[0]; // Mono channel
     const inputSampleRate = sampleRate; // Disediakan oleh AudioWorkletGlobalScope
 
-    // Rasio downsampling
-    const ratio = inputSampleRate / this.targetSampleRate;
+    // Rasio downsampling (dengan fallback aman untuk variasi sample rate hardware)
+    const ratio = Math.max(0.5, inputSampleRate / this.targetSampleRate);
 
-    let i = this.phaseOffset;
+    let i = Math.max(0, this.phaseOffset);
     while (i < inputChannel.length) {
       const startIdx = Math.floor(i);
       const nextI = i + ratio;
@@ -50,7 +50,7 @@ class GeminiAudioRecorderProcessor extends AudioWorkletProcessor {
     }
 
     // Simpan sisa desimal fase untuk blok berikutnya
-    this.phaseOffset = i - inputChannel.length;
+    this.phaseOffset = Math.max(0, i - inputChannel.length);
     return true;
   }
 }

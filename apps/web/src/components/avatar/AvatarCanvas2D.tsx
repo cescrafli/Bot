@@ -174,11 +174,11 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           ? Math.sin(tSec * 2.6) * 0.8 + (gazeTarget.x - 0.5) * 1.5
           : (gazeTarget.x - 0.5) * 1.0 + listeningNod;
 
-        // Lip-Sync dinamis
-        const speechCadence = Math.sin(now / 85) * 0.45 + 0.55;
+        // Lip-Sync dinamis proporsional terhadap amplop suara vokal asli
+        const speechCadence = Math.sin(now / 85) * 0.4 + 0.6;
         const dynamicMouthAmount =
           curIsSpeaking && curMouthOpen >= 0.015
-            ? Math.min(1, Math.max(curMouthOpen * 2.6, speechCadence * 0.9))
+            ? Math.min(1, curMouthOpen * 2.5 * (0.8 + speechCadence * 0.25))
             : 0;
 
         // Kinematika Lengan Kiri & Kanan

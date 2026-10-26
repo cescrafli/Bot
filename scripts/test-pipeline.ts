@@ -5,6 +5,8 @@
 import {
   normalizeEmotion,
   DEFAULT_VOICE_NAME,
+  VOICE_OPTIONS,
+  isNativeGeminiVoice,
   CELYN_SYSTEM_PROMPT,
   extractIndonesianSentences,
   inferEmotionFromText,
@@ -123,17 +125,28 @@ assert(normalizeEmotion("kaget") === "surprised", "Pemetaan sinonim bahasa Indon
 assert(normalizeEmotion("sedih") === "sad", "Pemetaan sinonim bahasa Indonesia 'sedih' -> 'sad'");
 assert(normalizeEmotion("unknown_random_string") === "neutral", "Fallback emosi yang tidak dikenal -> 'neutral'");
 
-// 5. Uji Suara Microsoft Edge Neural (id-ID-GadisNeural) & Bahasa Indonesia
+// 5. Uji Katalog Multi-Voice & Sintesis Edge Neural
 async function runTtsTests() {
-  console.log("\n--- 5. Uji Suara Microsoft Edge Neural (id-ID-GadisNeural) & Bahasa Indonesia ---");
+  console.log("\n--- 5. Uji Katalog Multi-Voice & Sintesis Edge Neural ---");
   assert(
-    DEFAULT_VOICE_NAME === "id-ID-GadisNeural",
-    `Default voice Celyn adalah '${DEFAULT_VOICE_NAME}'`
+    VOICE_OPTIONS.length === 4,
+    `Katalog multi-voice memiliki 4 profil suara (${VOICE_OPTIONS.map((v) => v.name).join(", ")})`
   );
   assert(
-    CELYN_SYSTEM_PROMPT.includes("100% BAHASA INDONESIA") &&
-      CELYN_SYSTEM_PROMPT.includes("id-ID-GadisNeural"),
-    "System prompt mengunci percakapan 100% Bahasa Indonesia dengan id-ID-GadisNeural"
+    DEFAULT_VOICE_NAME === "Aoede",
+    `Default voice rekomendasi Celyn adalah '${DEFAULT_VOICE_NAME}' (Gemini Live Ultra-Natural)`
+  );
+  assert(
+    isNativeGeminiVoice("Aoede") === true && isNativeGeminiVoice("Kore") === true,
+    "Aoede & Kore teridentifikasi sebagai Native Gemini Voice (Real-Time)"
+  );
+  assert(
+    isNativeGeminiVoice("id-ID-GadisNeural") === false && isNativeGeminiVoice("en-US-AvaMultilingualNeural") === false,
+    "Gadis & Ava teridentifikasi sebagai Microsoft Edge Neural TTS Voice"
+  );
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("100% BAHASA INDONESIA"),
+    "System prompt mengunci percakapan 100% Bahasa Indonesia"
   );
 
   const gecToken = generateSecMsGecV2();
@@ -247,17 +260,17 @@ async function runTtsTests() {
   assert(inferEmotionFromText("Waduh, kok bisa error kayak gitu?!") === "surprised", "Inferensi emosi surprised");
   assert(inferEmotionFromText("Yah, sayang banget filenya belum tersimpan.") === "sad", "Inferensi emosi sad");
 
-  // Uji Dynamic Prosody Engine
+  // Uji Dynamic Prosody Engine (Natural Recalibrated Prosody)
   const prosodyHappy = inferIndonesianProsody("Wah asik banget nih!", "happy");
   assert(
-    prosodyHappy.rate === "+9%" && prosodyHappy.pitch === "+4Hz",
-    `Prosodi happy dinaikkan dinamis (+9% rate, +4Hz pitch)`
+    prosodyHappy.rate === "+5%" && prosodyHappy.pitch === "+2Hz",
+    `Prosodi happy dinaikkan dinamis secara alami (+5% rate, +2Hz pitch - tidak cempreng)`
   );
 
   const prosodyQuestion = inferIndonesianProsody("Kamu lagi ngerjain project apa sekarang ya?");
   assert(
-    prosodyQuestion.pitch === "+4Hz",
-    `Intonasi nada tanya dinaikkan +4Hz untuk keluwesan vokal pertanyaan Indonesia`
+    prosodyQuestion.pitch === "+2Hz",
+    `Intonasi nada tanya dinaikkan +2Hz untuk keluwesan vokal pertanyaan Indonesia`
   );
 
   // Uji Sapaan Kontekstual Waktu (Pagi / Siang / Sore / Malam)

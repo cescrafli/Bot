@@ -352,37 +352,38 @@ function inferIndonesianProsody(text, emotion) {
 
   const cleanLen = text.replace(/[^a-zA-Z0-9]/g, "").length;
 
-  let rate = "+7%";
-  let pitch = "+2Hz";
+  // Nilai dasar alami (Natural Human Prosody): tidak cempreng, timbre bulat & hangat
+  let rate = "+3%";
+  let pitch = "+0Hz";
   let volume = "+0%";
 
   if (cleanLen < 35) {
-    rate = "+8%";
-    pitch = "+3Hz";
-  } else if (cleanLen > 90) {
-    rate = "+5%";
+    rate = "+4%";
     pitch = "+1Hz";
+  } else if (cleanLen > 90) {
+    rate = "+2%";
+    pitch = "+0Hz";
   }
 
   switch (activeEmotion) {
     case "happy":
-      rate = cleanLen > 90 ? "+7%" : "+9%";
-      pitch = "+4Hz";
-      volume = "+4%";
+      rate = cleanLen > 90 ? "+4%" : "+5%";
+      pitch = "+2Hz";
+      volume = "+2%";
       break;
     case "thinking":
-      rate = "+4%";
+      rate = "+1%";
       pitch = "+0Hz";
       volume = "+0%";
       break;
     case "surprised":
-      rate = "+10%";
-      pitch = "+5Hz";
-      volume = "+5%";
+      rate = "+6%";
+      pitch = "+2Hz";
+      volume = "+3%";
       break;
     case "sad":
-      rate = "+1%";
-      pitch = "-2Hz";
+      rate = "-2%";
+      pitch = "-1Hz";
       volume = "-2%";
       break;
     case "neutral":
@@ -397,8 +398,8 @@ function inferIndonesianProsody(text, emotion) {
 
   if (isQuestion) {
     const currentHz = parseInt(pitch, 10) || 0;
-    if (currentHz < 4) {
-      pitch = "+4Hz";
+    if (currentHz < 2) {
+      pitch = "+2Hz";
     }
   }
 

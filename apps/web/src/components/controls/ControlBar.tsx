@@ -26,6 +26,7 @@ interface ControlBarProps {
   onToggleScreenShare: () => void;
   onTogglePushToTalk: () => void;
   onToggleAvatarMode: () => void;
+  onToggleVoiceSelector?: () => void;
   onToggleHistory: () => void;
   onToggleHelp: () => void;
   onTriggerTestSpeech?: () => void;
@@ -45,6 +46,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onToggleScreenShare,
   onTogglePushToTalk,
   onToggleAvatarMode,
+  onToggleVoiceSelector,
   onToggleHistory,
   onToggleHelp,
   onTriggerTestSpeech,
@@ -163,6 +165,18 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           </>
         )}
       </button>
+
+      {/* Tombol Pemilih Suara */}
+      {onToggleVoiceSelector && (
+        <button
+          onClick={onToggleVoiceSelector}
+          title="Pilih Suara Celyn (Multi-Voice)"
+          className="flex items-center gap-1 sm:gap-1.5 px-2.5 py-2 sm:px-3 sm:py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-white/10 transition-colors shrink-0"
+        >
+          <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-400" />
+          <span className="hidden md:inline">Suara</span>
+        </button>
+      )}
 
       {/* Tombol Tes Suara & Mulut */}
       {onTriggerTestSpeech && (

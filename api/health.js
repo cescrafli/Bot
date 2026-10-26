@@ -8,6 +8,6 @@ export default function handler(req, res) {
     service: "Celyn AI Bot Vercel Serverless",
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     model: process.env.GEMINI_MODEL || "gemini-3.8-live",
-    voice: process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "id-ID-GadisNeural",
+    voice: process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "Aoede",
   });
 }

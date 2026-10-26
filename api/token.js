@@ -74,7 +74,8 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GEMINI_API_KEY || "";
   const model = process.env.GEMINI_MODEL || "gemini-3.8-live";
-  const voice = process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "id-ID-GadisNeural";
+  const requestedVoice = req.query?.voice || (req.body && typeof req.body === "object" ? req.body.voice : "");
+  const voice = requestedVoice || process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "Aoede";
 
   if (!apiKey) {
     return res.status(500).json({

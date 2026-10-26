@@ -243,7 +243,7 @@ export function useAudioEngine({
 
   // Jadwalkan AudioBuffer ke antrean pemutaran gapless & AnalyserNode Lip-Sync
   const scheduleAudioBuffer = useCallback(
-    (ctx: AudioContext, audioBuffer: AudioBuffer) => {
+    (ctx: AudioContext, audioBuffer: AudioBuffer, isGapless = false) => {
       if (stopPlayingTimerRef.current) {
         clearTimeout(stopPlayingTimerRef.current);
         stopPlayingTimerRef.current = null;
@@ -259,9 +259,17 @@ export function useAudioEngine({
       }
 
       const now = ctx.currentTime;
-      // Sambungan alami tanpa jeda kosong (25ms) setelah silence bawaan MP3 dipangkas
       const hasPriorAudio = nextPlayTimeRef.current > now;
-      const startTime = hasPriorAudio ? nextPlayTimeRef.current + 0.025 : now;
+      let startTime: number;
+
+      if (isGapless) {
+        // Kontinu murni tanpa jeda (0ms gap) untuk streaming PCM chunks native Gemini / fallback
+        startTime = hasPriorAudio ? nextPlayTimeRef.current : now + 0.02;
+      } else {
+        // Sambungan alami jeda napas mikro (15ms) setelah silence MP3 Edge TTS dipangkas
+        startTime = hasPriorAudio ? nextPlayTimeRef.current + 0.015 : now;
+      }
+
       source.start(startTime);
       nextPlayTimeRef.current = startTime + audioBuffer.duration;
 
@@ -288,7 +296,7 @@ export function useAudioEngine({
     []
   );
 
-  // Mainkan audio chunk (mendukung MP3 dari Microsoft Edge Neural id-ID-GadisNeural maupun PCM 24kHz)
+  // Mainkan audio chunk (mendukung MP3 dari Microsoft Edge Neural maupun PCM 24kHz)
   const playAudioChunk = useCallback(
     (b64Audio: string, mimeType?: string) => {
       try {
@@ -320,10 +328,10 @@ export function useAudioEngine({
               );
               if (epochAtEnqueue !== playbackEpochRef.current) return;
               const cleanBuffer = trimAudioBufferSilence(ctx, decodedBuffer);
-              scheduleAudioBuffer(ctx, cleanBuffer);
+              scheduleAudioBuffer(ctx, cleanBuffer, false);
             })
             .catch((err) => {
-              console.error("Gagal men-decode audio MP3 GadisNeural:", err);
+              console.error("Gagal men-decode audio MP3:", err);
             });
           return;
         }
@@ -333,7 +341,7 @@ export function useAudioEngine({
           .then(async () => {
             if (epochAtEnqueue !== playbackEpochRef.current) return;
             const audioBuffer = base64PcmToAudioBuffer(ctx, b64Audio, 24000);
-            scheduleAudioBuffer(ctx, audioBuffer);
+            scheduleAudioBuffer(ctx, audioBuffer, true);
           })
           .catch((err) => {
             console.error("Gagal memainkan chunk audio PCM:", err);
@@ -540,10 +548,6 @@ export function useAudioEngine({
 
   // Hentikan mikrofon
   const stopMic = useCallback(() => {
-    if (stopPlayingTimerRef.current) {
-      clearTimeout(stopPlayingTimerRef.current);
-      stopPlayingTimerRef.current = null;
-    }
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;

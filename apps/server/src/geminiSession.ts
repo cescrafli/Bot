@@ -30,6 +30,7 @@ export class GeminiSession {
   private ttsTurnId = 0;
   private ttsChain: Promise<void> = Promise.resolve();
   private useEdgeTts = true;
+  private activeVoice: string;
   private isFirstChunkInTurn = true;
   private currentEmotion: EmotionType = "neutral";
   private explicitEmotionUsedInTurn = false;
@@ -44,11 +45,12 @@ export class GeminiSession {
     toolCallsHandled: 0,
   };
 
-  constructor(clientWs: WebSocket) {
+  constructor(clientWs: WebSocket, customVoice?: string) {
     this.clientWs = clientWs;
+    this.activeVoice = customVoice || config.geminiVoice;
     this.useEdgeTts =
-      config.geminiVoice.includes("Neural") ||
-      config.geminiVoice.startsWith("id-ID");
+      this.activeVoice.includes("Neural") ||
+      this.activeVoice.startsWith("id-ID");
   }
 
   public async connect(): Promise<void> {
@@ -66,10 +68,10 @@ export class GeminiSession {
 
     try {
       console.log(
-        `🔌 [Gemini Live SDK] Menginisialisasi sesi (${config.geminiModel}) dengan suara: ${config.geminiVoice}`
+        `🔌 [Gemini Live SDK] Menginisialisasi sesi (${config.geminiModel}) dengan suara: ${this.activeVoice}`
       );
       const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
-      const internalGeminiVoice = this.useEdgeTts ? "Aoede" : config.geminiVoice;
+      const internalGeminiVoice = this.useEdgeTts ? "Aoede" : this.activeVoice;
 
       this.session = await ai.live.connect({
         model: config.geminiModel,
@@ -157,7 +159,7 @@ export class GeminiSession {
       this.sendToClient({
         type: "session_info",
         model: config.geminiModel,
-        voice: config.geminiVoice,
+        voice: this.activeVoice,
       });
 
       this.sendToClient({
@@ -285,7 +287,7 @@ export class GeminiSession {
     turnId: number,
     emotion?: EmotionType
   ): void {
-    const voice = config.geminiVoice || DEFAULT_VOICE_NAME;
+    const voice = this.activeVoice || config.geminiVoice || DEFAULT_VOICE_NAME;
     // Pipelined parallel prefetch: sintesis Edge TTS langsung dijalankan seketika di background
     const prefetchPromise = synthesizeEdgeTTS(sentence, { voice, emotion });
 
@@ -317,9 +319,9 @@ export class GeminiSession {
             turnId === this.ttsTurnId &&
             this.state === "ACTIVE"
           ) {
-            const fallbackPcm = this.backupPcmChunks.shift();
-            if (fallbackPcm) {
-              console.warn("⚠️ Mengirim audio cadangan Gemini PCM (Server Fallback)");
+            const allFallbackPcm = this.backupPcmChunks.splice(0);
+            console.warn(`⚠️ Mengirim ${allFallbackPcm.length} audio cadangan Gemini PCM (Server Fallback)`);
+            for (const fallbackPcm of allFallbackPcm) {
               this.stats.audioChunksOut++;
               this.sendToClient({
                 type: "audio",
@@ -346,6 +348,7 @@ export class GeminiSession {
     // 2. Transkripsi Suara Pengguna (Input Transcription)
     if (data.serverContent?.inputTranscription?.text) {
       this.isBargeInMuted = false;
+      this.backupPcmChunks = [];
       const userText = data.serverContent.inputTranscription.text.trim();
       if (userText) {
         console.log(`🎙️ [User Speech]: ${userText}`);
@@ -373,6 +376,21 @@ export class GeminiSession {
             speaker: "celyn",
             text: celynText,
           });
+
+          // Auto-emotion inference di semua mode suara (Edge TTS maupun Native Gemini Live)
+          if (!this.explicitEmotionUsedInTurn) {
+            const detected = inferEmotionFromText(celynText);
+            if (detected !== "neutral" && detected !== this.currentEmotion) {
+              this.currentEmotion = detected;
+              this.sendToClient({
+                type: "tool_call",
+                id: "auto_expression",
+                name: "set_expression",
+                args: { emotion: detected },
+              });
+            }
+          }
+
           if (this.useEdgeTts) {
             this.ttsBuffer += celynText;
             this.flushCompleteSentences(false);
@@ -443,6 +461,7 @@ export class GeminiSession {
         this.flushCompleteSentences(true);
         const turnAtComplete = this.ttsTurnId;
         this.ttsChain.then(() => {
+          this.backupPcmChunks = [];
           if (this.ttsTurnId === turnAtComplete && this.state === "ACTIVE") {
             this.sendToClient({
               type: "status",
@@ -452,6 +471,7 @@ export class GeminiSession {
           }
         });
       } else {
+        this.backupPcmChunks = [];
         this.sendToClient({
           type: "status",
           status: "listening",

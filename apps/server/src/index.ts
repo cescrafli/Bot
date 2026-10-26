@@ -68,7 +68,7 @@ const server = http.createServer((req, res) => {
       parsedUrl.searchParams.get("password") ||
       parsedUrl.searchParams.get("key");
 
-    if (authPass !== "admin") {
+    if (authPass !== config.adminPassword) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi admin diperlukan." }));
       return;
@@ -79,6 +79,8 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diisi di .env" }));
       return;
     }
+
+    const selectedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
 
     (async () => {
       try {
@@ -95,7 +97,7 @@ const server = http.createServer((req, res) => {
           JSON.stringify({
             token: tokenResource.name,
             model: config.geminiModel,
-            voice: config.geminiVoice,
+            voice: selectedVoice,
             expireTime,
           })
         );
@@ -233,7 +235,21 @@ wss.on("connection", (ws: AliveWebSocket, req) => {
 
   console.log(`🔌 [Klien Masuk] Terhubung dari ${clientIp} (Aktif: ${serverStats.activeConnections})`);
 
-  const session = new GeminiSession(ws);
+  const parsedUrl = new URL(req.url || "/", `http://localhost:${config.port}`);
+  const authPass =
+    req.headers["x-admin-password"] ||
+    parsedUrl.searchParams.get("password") ||
+    parsedUrl.searchParams.get("key");
+
+  if (authPass && authPass !== config.adminPassword) {
+    console.warn(`⛔ [Auth Failed] Koneksi WebSocket ditolak: Password salah dari ${clientIp}`);
+    ws.send(JSON.stringify({ type: "error", message: "Akses ditolak: Kata sandi salah." }));
+    ws.close(1008, "Unauthorized");
+    return;
+  }
+
+  const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
+  const session = new GeminiSession(ws, requestedVoice);
   session.connect();
 
   // Idle timeout timer: jika tidak ada interaksi dalam 5 menit, putuskan sesi secara tertib
