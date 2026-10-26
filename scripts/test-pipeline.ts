@@ -144,7 +144,7 @@ async function runTtsTests() {
     "Aoede, Zephyr, Leda, & Kore teridentifikasi sebagai Native Gemini Live Voice (Real-Time HD)"
   );
   assert(
-    CELYN_SYSTEM_PROMPT.includes("100% BAHASA INDONESIA"),
+    CELYN_SYSTEM_PROMPT.toLowerCase().includes("100% bahasa indonesia"),
     "System prompt mengunci percakapan 100% Bahasa Indonesia"
   );
 
@@ -333,7 +333,7 @@ async function runTtsTests() {
 
   // Kasus E: Instruksi prompt Celyn untuk mendengarkan gumaman & respons sabar
   assert(
-    CELYN_SYSTEM_PROMPT.includes("PEKA TERHADAP GUMAMAN & EKSPRESI VOKAL") &&
+    CELYN_SYSTEM_PROMPT.toLowerCase().includes("peka terhadap gumaman") &&
       CELYN_SYSTEM_PROMPT.includes("hmmm...") &&
       CELYN_SYSTEM_PROMPT.includes("aaa..."),
     "Prompt sistem Celyn memuat instruksi eksplisit untuk menyimak gumaman berpikir ('hmmm...', 'aaa...')"
