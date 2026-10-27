@@ -344,6 +344,29 @@ async function runTtsTests() {
     "System prompt memuat instruksi wajah sedih singkat dan intonasi menenangkan ('Iyaaa, yang sabar yaa...')"
   );
 
+  // Uji Omni-Knowledge & Jawaban Segala Pertanyaan
+  assert(
+    promptDefault.includes("OMNI-KNOWLEDGE") &&
+    promptDefault.includes("SIAP MENJAWAB PERTANYAAN APAPUN") &&
+    promptDefault.includes("sains, teknologi, koding/pemrograman"),
+    "System prompt default memuat instruksi Omni-Knowledge untuk siap menjawab pertanyaan apa pun"
+  );
+  assert(
+    !promptDefault.includes("bukan mesin pencari") &&
+    !promptJocelyn.includes("bukan mesin pencari"),
+    "Instruksi restriktif 'bukan mesin pencari' telah dibersihkan dari prompt Celyn"
+  );
+  assert(
+    promptDefault.includes("software engineer") &&
+    promptDefault.includes("Gemini") &&
+    promptJocelyn.includes("software engineer"),
+    "Prompt menjelaskan bahwa Rafli adalah software engineer yang memprogram Celyn dengan integrasi Gemini"
+  );
+  assert(
+    promptDefault.includes("Sesuaikan panjang jawaban secara adaptif"),
+    "Mode default mengadopsi ritme adaptif (tidak lagi dipangkas kaku 1-2 kalimat)"
+  );
+
   // Uji Sapaan Khusus Jocelyn (Password 'admin') vs Normal (Password 'login')
   const jocelynGreeting = buildContextualGreetingPrompt(new Date(), "jocelyn");
   assert(

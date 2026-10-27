@@ -1,37 +1,80 @@
 # 🌟 Celyn AI BOT
-### *AI Assistant Real-time dengan Avatar Bergerak (2D & 3D VRM) + Live Screen Share + Gemini Multimodal Live API*
+### *Next-Gen Real-time Multimodal AI Companion & Assistant*
+*Didukung oleh Google Gemini Multimodal Live API, Avatar Responsif 2.5D Rigged Multi-Ekspresi & 3D VRM, Live Screen Sharing Hemat Token, serta Proteksi Sesi Server-side.*
 
 ![Celyn AI](apps/web/public/celyn_avatar.png)
 
-Celyn AI BOT adalah asisten AI interaktif dengan respon suara real-time, kemampuan melihat layar pengguna (*live screen sharing*), serta avatar responsif yang bernapas, berkedip, bergerak bibirnya (*lip-sync*), dan mengubah ekspresi emosi sesuai alur percakapan.
+---
+
+## 📖 Tentang Celyn AI BOT
+
+**Celyn AI BOT** adalah asisten AI visual interaktif generasi baru yang dirancang untuk komunikasi suara dua arah (*bidirectional audio*) berkecepatan tinggi dengan latensi sangat rendah (< 1 detik). 
+
+Celyn memadukan kecerdasan multimodal mutakhir dengan persona yang hangat, ramah, dan berwawasan luas. Celyn mampu menjawab beragam pertanyaan—mulai dari sains, teknologi, pemrograman (*coding*), logika, matematika, analisis masalah, hingga obrolan santai sehari-hari dan teman curhat dengan empati alami.
+
+Sistem dilengkapi avatar 2.5D dengan animasi pernapasan dinamis, kedipan mata alami, sinkronisasi gerak bibir (*dynamic lip-sync*), tatapan mata yang melirik ke layar (*gaze tracking*), dan 5 ekspresi emosi visual yang bertransisi secara mulus.
 
 ---
 
-## ✨ Fitur Utama
+## ✨ Fitur-Fitur Utama
 
-- 🧠 **Gemini Multimodal Live API**: Komunikasi suara 2 arah ultra-low latency (< 1 detik) melalui koneksi WebSocket persisten.
-- 🖥️ **Live Screen Share Hemat Token**: Membaca layar pada 1 FPS dengan deteksi perubahan visual berbasis thumbnail 32x32 piksel (menghemat hingga 85%+ biaya token vision).
-- 🎭 **Dual Avatar System**:
-  - **Mode 2D (Default)**: Menggunakan ilustrasi karakter Celyn dengan animasi bernapas, kedipan mata alami, dynamic lip-sync berbasis volume RMS, dan aura emosi.
-  - **Mode 3D (VRM)**: Menggunakan Three.js & `@pixiv/three-vrm` dengan viseme blendshapes dan gaze tracking.
-- 🛡️ **Secure Backend Proxy**: `GEMINI_API_KEY` aman di server Node.js, tidak pernah terekspos ke bundle browser pengguna.
-- 💬 **Tool Calling Real-time**:
-  - `set_expression`: AI mengubah ekspresi wajah (Happy, Thinking, Surprised, Neutral, Sad).
-  - `point_at_screen`: AI mengarahkan tatapan mata dan target reticle ke elemen layar yang sedang dibahas.
-- ⚡ **Barge-in / Interupsi Spontan**: Begitu pengguna mulai berbicara, AI langsung menghentikan suara sebelumnya seketika.
+### 🧠 1. Google Gemini Multimodal Live API
+- **Interaksi Audio Real-Time**: Berbicara langsung dengan Celyn layaknya panggilan suara / video call alami tanpa jeda konversi teks konvensional yang kaku.
+- **Suara Lisan Alami**: Didukung opsi suara perempuan native Gemini (*Aoede*, *Zephyr*, *Leda*, *Kore*) yang mengalir, hidup, dan ekspresif.
+- **Barge-In / Interupsi Spontan**: Begitu pengguna mulai berbicara, Celyn seketika berhenti bicara untuk mendengarkan, menciptakan dinamika percakapan manusiawi.
+
+### 🎭 2. Dual Avatar Architecture (2.5D Rigged & 3D VRM)
+- **Avatar 2.5D Rigged Multi-Ekspresi (Default)**:
+  - 5 status ekspresi emosi: **Neutral/Happy** (senang/ramah), **Thinking** (mikir/analitis), **Surprised** (kaget/terkesan), **Sad** (empati/teduh), dan **Shy** (tersipu/malu manis).
+  - Transisi emosi mulus berbasis GPU crossfade shader.
+  - Kedipan mata periodik alami (*closed-eye textures*) dan animasi pernapasan (*procedural breathing*).
+  - Sambungan anatomi organik pada bahu dan pergelangan tangan tanpa artefak patah.
+- **Avatar 3D VRM (Opsional)**:
+  - Didukung Three.js dan `@pixiv/three-vrm` lengkap dengan viseme blendshapes dan gaze tracking 3D.
+  - Tombol toggle instan untuk berganti antara mode 2D dan 3D di antarmuka.
+
+### 🖥️ 3. Live Screen Share Cerdas Hemat Token
+- **Optimasi Token Vision**: Menggunakan algoritma deteksi perbedaan visual *thumbnail* 32×32 piksel, menghemat hingga **85%+ konsumsi kuota token penglihatan**.
+- **Point-at-Screen Visual Reticle**: Saat membahas elemen di layar (misalnya kode program, artikel berita, atau diagram), Celyn dapat mengarahkan tatapan mata dan target visual ke koordinat yang sedang dibahas.
+
+### 🌐 4. Omni-Knowledge & Penalaran Adaptif
+- **Siap Menjawab Topik Apapun**: Memiliki wawasan luas untuk menjelaskan sains, koding, troubleshooting teknis, kalkulasi logika, sejarah, hingga tips praktis.
+- **Adaptasi Konteks (Dual-Brain)**:
+  - *Pertanyaan Informatif & Edukatif*: Dijelaskan secara cerdas, gamblang, runtut, dan tuntas dalam bahasa lisan yang mudah dipahami.
+  - *Obrolan Curhat & Kondisi Lelah*: Menghadirkan respon penuh empati yang hangat tanpa menceramahi.
+  - *Basa-Basi & Guyonan*: Santai, akrab, dan menyenangkan.
+
+### 🔐 5. Keamanan & Proteksi Sesi (Passcode Protected Gate)
+- **Gerbang Autentikasi Sesi**: Akses koneksi sesi Celyn dilindungi oleh sistem verifikasi sandi di tingkat backend untuk menjamin penggunaan yang terotentikasi dan aman.
+- **Isolasi Mode Persona Server-side**:
+  - Konfigurasi system prompt dibangun secara aman di sisi server Node.js dan tidak pernah terekspos ke bundle browser publik.
+  - Memisahkan antara mode interaksi publik dan mode terotentikasi khusus.
+- **Kerahasiaan Kunci & Kredensial**: API Key Gemini dan kredensial akses sepenuhnya terjaga di environment server.
+
+### 🧪 6. Comprehensive Test Suite (92+ Tests)
+- Dilengkapi test pipeline terintegrasi (`scripts/test-pipeline.ts`) untuk memverifikasi keutuhan sistem secara berkala: audio processing, SSML prosody, gesture/emotion inference, validasi aset rigging, dan boundary security.
 
 ---
 
 ## 📁 Struktur Monorepo
 
 ```
-celyn-ai-bot/
+Celyn_AI_BOT/
 ├── apps/
-│   ├── web/               # Frontend (React 18 + Vite + TypeScript + Three.js)
-│   └── server/            # Backend (Node.js + WebSocket Proxy ke Gemini Live API)
+│   ├── web/               # Frontend (React 18 + Vite + TypeScript + TailwindCSS + Three.js)
+│   │   ├── public/        # Aset visual avatar 2.5D (torso, emosi, kedipan mata) & model 3D VRM
+│   │   └── src/
+│   │       ├── components/# UI AvatarCanvas2D, AvatarVRM, ControlBar, Passcode Modal
+│   │       └── hooks/     # Audio Engine, Gemini Live WebSocket Client, Change Detection
+│   └── server/            # Backend (Node.js + TypeScript + WebSocket Proxy ke Gemini Live)
+│       └── src/
+│           ├── geminiSession.ts  # Orkestrator sesi Gemini Live, Tool Call & Barge-in
+│           ├── edgeTts.ts        # Fallback audio engine & SSML synthesizer
+│           └── config.ts         # Konfigurasi environment & keamanan
 ├── packages/
-│   └── shared/            # Type definitions TypeScript bersama
-├── .env                   # Tempat meletakkan GEMINI_API_KEY
+│   └── shared/            # Shared Library (System Prompt, Persona, Enum Emosi, SSML Parser)
+├── scripts/               # Script pengujian otomatis (Smoke Test Pipeline)
+├── .env                   # Variabel lingkungan server (Lokal)
 └── README.md
 ```
 
@@ -39,61 +82,82 @@ celyn-ai-bot/
 
 ## 🚀 Panduan Memulai Cepat
 
-### 1. Prasyarat
-- **Node.js** v18+ atau v20+ (diuji pada v24)
-- **Google Gemini API Key** (Dapatkan di [Google AI Studio](https://aistudio.google.com/))
+### 1. Prasyarat Sistem
+- **Node.js** v18, v20, atau versi LTS terbaru.
+- **Google Gemini API Key** (dapat dibuat di [Google AI Studio](https://aistudio.google.com/)).
 
-### 2. Pasang Dependencies
-Jalankan perintah ini di root project:
+### 2. Pemasangan Dependensi
+Jalankan perintah berikut di direktori utama:
 ```bash
 npm install
 ```
 
-### 3. Konfigurasi API Key
-Buka file `.env` di root project, lalu masukkan API Key Anda:
+### 3. Konfigurasi Lingkungan (`.env`)
+Salin atau buat file `.env` di root direktori project:
 ```env
-GEMINI_API_KEY=AIzaSy...your_gemini_api_key_here
+# Google Gemini API Key
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Port Server Backend
 PORT=3001
+
+# Model Gemini Live Multimodal
 GEMINI_MODEL=gemini-3.8-live
+
+# Suara Default Celyn (Aoede / Zephyr / Leda / Kore)
 GEMINI_VOICE=Aoede
+
+# Keamanan Sesi (Opsional: Tentukan passcode kustom Anda)
+ADMIN_PASSWORD=your_custom_secure_passcode
 ```
 
-### 4. Jalankan Aplikasi Lokal (1 Perintah)
+> [!NOTE]
+> Nilai `ADMIN_PASSWORD` dapat Anda atur sendiri secara bebas untuk melindungi akses sesi Celyn. Jangan membagikan file `.env` atau mengunggahnya ke repositori publik.
 
-Cukup jalankan satu perintah di root terminal:
+### 4. Menjalankan Server Lokal (Satu Perintah)
+Jalankan backend dan frontend sekaligus dalam satu terminal:
 ```bash
 npm run dev
 ```
-Perintah ini akan menjalankan **Backend Server** (`http://localhost:3001`) dan **Frontend Web** (`http://localhost:5173`) secara serentak. Buka browser di:
+
+Server backend akan berjalan di `http://localhost:3001` dan frontend di `http://localhost:5173`. Buka peramban Anda di:
 👉 **`http://localhost:5173`**
 
----
+### 5. Menjalankan Uji Otomatis (Testing)
+Untuk memastikan seluruh 92+ uji pipeline lulus:
+```bash
+npx tsx scripts/test-pipeline.ts
+```
 
-## ☁️ Panduan Deployment ke Vercel (Zero External Server)
-
-Aplikasi ini mendukung arsitektur **Hybrid Vercel Serverless + Ephemeral Auth Tokens**, sehingga Anda dapat mendeploy seluruh aplikasi ke Vercel tanpa perlu menyewa server WebSocket/VPS eksternal!
-
-1. Buka [https://vercel.com/new](https://vercel.com/new) dan import repositori ini dari GitHub.
-2. Di bagian **Root Directory**, pilih **`Bot (root)`** (bukan `apps/web`).
-3. Tambahkan **Environment Variables** di Vercel:
-   - `GEMINI_API_KEY`: *(API Key Gemini Anda dari Google AI Studio)*
-   - `GEMINI_MODEL`: `gemini-3.8-live`
-   - `GEMINI_VOICE`: `Aoede`
-4. Klik **Deploy**! Vercel akan otomatis menyajikan frontend Vite dan fungsi Serverless `/api/token` yang mencetak Ephemeral Token sekali pakai untuk koneksi langsung yang aman.
+Untuk memverifikasi build produksi:
+```bash
+npm run build
+```
 
 ---
 
 ## 🎮 Cara Menggunakan
 
-1. Buka `http://localhost:5173`.
-2. Klik tombol **"Mulai Celyn"** di bar kontrol bawah.
-3. Izinkan akses mikrofon saat diminta oleh browser.
-4. Ucapkan *"Halo Celyn, apa kabar?"* dan dengarkan respon suara langsung dari Celyn. Perhatikan mulut avatar bergerak seirama dengan suara.
-5. Klik tombol **"Share Layar"** dan pilih jendela/layar yang ingin Anda bahas bersama Celyn (misal kode editor, artikel berita, atau error di konsol).
-6. Tanyakan: *"Celyn, coba lihat layar saya, ada apa di bagian tengah?"* — Celyn akan membaca dan melirik ke arah elemen tersebut!
-7. Klik ikon **"Mode 2D / 3D"** untuk berganti antara avatar 2D Celyn dan avatar 3D VRM.
+1. Buka `http://localhost:5173` di browser Anda.
+2. Saat pertama kali masuk, Anda akan disambut dialog verifikasi sesi. Masukkan passcode akses yang telah Anda konfigurasikan di server.
+3. Klik tombol **"Mulai Sesi Celyn"** di bilah kontrol bawah.
+4. Berikan izin akses mikrofon saat diminta oleh browser.
+5. Sapa Celyn dengan suara Anda atau ketik pesan teks:
+   - *"Halo Celyn, bisa bantu jelaskan konsep black hole dalam fisika?"*
+   - *"Celyn, aku lagi bingung milih struktur database, bagusan SQL atau NoSQL?"*
+   - *"Celyn, hari ini kerjaanku padat banget, capek..."*
+6. **Berbagi Layar**: Klik tombol **"Share Layar"** untuk meninjau baris kode, artikel web, atau diagram bersama Celyn secara interaktif.
+7. **Ganti Avatar**: Gunakan tombol toggle **2D / 3D** untuk beralih antara avatar ilustrasi 2.5D Celyn dan model 3D VRM.
+
+---
+
+## 🛡️ Kebijakan Privasi & Keamanan
+
+- **Zero Client Credential Leakage**: `GEMINI_API_KEY` dan logika verifikasi sandi sepenuhnya tersimpan di sisi backend server. Kunci API tidak pernah dikirim ke browser pengguna.
+- **Passcode Confidentiality**: Repositori ini mematuhi standar keamanan ketat. Sandi akses atau memori personal pembuat tidak disebarluaskan di dokumentasi publik.
+- **Proteksi Data Layar**: Frame layar hanya ditransmisikan saat terjadi perubahan visual nyata dan tidak disimpan secara permanen di server.
 
 ---
 
 ## 📄 Lisensi
-MIT License.
+Hak Cipta © 2026 Celyn AI Project. Dirilis di bawah [MIT License](LICENSE).

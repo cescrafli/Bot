@@ -574,7 +574,7 @@ export class GeminiSession {
                   response: {
                     output: {
                       status: "applied",
-                      instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung memberikan respon lisanmu dengan suara (audio) dalam Bahasa Indonesia.",
+                      instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung menjawab pertanyaan pengguna secara lisan dengan suara (audio) dalam Bahasa Indonesia secara jelas, tuntas, dan tanpa ragu.",
                     },
                   },
                 },
@@ -654,7 +654,7 @@ export class GeminiSession {
           message: userEmotion.statusMessage,
         });
         // Sertakan direktif verbal eksplisit agar model native audio selalu menghasilkan jawaban suara lisan
-        const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;
+        const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia secara jelas dan tuntas!`;
         await this.session.sendClientContent({
           turns: [{ role: "user", parts: [{ text: textPrompt }] }],
           turnComplete: true,
