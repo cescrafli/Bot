@@ -511,9 +511,12 @@ const TOOLS = `TOOL:
  * - 'jocelyn': memuat alur referensi orang terkasih Rafli (Celyn/Jocelyn, rekan profesional tapi terkadang perasa).
  * - 'default': teman ngobrol visual AI umum buatan Rafli, tanpa kisah pribadi sama sekali.
  */
-export function buildCelynSystemPrompt(authMode: AuthMode = "default"): string {
+export function buildCelynSystemPrompt(
+  authMode: AuthMode = "default",
+  memoryContext?: string
+): string {
   const isJocelyn = authMode === "jocelyn";
-  return [
+  const base = [
     PERSONA,
     isJocelyn ? IDENTITY_JOCELYN : IDENTITY_DEFAULT,
     ...(isJocelyn ? [RAFLI_STORY] : []),
@@ -528,6 +531,13 @@ export function buildCelynSystemPrompt(authMode: AuthMode = "default"): string {
     ...(isJocelyn ? [EXAMPLES_JOCELYN] : []),
     TOOLS,
   ].join("\n\n");
+
+  // Memori Turso Cloud HANYA disematkan jika mode adalah 'jocelyn' (admin)
+  // Untuk mode 'default' (login), memori tidak pernah disematkan (zero leak)
+  if (isJocelyn && memoryContext && memoryContext.trim().length > 0) {
+    return `${base}\n\n${memoryContext.trim()}`;
+  }
+  return base;
 }
 
 export const CELYN_SYSTEM_PROMPT = buildCelynSystemPrompt("default");

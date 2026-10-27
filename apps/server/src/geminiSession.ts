@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { config } from "./config.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
+import { memoryService } from "./services/MemoryService.js";
 import {
   ClientMessage,
   ServerMessage,
@@ -43,6 +44,9 @@ export class GeminiSession {
   private backupPcmChunks: string[] = [];
   private hasPendingToolCall = false;
   private hasUserInitiatedTurn = false;
+  public sessionId: string;
+  private memoryContext?: string;
+  private currentTurnCelynText = "";
 
   public stats = {
     audioChunksIn: 0,
@@ -51,10 +55,19 @@ export class GeminiSession {
     toolCallsHandled: 0,
   };
 
-  constructor(clientWs: WebSocket, customVoice?: string, authMode: AuthMode = "default") {
+  constructor(
+    clientWs: WebSocket,
+    customVoice?: string,
+    authMode: AuthMode = "default",
+    sessionId?: string,
+    memoryContext?: string
+  ) {
     this.clientWs = clientWs;
     this.activeVoice = customVoice || config.geminiVoice;
     this.authMode = authMode;
+    this.sessionId =
+      sessionId || `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    this.memoryContext = memoryContext;
     this.useEdgeTts =
       this.activeVoice.includes("Neural") ||
       this.activeVoice.startsWith("id-ID");
@@ -98,7 +111,7 @@ export class GeminiSession {
           systemInstruction: {
             parts: [
               {
-                text: buildCelynSystemPrompt(this.authMode),
+                text: buildCelynSystemPrompt(this.authMode, this.memoryContext),
               },
             ],
           },
@@ -384,6 +397,10 @@ export class GeminiSession {
       const userText = data.serverContent.inputTranscription.text.trim();
       if (userText) {
         console.log(`🎙️ [User Speech]: ${userText}`);
+        // Riwayat obrolan hanya disimpan ke Turso jika dalam mode jocelyn (admin)
+        if (this.authMode === "jocelyn") {
+          memoryService.recordTurn(this.sessionId, "user", userText);
+        }
         this.sendToClient({
           type: "transcript",
           speaker: "user",
@@ -416,6 +433,7 @@ export class GeminiSession {
       if (!this.isBargeInMuted) {
         const celynText = data.serverContent.outputTranscription.text;
         if (celynText) {
+          this.currentTurnCelynText += celynText;
           this.sendToClient({
             type: "transcript",
             speaker: "celyn",
@@ -467,6 +485,7 @@ export class GeminiSession {
         }
         if (part.text && !data.serverContent?.outputTranscription?.text) {
           if (this.isBargeInMuted) continue;
+          this.currentTurnCelynText += part.text;
           console.log(`💬 [Celyn AI]: ${part.text}`);
           this.sendToClient({
             type: "transcript",
@@ -484,6 +503,13 @@ export class GeminiSession {
     // 2.5 Giliran Model Selesai
     if (data.serverContent?.turnComplete) {
       this.isBargeInMuted = false;
+
+      if (this.currentTurnCelynText.trim()) {
+        if (this.authMode === "jocelyn") {
+          memoryService.recordTurn(this.sessionId, "assistant", this.currentTurnCelynText.trim());
+        }
+        this.currentTurnCelynText = "";
+      }
 
       // Jika baru saja mengeksekusi sub-turn pemanggilan tool, tahan status listening
       // agar tidak mendahului sub-turn jawaban suara yang akan segera dimulai model
@@ -631,6 +657,9 @@ export class GeminiSession {
         });
       } else if (msg.type === "text") {
         console.log(`👤 [User Text]: "${msg.text}"`);
+        if (this.authMode === "jocelyn") {
+          memoryService.recordTurn(this.sessionId, "user", msg.text);
+        }
         this.hasUserInitiatedTurn = true;
         this.isBargeInMuted = false;
         this.hasPendingToolCall = false;
@@ -705,5 +734,12 @@ export class GeminiSession {
       this.session = null;
     }
     this.state = "CLOSED";
+
+    // Trigger ringkasan otomatis saat sesi ditutup (HANYA untuk admin / mode jocelyn)
+    if (this.authMode === "jocelyn") {
+      memoryService.summarizeAndPersistSession(this.sessionId).catch((err) => {
+        console.warn("[MEMORY] ⚠️ Gagal merangkum sesi percakapan:", err?.message || err);
+      });
+    }
   }
 }

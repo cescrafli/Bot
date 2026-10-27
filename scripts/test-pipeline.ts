@@ -22,6 +22,7 @@ import {
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
+import { memoryService } from "../apps/server/src/services/MemoryService.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
 
@@ -635,7 +636,43 @@ async function runTtsTests() {
   assert(fs.existsSync("apps/web/public/celyn_torso_rig_shy.png"), "Aset tekstur wajah tersipu / malu manis ada");
   assert(fs.existsSync("apps/web/public/celyn_torso_rig_shy_closed.png"), "Aset tekstur tersipu mata terpejam ada");
 
-  // 14. Ringkasan
+  // 14. Uji Sistem Memori Turso Cloud & Anti-Gemini Guardrail
+  console.log("\n--- 14. Uji Sistem Memori Turso Cloud & Anti-Gemini Guardrail ---");
+  await memoryService.initSchema();
+  const memPrompt = await memoryService.getMemoryPromptBlock();
+  assert(
+    memPrompt.includes("Rafli") && memPrompt.includes("software engineer"),
+    "Memory block berhasil mengambil data profil Rafli dari Turso Cloud"
+  );
+  assert(
+    memPrompt.includes("JANGAN PERNAH menyebutkan, mengakui, atau membahas bahwa kamu dibuat dari model AI pihak ketiga"),
+    "Blok memori memuat instruksi tegas Anti-Vendor & Anti-Third-Party Guardrail"
+  );
+  assert(
+    !memPrompt.includes("Gemini") && !memPrompt.includes("Google"),
+    "Blok memori bebas 100% dari penyebutan nama vendor Gemini/Google"
+  );
+  // Uji Isolasi Mode Default (Login): Reset dari Awal & Bebas Kebocoran Memori (Zero Data Leak)
+  const defaultPromptWithMem = buildCelynSystemPrompt("default", memPrompt);
+  assert(
+    !defaultPromptWithMem.includes("MEMORI & PENGETAHUAN TENTANG PENGGUNA") &&
+    !defaultPromptWithMem.includes("Fakta profil yang kamu ingat"),
+    "Mode 'default' (login) menolak blok memori Turso secara mutlak, menjamin zero data leak"
+  );
+
+  // Uji Mode Jocelyn (Admin): Memori Turso Disuntikkan Lengkap
+  const adminPrompt = buildCelynSystemPrompt("jocelyn", memPrompt);
+  assert(
+    adminPrompt.includes("MEMORI & PENGETAHUAN TENTANG PENGGUNA") &&
+    adminPrompt.includes("software engineer yang merancang dan memprogram seluruh sistem"),
+    "Mode 'jocelyn' (admin) berhasil memuat memori Turso dengan konteks personal Rafli"
+  );
+  assert(
+    !adminPrompt.includes("Gemini") && !adminPrompt.includes("Google"),
+    "Prompt admin bebas 100% dari pembahasan Gemini atau Google"
+  );
+
+  // 15. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

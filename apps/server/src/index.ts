@@ -4,6 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
+import { memoryService } from "./services/MemoryService.js";
 import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode } from "@celyn/shared";
 
 // Metrik Global Server
@@ -206,7 +207,7 @@ wss.on("close", () => {
   clearInterval(heartbeatInterval);
 });
 
-wss.on("connection", (ws: AliveWebSocket, req) => {
+wss.on("connection", async (ws: AliveWebSocket, req) => {
   const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "unknown";
 
   // Tandai klien aktif saat pertama terhubung dan saat merespons pong
@@ -258,7 +259,11 @@ wss.on("connection", (ws: AliveWebSocket, req) => {
     authModeQuery === "jocelyn" || authPass === "admin" ? "jocelyn" : "default";
 
   const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
-  const session = new GeminiSession(ws, requestedVoice, authMode);
+  // Memori jangka panjang Turso HANYA diakses untuk password 'admin' (mode jocelyn)
+  // Mode 'login' (default) selalu mulai dari awal tanpa memori Turso (zero data leak)
+  const memoryContext =
+    authMode === "jocelyn" ? await memoryService.getMemoryPromptBlock() : undefined;
+  const session = new GeminiSession(ws, requestedVoice, authMode, undefined, memoryContext);
   session.connect();
 
   // Idle timeout timer: jika tidak ada interaksi dalam 5 menit, putuskan sesi secara tertib
@@ -338,6 +343,11 @@ const handleShutdown = () => {
 
 process.on("SIGINT", handleShutdown);
 process.on("SIGTERM", handleShutdown);
+
+// Inisialisasi skema memori Turso di latar belakang
+memoryService.initSchema().catch((err) => {
+  console.warn("[MEMORY] ⚠️ Gagal menginisialisasi skema Turso:", err?.message || err);
+});
 
 server.listen(config.port, () => {
   console.log(`
