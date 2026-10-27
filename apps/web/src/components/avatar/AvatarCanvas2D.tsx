@@ -29,8 +29,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const torsoContainerRef = useRef<HTMLDivElement>(null);
-  const leftArmRef = useRef<HTMLDivElement>(null);
-  const rightArmRef = useRef<HTMLDivElement>(null);
   const mouthOverlayRef = useRef<HTMLDivElement>(null);
   const upperTeethRef = useRef<HTMLDivElement>(null);
   const tongueRef = useRef<HTMLDivElement>(null);
@@ -178,7 +176,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     let currDepthZ = 0;
     let currSlumpY = 0;
     let currShiftX = 0;
-    let currArmDamping = 1.0;
 
     const loop = (now: number) => {
       if (document.visibilityState !== "hidden") {
@@ -205,7 +202,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         let targetSlumpY = 0;
         let targetShiftX = 0;
         let targetSpeedMult = 1.0;
-        let targetArmDamping = 1.0;
 
         if (curEmotion === "sad") {
           // Sedih / Empati: Kepala menunduk lembut, napas tenang, tubuh tetap tegak stabil
@@ -217,7 +213,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           targetSlumpY = 3.0 + sigh;
           targetShiftX = 0;
           targetSpeedMult = 0.9;
-          targetArmDamping = 0.6;
         } else if (curEmotion === "happy") {
           // Ceria / Gembira: Tubuh tegap maju ke depan lembut
           const bounce = Math.sin(tSec * 2.5) * 0.8;
@@ -228,7 +223,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           targetSlumpY = -1.5 + bounce;
           targetShiftX = 0;
           targetSpeedMult = 1.15;
-          targetArmDamping = 1.2;
         } else if (curEmotion === "thinking") {
           // Berpikir: Dagu terangkat sedikit, tetap tegak tanpa miring condong
           targetPitch = -1.5;
@@ -238,7 +232,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           targetSlumpY = 0;
           targetShiftX = 0;
           targetSpeedMult = 0.95;
-          targetArmDamping = 0.85;
         } else if (curEmotion === "surprised") {
           // Kaget / Terkesan: Kepala sedikit terkesima
           targetPitch = -2.2;
@@ -248,7 +241,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           targetSlumpY = -1.5;
           targetShiftX = 0;
           targetSpeedMult = 1.25;
-          targetArmDamping = 1.2;
         } else if (curEmotion === "shy") {
           // Tersipu / Malu Manis: Sedikit menunduk anggun
           targetPitch = 1.8;
@@ -258,7 +250,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           targetSlumpY = 1.2;
           targetShiftX = 0;
           targetSpeedMult = 1.0;
-          targetArmDamping = 0.7;
         }
 
         // Lerp halus 60 FPS untuk seluruh parameter rotasi & posisi
@@ -269,7 +260,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
         currDepthZ += (targetDepthZ - currDepthZ) * lerpFactor;
         currSlumpY += (targetSlumpY - currSlumpY) * lerpFactor;
         currShiftX += (targetShiftX - currShiftX) * lerpFactor;
-        currArmDamping += (targetArmDamping - currArmDamping) * lerpFactor;
 
         // ⚡ Aksentuasi Intonasi Vokal (Emphasis Micro-Nod saat kata ditekankan)
         const intonationAccent = curIsSpeaking ? curIntonation * 2.2 : 0;
@@ -299,24 +289,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             ? Math.min(1, curMouthOpen * 2.2 * (0.8 + speechCadence * 0.25))
             : 0;
 
-        // Kinematika Lengan Kiri & Kanan (Mengikuti Damping & Aksentuasi Intonasi)
-        const armBreathL = -breath * 0.6 * currArmDamping;
-        const armBreathR = breath * 0.6 * currArmDamping;
-        const speechArmL = curIsSpeaking
-          ? (Math.sin(tSec * 2.4) * (curRig.armMaxRot * 0.6) + dynamicMouthAmount * 1.0 + curIntonation * 1.5) * currArmDamping
-          : 0;
-        const speechArmR = curIsSpeaking
-          ? (-Math.cos(tSec * 2.2 + 0.4) * (curRig.armMaxRot * 0.55) - dynamicMouthAmount * 0.9 - curIntonation * 1.4) * currArmDamping
-          : 0;
-        const armGazeOffset = (gazeTarget.x - 0.5) * 0.8;
-
-        // Gestur lengan thinking: lengan kanan terangkat sedikit ke arah dada
-        const thinkingArmBonus = curEmotion === "thinking" ? 3.0 : 0;
-
-        const armAngleLeft = Math.max(-5, Math.min(5, armBreathL + speechArmL + armGazeOffset));
-        const armAngleRight = Math.max(-5, Math.min(5, armBreathR + speechArmR + armGazeOffset + thinkingArmBonus));
-
-        // 1. Update Torso Container Transform (2.5D Volumetric GPU Layer)
+        // 1. Update Torso Container Transform (2.5D Volumetric GPU Layer & Solid Anatomical Posture)
         if (torsoContainerRef.current) {
           torsoContainerRef.current.style.transform = `
             perspective(900px)
@@ -327,14 +300,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             scaleY(${breathScaleY.toFixed(3)})
             scaleX(${breathScaleX.toFixed(3)})
           `;
-        }
-
-        // 2. Update Lengan Kiri & Kanan
-        if (leftArmRef.current) {
-          leftArmRef.current.style.transform = `rotate(${armAngleLeft.toFixed(2)}deg)`;
-        }
-        if (rightArmRef.current) {
-          rightArmRef.current.style.transform = `rotate(${armAngleRight.toFixed(2)}deg)`;
         }
 
         // 3. Update Lapisan Mulut (Lip-Sync Halus & Alami)
@@ -552,41 +517,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             mouthScale={rigConfig.mouthScale}
           />
 
-          {/* ============================================================= */}
-          {/* LENGAN KIRI BERGERAK INDEPENDEN (Poros di Sendi Bahu Kiri) */}
-          {/* ============================================================= */}
-          <div
-            ref={leftArmRef}
-            className="absolute inset-0 w-full h-full pointer-events-none z-20 will-change-transform"
-            style={{
-              transformOrigin: `${rigConfig.armPivotLX}% ${rigConfig.armPivotLY}%`,
-            }}
-          >
-            <img
-              src="/celyn_arm_l_clean.png"
-              alt="Celyn Left Arm"
-              className="w-full h-full object-contain select-none pointer-events-none"
-              draggable={false}
-            />
-          </div>
-
-          {/* ============================================================= */}
-          {/* LENGAN KANAN BERGERAK INDEPENDEN (Poros di Sendi Bahu Kanan) */}
-          {/* ============================================================= */}
-          <div
-            ref={rightArmRef}
-            className="absolute inset-0 w-full h-full pointer-events-none z-20 will-change-transform"
-            style={{
-              transformOrigin: `${rigConfig.armPivotRX}% ${rigConfig.armPivotRY}%`,
-            }}
-          >
-            <img
-              src="/celyn_arm_r_clean.png"
-              alt="Celyn Right Arm"
-              className="w-full h-full object-contain select-none pointer-events-none"
-              draggable={false}
-            />
-          </div>
 
           {/* ============================================================= */}
           {/* LAPISAN MULUT LIP-SYNC HALUS (Presisi Terkunci pada Bibir) */}
