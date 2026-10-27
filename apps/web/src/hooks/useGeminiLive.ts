@@ -338,7 +338,14 @@ export function useGeminiLive({
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           systemInstruction: {
-            parts: [{ text: buildCelynSystemPrompt(getStoredAuthMode()) }],
+            parts: [
+              {
+                text: buildCelynSystemPrompt(
+                  getStoredAuthMode(),
+                  data.memoryContext || undefined
+                ),
+              },
+            ],
           },
           tools: [
             {

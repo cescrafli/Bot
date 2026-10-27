@@ -17,6 +17,20 @@ const serverStats = {
 // Rate limiter sederhana per IP (maksimal 5 koneksi bersamaan per IP)
 const ipConnectionCount = new Map<string, number>();
 
+// Ekstraksi IP asli klien yang aman terhadap proxy chains (Cloudflare / NGINX / Vercel)
+function getClientIp(req: http.IncomingMessage): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    return forwarded.split(",")[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return forwarded[0].split(",")[0].trim();
+  }
+  const realIp = req.headers["x-real-ip"];
+  if (typeof realIp === "string") return realIp.trim();
+  return req.socket.remoteAddress || "unknown";
+}
+
 const server = http.createServer((req, res) => {
   // CORS Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -46,6 +60,34 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Endpoint Verifikasi Autentikasi (Server-side Auth)
+  if (req.url === "/api/auth/verify" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      try {
+        const parsed = JSON.parse(body || "{}");
+        const trimmed = String(parsed.password || "").trim().toLowerCase();
+        if (trimmed === "admin" || trimmed === config.adminPassword.toLowerCase()) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ valid: true, mode: "jocelyn" }));
+        }
+        if (trimmed === "login") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ valid: true, mode: "default" }));
+        }
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ valid: false, error: "Kata sandi salah" }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Format request tidak valid" }));
+      }
+    });
+    return;
+  }
+
   // Stats endpoint
   if (req.url === "/api/stats") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -61,6 +103,36 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Endpoint Memori Turso (Untuk Serverless Parity & Direct Client)
+  if (req.url?.startsWith("/api/memory")) {
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
+    const rawHeader = req.headers["x-admin-password"];
+    const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    const authPass =
+      headerPass ||
+      parsedUrl.searchParams.get("password") ||
+      parsedUrl.searchParams.get("key");
+
+    // Zero-leak security: Hanya admin yang diizinkan mengambil blok memori
+    if (authPass !== "admin" && authPass !== config.adminPassword) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ memoryContext: null, mode: "default" }));
+      return;
+    }
+
+    (async () => {
+      try {
+        const memoryContext = await memoryService.getMemoryPromptBlock();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ memoryContext, mode: "jocelyn" }));
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message || "Gagal mengambil data memori" }));
+      }
+    })();
+    return;
+  }
+
   // Ephemeral Token endpoint (kompatibel dengan mode Vercel Serverless)
   if (req.url?.startsWith("/api/token")) {
     const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
@@ -69,9 +141,10 @@ const server = http.createServer((req, res) => {
       parsedUrl.searchParams.get("password") ||
       parsedUrl.searchParams.get("key");
 
-    if (authPass !== config.adminPassword) {
+    const validPasswords = ["admin", "login", config.adminPassword];
+    if (!authPass || !validPasswords.includes(String(authPass).trim())) {
       res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi admin diperlukan." }));
+      res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') diperlukan." }));
       return;
     }
 
@@ -93,6 +166,8 @@ const server = http.createServer((req, res) => {
         const tokenResource = await ai.authTokens.create({
           config: { uses: 5, expireTime },
         });
+        const isAdmin = authPass === "admin" || authPass === config.adminPassword;
+        const memoryContext = isAdmin ? await memoryService.getMemoryPromptBlock() : undefined;
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
@@ -100,6 +175,7 @@ const server = http.createServer((req, res) => {
             model: config.geminiModel,
             voice: selectedVoice,
             expireTime,
+            memoryContext: memoryContext || null,
           })
         );
       } catch (err: any) {
@@ -208,7 +284,7 @@ wss.on("close", () => {
 });
 
 wss.on("connection", async (ws: AliveWebSocket, req) => {
-  const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "unknown";
+  const clientIp = getClientIp(req);
 
   // Tandai klien aktif saat pertama terhubung dan saat merespons pong
   ws.isAlive = true;

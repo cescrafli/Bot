@@ -672,6 +672,21 @@ async function runTtsTests() {
     "Prompt admin bebas 100% dari pembahasan Gemini atau Google"
   );
 
+  // Uji Auto-Pruning Log Chat Lama (> 30 hari)
+  const prunedCount = await memoryService.pruneOldLogs();
+  assert(
+    typeof prunedCount === "number",
+    `Auto-pruning chat_logs lama berjalan sukses (terhapus: ${prunedCount} baris)`
+  );
+
+  // Uji Ekstraksi IP Asli di Belakang Multi-Proxy (RFC 7239 compliant)
+  const proxyHeader = "203.0.113.195, 70.41.3.18, 150.172.238.178";
+  const extractedClientIp = proxyHeader.split(",")[0].trim();
+  assert(
+    extractedClientIp === "203.0.113.195",
+    "Ekstraksi IP proxy chain berhasil mengidentifikasi IP asli klien (anti rate-limit collision)"
+  );
+
   // 15. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

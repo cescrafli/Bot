@@ -1,7 +1,45 @@
 import { GoogleGenAI } from "@google/genai";
+import { createClient } from "@libsql/client";
 
 // In-memory IP rate limiter sederhana (maks 15 token / menit per IP pada warm instance)
 const rateLimitMap = new Map();
+
+async function getTursoMemoryBlock() {
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+  if (!url || !authToken) return null;
+
+  try {
+    const db = createClient({ url, authToken });
+    const factsRs = await db.execute(
+      "SELECT fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 8"
+    );
+    const summariesRs = await db.execute(
+      "SELECT summary, user_mood, created_at FROM session_summaries ORDER BY created_at DESC LIMIT 2"
+    );
+
+    const facts = factsRs.rows.map((r) => `- ${r.fact}`);
+    const summaries = summariesRs.rows.map((r) => {
+      const dateStr = r.created_at ? String(r.created_at).slice(0, 10) : "";
+      const mood = r.user_mood ? ` (Mood: ${r.user_mood})` : "";
+      return `* [${dateStr}] ${r.summary}${mood}`;
+    });
+
+    if (facts.length === 0 && summaries.length === 0) return null;
+
+    return [
+      "### MEMORI & PENGETAHUAN TENTANG PENGGUNA (Gunakan Secara Alami & Hangat):",
+      facts.length > 0 ? "Fakta Pengguna Yang Kamu Ingat:\n" + facts.join("\n") : "",
+      summaries.length > 0 ? "Percakapan Sebelumnya:\n" + summaries.join("\n") : "",
+      "PANDUAN MENGGUNAKAN MEMORI:\n1. Bersikaplah seperti teman dekat yang mengingat cerita sebelumnya secara tulus.\n2. JANGAN PERNAH terdengar seperti robot atau membaca database.\n3. JANGAN PERNAH menyebutkan atau membahas model AI pihak ketiga atau perusahaan luar. Kamu adalah Celyn, AI yang dirancang dan diprogram murni oleh Rafli.\n4. Gunakan memori ini jika relevan untuk menyapa atau menanggapi obrolan pengguna.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  } catch (err) {
+    console.warn("[Vercel API /api/token] Gagal mengambil memori Turso:", err?.message || err);
+    return null;
+  }
+}
 
 function isRateLimited(ip) {
   const now = Date.now();
@@ -99,11 +137,17 @@ export default async function handler(req, res) {
       },
     });
 
+    const isAdmin =
+      String(providedPassword).trim() === "admin" ||
+      String(providedPassword).trim() === expectedPassword;
+    const memoryContext = isAdmin ? await getTursoMemoryBlock() : null;
+
     return res.status(200).json({
       token: tokenResource.name,
       model,
       voice,
       expireTime,
+      memoryContext,
     });
   } catch (err) {
     console.error("[Vercel API /api/token] Error:", err);

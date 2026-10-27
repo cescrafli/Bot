@@ -90,6 +90,7 @@ export class MemoryService {
       console.log("[MEMORY] 📦 Skema database Turso berhasil diverifikasi & siap.");
 
       await this.seedInitialProfile();
+      await this.pruneOldLogs();
     } catch (err) {
       console.error("[MEMORY] ❌ Gagal membuat skema tabel Turso:", err);
     }
@@ -217,6 +218,28 @@ export class MemoryService {
   }
 
   /**
+   * Menghapus log obrolan lama (> 30 hari) agar database Turso tetap ramping dan tidak bloat.
+   */
+  async pruneOldLogs(): Promise<number> {
+    const db = this.getClient();
+    if (!db) return 0;
+
+    try {
+      const res = await db.execute(
+        "DELETE FROM chat_logs WHERE created_at < datetime('now', '-30 days')"
+      );
+      const affected = res.rowsAffected || 0;
+      if (affected > 0) {
+        console.log(`[MEMORY] 🧹 Auto-prune: ${affected} baris log chat lama berhasil dibersihkan.`);
+      }
+      return affected;
+    } catch (err) {
+      console.warn("[MEMORY] ⚠️ Gagal melakukan auto-prune chat_logs:", err);
+      return 0;
+    }
+  }
+
+  /**
    * Meringkas sesi obrolan yang baru selesai dan menyimpan fakta baru ke Turso.
    */
   async summarizeAndPersistSession(sessionId: string): Promise<void> {
@@ -235,6 +258,19 @@ export class MemoryService {
         .map((m) => `${m.role === "user" ? "Pengguna" : "Celyn"}: ${m.content}`)
         .join("\n");
 
+      // Ambil daftar fakta yang sudah ada untuk semantic deduplication & contradiction resolving
+      let existingFactsBlock = "";
+      try {
+        const existingRs = await db.execute(
+          "SELECT id, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 20"
+        );
+        if (existingRs.rows.length > 0) {
+          existingFactsBlock =
+            "Fakta yang sudah kamu ketahui saat ini:\n" +
+            existingRs.rows.map((r) => `- [ID ${r.id}] ${r.fact}`).join("\n");
+        }
+      } catch {}
+
       const ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: { apiVersion: "v1alpha" },
@@ -243,11 +279,14 @@ export class MemoryService {
 
 ${transcript}
 
-Tugas:
+${existingFactsBlock ? existingFactsBlock + "\n\n" : ""}Tugas:
 1. Buat ringkasan padat obrolan ini dalam 1 sampai 2 kalimat bahasa Indonesia santai (fokus pada topik utama dan apa yang dibahas/diselesaikan).
 2. Deteksi mood/suasana hati dominan pengguna (misal: "santai", "semangat", "lelah", "fokus", "senang").
 3. Ekstrak kata kunci topik (pisahkan dengan koma).
-4. Jika pengguna menceritakan fakta baru tentang dirinya (seperti hobi, makanan kesukaan, kesibukan baru, atau preferensi), ekstrak sebagai kalimat fakta pendek. Jika tidak ada fakta baru, kosongkan.
+4. Jika pengguna menceritakan fakta baru tentang dirinya (seperti hobi, makanan kesukaan, kesibukan baru, atau preferensi):
+   - Jika fakta tersebut memperbarui atau menggantikan fakta lama yang sudah ada di daftar fakta di atas (misal alamat baru, pekerjaan baru), gunakan format: {"fact": "fakta baru", "supersedesId": ID_FAKTA_LAMA}.
+   - Jika fakta baru murni, gunakan format: {"fact": "fakta baru"}.
+   - Jika fakta sudah ada atau intinya sama, JANGAN dimasukkan lagi (hindari duplikasi semantik).
 5. PENTING: JANGAN PERNAH menyertakan kata "Gemini", "Google", atau istilah vendor AI dalam ringkasan atau fakta.
 
 Format output WAJIB JSON:
@@ -255,7 +294,9 @@ Format output WAJIB JSON:
   "summary": "Ringkasan 1-2 kalimat",
   "userMood": "kata mood",
   "keyTopics": "topik1, topik2",
-  "newFacts": ["fakta baru 1", "fakta baru 2"]
+  "newFacts": [
+    { "fact": "fakta baru" }
+  ]
 }`;
 
       let responseText = "";
@@ -289,6 +330,7 @@ Format output WAJIB JSON:
             "obrolan santai",
           ],
         });
+        await this.pruneOldLogs();
         return;
       }
 
@@ -297,7 +339,7 @@ Format output WAJIB JSON:
       const cleanSummary = this.sanitizeText(parsed.summary || "");
       const cleanMood = this.sanitizeText(parsed.userMood || "santai");
       const cleanTopics = this.sanitizeText(parsed.keyTopics || "");
-      const newFacts: string[] = Array.isArray(parsed.newFacts) ? parsed.newFacts : [];
+      const rawFacts: any[] = Array.isArray(parsed.newFacts) ? parsed.newFacts : [];
 
       if (cleanSummary) {
         await db.execute({
@@ -307,16 +349,31 @@ Format output WAJIB JSON:
         console.log(`[MEMORY] 📝 Ringkasan sesi tersimpan: "${cleanSummary}"`);
       }
 
-      for (const rawFact of newFacts) {
+      for (const item of rawFacts) {
+        const rawFact = typeof item === "string" ? item : item?.fact;
+        const supersedesId = typeof item === "object" ? Number(item?.supersedesId) : NaN;
+        if (!rawFact) continue;
+
         const cleanFact = this.sanitizeText(rawFact.trim());
         if (cleanFact.length > 5) {
-          await db.execute({
-            sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance) VALUES (?, ?, ?)",
-            args: ["fakta", cleanFact, 1],
-          });
-          console.log(`[MEMORY] 💡 Fakta baru pengguna tercatat: "${cleanFact}"`);
+          if (!Number.isNaN(supersedesId) && supersedesId > 0) {
+            await db.execute({
+              sql: "UPDATE user_profile SET fact = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+              args: [cleanFact, supersedesId],
+            });
+            console.log(`[MEMORY] 🔄 Fakta ID ${supersedesId} diperbarui: "${cleanFact}"`);
+          } else {
+            await db.execute({
+              sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance) VALUES (?, ?, ?)",
+              args: ["fakta", cleanFact, 1],
+            });
+            console.log(`[MEMORY] 💡 Fakta baru pengguna tercatat: "${cleanFact}"`);
+          }
         }
       }
+
+      // Bersihkan log chat lama secara otomatis di latar belakang
+      await this.pruneOldLogs();
     } catch (err) {
       console.warn("[MEMORY] ⚠️ Gagal merangkum sesi percakapan:", err);
     }
