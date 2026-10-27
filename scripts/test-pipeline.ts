@@ -315,6 +315,11 @@ async function runTtsTests() {
     promptJocelyn.includes("menekuni di bidang rekan profesional tapi terkadang perasa. Pembuat saya menciptakan saya untuk selalu dapat menyemangati orang terkasihnya"),
     "Mode admin memuat kisah orang terkasih: rekan profesional, terkadang perasa, dan diciptakan untuk menyemangatinya"
   );
+  assert(
+    promptJocelyn.includes("BEBAS BERBICARA LEBIH PANJANG, MENGALIR, DAN HANGAT") &&
+    !promptJocelyn.includes("cukup 1 sampai 2 kalimat pendek per giliran"),
+    "Mode admin membebaskan panjang kalimat basa-basi (tidak dibatasi 1-2 kalimat pendek)"
+  );
 
   // Uji Persona Identitas Khusus Mode Login ('default' / Password 'login')
   const promptDefault = buildCelynSystemPrompt("default");
