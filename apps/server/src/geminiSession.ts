@@ -6,6 +6,7 @@ import {
   ClientMessage,
   ServerMessage,
   EmotionType,
+  AuthMode,
   inferEmotionFromText,
   inferUserEmotion,
   normalizeEmotion,
@@ -32,6 +33,7 @@ export class GeminiSession {
   private ttsChain: Promise<void> = Promise.resolve();
   private useEdgeTts = true;
   private activeVoice: string;
+  private authMode: AuthMode = "default";
   private isFirstChunkInTurn = true;
   private currentEmotion: EmotionType = "neutral";
   private explicitEmotionUsedInTurn = false;
@@ -48,9 +50,10 @@ export class GeminiSession {
     toolCallsHandled: 0,
   };
 
-  constructor(clientWs: WebSocket, customVoice?: string) {
+  constructor(clientWs: WebSocket, customVoice?: string, authMode: AuthMode = "default") {
     this.clientWs = clientWs;
     this.activeVoice = customVoice || config.geminiVoice;
+    this.authMode = authMode;
     this.useEdgeTts =
       this.activeVoice.includes("Neural") ||
       this.activeVoice.startsWith("id-ID");
@@ -206,7 +209,7 @@ export class GeminiSession {
                   role: "user",
                   parts: [
                     {
-                      text: buildContextualGreetingPrompt(),
+                      text: buildContextualGreetingPrompt(new Date(), this.authMode),
                     },
                   ],
                 },

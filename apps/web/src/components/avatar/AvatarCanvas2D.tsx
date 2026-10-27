@@ -130,6 +130,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     [
       "/celyn_torso_rig.png",
       "/celyn_torso_rig_closed.png",
+      "/celyn_torso_rig_sad.png",
+      "/celyn_torso_rig_sad_closed.png",
       "/celyn_arm_l_clean.png",
       "/celyn_arm_r_clean.png",
     ].forEach((src) => {
@@ -484,12 +486,21 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* ============================================================= */}
           {/* LAPISAN TUBUH UTAMA (Kepala, Leher, Badan, Rambut & Pakaian) */}
           {/* Normal: Mata Terbuka (/celyn_torso_rig.png) */}
-          {/* Kedip (130ms): Mata Merem Alami (/celyn_torso_rig_closed.png) */}
+          {/* Sedih: Tekstur Wajah Empatis Alami (/celyn_torso_rig_sad.png) */}
+          {/* Kedip (130ms): Mata Merem Alami (/celyn_torso_rig_closed.png / sad_closed.png) */}
           {/* ============================================================= */}
           <img
-            src={isBlinking ? "/celyn_torso_rig_closed.png" : "/celyn_torso_rig.png"}
+            src={
+              emotion === "sad"
+                ? isBlinking
+                  ? "/celyn_torso_rig_sad_closed.png"
+                  : "/celyn_torso_rig_sad.png"
+                : isBlinking
+                ? "/celyn_torso_rig_closed.png"
+                : "/celyn_torso_rig.png"
+            }
             alt="Celyn Avatar Body"
-            className="w-full h-full object-contain filter drop-shadow-2xl relative z-10 select-none pointer-events-none"
+            className="w-full h-full object-contain relative z-10 select-none pointer-events-none"
             draggable={false}
           />
 
@@ -519,7 +530,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             <img
               src="/celyn_arm_l_clean.png"
               alt="Celyn Left Arm"
-              className="w-full h-full object-contain filter drop-shadow-md select-none pointer-events-none"
+              className="w-full h-full object-contain select-none pointer-events-none"
               draggable={false}
             />
           </div>
@@ -537,7 +548,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             <img
               src="/celyn_arm_r_clean.png"
               alt="Celyn Right Arm"
-              className="w-full h-full object-contain filter drop-shadow-md select-none pointer-events-none"
+              className="w-full h-full object-contain select-none pointer-events-none"
               draggable={false}
             />
           </div>

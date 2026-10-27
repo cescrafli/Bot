@@ -47,16 +47,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed. Gunakan GET atau POST." });
   }
 
-  // Verifikasi Kata Sandi Admin (x-admin-password)
+  // Verifikasi Kata Sandi ('admin' atau 'login')
   const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
+  const validPasswords = ["admin", "login", expectedPassword];
   const providedPassword =
     req.headers["x-admin-password"] ||
     req.query?.password ||
     req.query?.key;
 
-  if (!providedPassword || String(providedPassword).trim() !== expectedPassword) {
+  if (!providedPassword || !validPasswords.includes(String(providedPassword).trim())) {
     return res.status(401).json({
-      error: "Akses ditolak: Kata sandi admin diperlukan untuk meminta token sesi Celyn AI.",
+      error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') diperlukan.",
     });
   }
 

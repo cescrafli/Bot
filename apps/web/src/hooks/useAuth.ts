@@ -1,7 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
+import { AuthMode } from "@celyn/shared";
 
-const ADMIN_PASSWORD = "admin";
+export type { AuthMode };
+
 const AUTH_STORAGE_KEY = "celyn_auth_token";
+const AUTH_MODE_KEY = "celyn_auth_mode";
+const AUTH_PASSWORD_KEY = "celyn_auth_pass";
 const AUTH_REMEMBER_KEY = "celyn_auth_remember";
 const FAILED_ATTEMPTS_KEY = "celyn_auth_failed_attempts";
 const LOCKOUT_KEY = "celyn_auth_lockout_until";
@@ -27,19 +31,20 @@ export function isTokenValid(token: string | null): boolean {
   }
 }
 
+export function getStoredAuthMode(): AuthMode {
+  const sessionMode = sessionStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;
+  if (sessionMode === "jocelyn" || sessionMode === "default") return sessionMode;
+  const localMode = localStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;
+  if (localMode === "jocelyn" || localMode === "default") return localMode;
+  return "default";
+}
+
 export function getStoredAuthPassword(): string {
-  const sessionToken = sessionStorage.getItem(AUTH_STORAGE_KEY);
-  if (sessionToken && isTokenValid(sessionToken)) {
-    return ADMIN_PASSWORD;
-  }
-  const localToken = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (localToken && isTokenValid(localToken)) {
-    return ADMIN_PASSWORD;
-  }
-  // Jika token invalid atau sudah expired, bersihkan
-  sessionStorage.removeItem(AUTH_STORAGE_KEY);
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-  return "";
+  const sessionPass = sessionStorage.getItem(AUTH_PASSWORD_KEY);
+  if (sessionPass) return sessionPass;
+  const localPass = localStorage.getItem(AUTH_PASSWORD_KEY);
+  if (localPass) return localPass;
+  return getStoredAuthMode() === "jocelyn" ? "admin" : "login";
 }
 
 export function useAuth() {
@@ -105,14 +110,20 @@ export function useAuth() {
         return false;
       }
 
-      const trimmed = inputPassword.trim();
-      if (trimmed === ADMIN_PASSWORD) {
-        const token = btoa(`celyn_auth:${Date.now()}`);
+      const trimmed = inputPassword.trim().toLowerCase();
+      // Hanya 2 password yang valid: 'admin' (mode Jocelyn) dan 'login' (mode default)
+      if (trimmed === "admin" || trimmed === "login") {
+        const mode: AuthMode = trimmed === "admin" ? "jocelyn" : "default";
+        const token = btoa(`celyn_auth:${Date.now()}:${mode}`);
         if (rememberMe) {
           localStorage.setItem(AUTH_STORAGE_KEY, token);
+          localStorage.setItem(AUTH_MODE_KEY, mode);
+          localStorage.setItem(AUTH_PASSWORD_KEY, trimmed);
           localStorage.setItem(AUTH_REMEMBER_KEY, "true");
         } else {
           sessionStorage.setItem(AUTH_STORAGE_KEY, token);
+          sessionStorage.setItem(AUTH_MODE_KEY, mode);
+          sessionStorage.setItem(AUTH_PASSWORD_KEY, trimmed);
         }
 
         localStorage.removeItem(FAILED_ATTEMPTS_KEY);
@@ -145,7 +156,11 @@ export function useAuth() {
 
   const logout = useCallback(() => {
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.removeItem(AUTH_MODE_KEY);
+    sessionStorage.removeItem(AUTH_PASSWORD_KEY);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(AUTH_MODE_KEY);
+    localStorage.removeItem(AUTH_PASSWORD_KEY);
     localStorage.removeItem(AUTH_REMEMBER_KEY);
     setIsAuthenticated(false);
     setError(null);

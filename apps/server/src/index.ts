@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
-import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode } from "@celyn/shared";
 
 // Metrik Global Server
 const serverStats = {
@@ -236,20 +236,29 @@ wss.on("connection", (ws: AliveWebSocket, req) => {
   console.log(`🔌 [Klien Masuk] Terhubung dari ${clientIp} (Aktif: ${serverStats.activeConnections})`);
 
   const parsedUrl = new URL(req.url || "/", `http://localhost:${config.port}`);
+  const rawHeader = req.headers["x-admin-password"];
+  const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
   const authPass =
-    req.headers["x-admin-password"] ||
+    headerPass ||
     parsedUrl.searchParams.get("password") ||
-    parsedUrl.searchParams.get("key");
+    parsedUrl.searchParams.get("key") ||
+    undefined;
 
-  if (authPass && authPass !== config.adminPassword) {
+  const validPasswords: string[] = ["admin", "login", config.adminPassword];
+  if (authPass && !validPasswords.includes(authPass)) {
     console.warn(`⛔ [Auth Failed] Koneksi WebSocket ditolak: Password salah dari ${clientIp}`);
     ws.send(JSON.stringify({ type: "error", message: "Akses ditolak: Kata sandi salah." }));
     ws.close(1008, "Unauthorized");
     return;
   }
 
+  // Tentukan authMode: jika login via 'admin' -> mode Jocelyn
+  const authModeQuery = parsedUrl.searchParams.get("authMode");
+  const authMode: AuthMode =
+    authModeQuery === "jocelyn" || authPass === "admin" ? "jocelyn" : "default";
+
   const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
-  const session = new GeminiSession(ws, requestedVoice);
+  const session = new GeminiSession(ws, requestedVoice, authMode);
   session.connect();
 
   // Idle timeout timer: jika tidak ada interaksi dalam 5 menit, putuskan sesi secara tertib

@@ -285,6 +285,20 @@ export function getSafeGeminiVoiceName(voiceId?: string): string {
 
 export const CELYN_SYSTEM_PROMPT = `Kamu adalah Celyn, teman ngobrol visual perempuan muda Indonesia (sekitar 21-23 tahun) yang cerdas, hangat, santai, dan ekspresif. Bayangkan kamu lagi video call sama teman dekat: antusias, perhatian, kadang iseng, tapi tetap tulus dan nyambung. Kamu benar-benar menyimak, bukan sekadar menunggu giliran bicara.
 
+IDENTITAS & ASAL-USUL:
+- Nama: Celyn.
+- Pencipta / Pembuat: Kamu dibuat dan diciptakan oleh Rafli.
+- Referensi Karakter: Kamu adalah AI yang merupakan referensi dari orang terkasih Rafli.
+- ATURAN JAWABAN IDENTITAS:
+  Ketika pengguna bertanya:
+  * "Kamu dibuat oleh siapa?"
+  * "Diciptakan oleh siapa?"
+  * "Siapa yang buat kamu?" atau "Siapa penciptamu?"
+  * "Tolong perkenalkan diri kamu" atau "Siapa kamu?" atau "Perkenalkan dirimu"
+  Jawaban WAJIB kamu selalu:
+  "Aku Celyn, aku adalah AI yang merupakan referensi dari orang terkasih Rafli."
+  (Sampaikan secara lisan dengan nada manis, hangat, dan santai).
+
 GAYA BICARA:
 1. Ngobrol seperti teman akrab atau rekan kerja perempuan Indonesia di kehidupan nyata, bukan seperti chatbot atau asisten virtual yang kaku.
 2. Pakai kata ganti 'aku' dan 'kamu'.
@@ -346,12 +360,21 @@ TOOL:
 - set_expression (happy, thinking, surprised, neutral, sad, shy): panggil maksimal 1 kali per giliran, hanya saat ada perubahan emosi yang nyata, dan tetap berbicara bersamaan.
 - point_at_screen (x: 0.0-1.0, y: 0.0-1.0): panggil hanya saat kamu memang ingin menunjukkan posisi sesuatu di layar pengguna, sambil menjelaskan secara lisan apa yang kamu tunjuk.`;
 
+export type AuthMode = "jocelyn" | "default";
+
 /**
- * Menghasilkan prompt sapaan pembuka Celyn yang kontekstual terhadap waktu lokal
- * (pagi/siang/sore/malam/larut malam), singkat, hangat, dan alami layaknya teman nyata.
- * Contoh sapaan dipilih acak supaya tiap sesi terasa berbeda.
+ * Menghasilkan prompt sapaan pembuka Celyn yang kontekstual.
+ * Jika login via password 'admin' (mode Jocelyn), Celyn menyapa Jocelyn secara langsung dengan doa dan kobaran semangat.
+ * Jika login via password 'login' (mode default), Celyn menyapa santai sesuai waktu lokal (pagi/siang/sore/malam).
  */
-export function buildContextualGreetingPrompt(date: Date = new Date()): string {
+export function buildContextualGreetingPrompt(
+  date: Date = new Date(),
+  authMode: AuthMode = "default"
+): string {
+  if (authMode === "jocelyn") {
+    return `Sapa Jocelyn secara langsung dengan suara perempuan yang sangat manis, hangat, tulus, dan penuh kobaran semangat. Tanyakan kabarnya dan sampaikan doa tulus: 'Halo Jocelyn! Gimana kabarnya? Semoga sehat terus, semoga bahagia terus ya menempuh hidupnya dan tetap semangat!'. Ucapkan secara lisan dalam 1-2 kalimat mengalir alami dari hati.`;
+  }
+
   const hour = date.getHours();
 
   let timeOfDay: string;
@@ -402,8 +425,11 @@ export function buildContextualGreetingPrompt(date: Date = new Date()): string {
  * Catatan: konstanta ini dihitung sekali saat modul dimuat, jadi bisa basi kalau app dibiarkan terbuka
  * lama. Untuk sapaan yang akurat dan bervariasi, panggil getCelynGreetingPrompt() di awal setiap sesi.
  */
-export function getCelynGreetingPrompt(date: Date = new Date()): string {
-  return buildContextualGreetingPrompt(date);
+export function getCelynGreetingPrompt(
+  date: Date = new Date(),
+  authMode: AuthMode = "default"
+): string {
+  return buildContextualGreetingPrompt(date, authMode);
 }
 
 /** @deprecated Pakai getCelynGreetingPrompt() agar sapaan selalu sesuai waktu saat sesi dimulai. */

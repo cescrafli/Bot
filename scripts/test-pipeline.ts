@@ -19,6 +19,7 @@ import {
   analyzeHumanVoiceFrame,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
+import fs from "node:fs";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
@@ -296,6 +297,24 @@ async function runTtsTests() {
     `Sapaan pembuka dinamis menyesuaikan waktu pengguna (${morningGreeting.slice(0, 35)}...)`
   );
 
+  // Uji Aturan Identitas & Pencipta Celyn
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("Aku Celyn, aku adalah AI yang merupakan referensi dari orang terkasih Rafli."),
+    "System prompt memuat jawaban identitas wajib: 'Aku Celyn, aku adalah AI yang merupakan referensi dari orang terkasih Rafli.'"
+  );
+
+  // Uji Sapaan Khusus Jocelyn (Password 'admin') vs Normal (Password 'login')
+  const jocelynGreeting = buildContextualGreetingPrompt(new Date(), "jocelyn");
+  assert(
+    jocelynGreeting.includes("Jocelyn") && jocelynGreeting.includes("tetap semangat"),
+    "Sapaan khusus mode 'jocelyn' menyapa Jocelyn langsung dengan doa dan kobaran semangat"
+  );
+  const defaultGreeting = buildContextualGreetingPrompt(new Date(), "default");
+  assert(
+    !defaultGreeting.includes("Jocelyn"),
+    "Sapaan mode default tidak menyebutkan pesan khusus Jocelyn"
+  );
+
   // 7. Uji Human-Voice VAD & Deteksi Gumaman ("hmmm", "aaa") vs Penolakan Noise
   console.log("\n--- 7. Uji Smart Human-Voice VAD & Deteksi Gumaman (hmmm, aaa) ---");
 
@@ -387,21 +406,23 @@ async function runTtsTests() {
   );
 
   // 9. Uji Gerbang Autentikasi Admin & Proteksi Sesi
-  console.log("\n--- 9. Uji Gerbang Autentikasi Admin & Proteksi Token ---");
+  console.log("\n--- 9. Uji Gerbang Autentikasi 2-Password ('admin' & 'login') ---");
 
-  const ADMIN_PASS = "admin";
-  const validateAuth = (input: string) => input.trim() === ADMIN_PASS;
+  const VALID_PASSWORDS = ["admin", "login"];
+  const validateAuth = (input: string) => VALID_PASSWORDS.includes(input.trim().toLowerCase());
 
-  assert(validateAuth("admin"), "Kata sandi otorisasi 'admin' berhasil divalidasi");
+  assert(validateAuth("admin"), "Kata sandi otorisasi 'admin' (Mode Jocelyn) berhasil divalidasi");
+  assert(validateAuth("login"), "Kata sandi otorisasi 'login' (Mode Default) berhasil divalidasi");
   assert(validateAuth(" admin "), "Kata sandi dengan spasi ' admin ' berhasil ditoleransi via trim");
+  assert(validateAuth(" LOGIN "), "Kata sandi ' LOGIN ' berhasil ditoleransi via case-insensitivity");
   assert(!validateAuth("12345"), "Kata sandi salah '12345' ditolak oleh sistem");
   assert(!validateAuth(""), "Kata sandi kosong ditolak oleh sistem");
 
   // Simulasi verifikasi otentikasi endpoint /api/token
   function checkApiTokenAuth(headers: Record<string, string>, query: Record<string, string>) {
-    const expected = "admin";
+    const valid = ["admin", "login"];
     const provided = headers["x-admin-password"] || query.password || query.key;
-    if (!provided || String(provided).trim() !== expected) {
+    if (!provided || !valid.includes(String(provided).trim())) {
       return { status: 401, error: "Unauthorized" };
     }
     return { status: 200, ok: true };
@@ -413,8 +434,11 @@ async function runTtsTests() {
   const wrongHeaderReq = checkApiTokenAuth({ "x-admin-password": "salah" }, {});
   assert(wrongHeaderReq.status === 401, "Permintaan /api/token dengan password salah ditolak (HTTP 401)");
 
-  const validHeaderReq = checkApiTokenAuth({ "x-admin-password": "admin" }, {});
-  assert(validHeaderReq.status === 200, "Permintaan /api/token dengan header 'x-admin-password: admin' diterima (HTTP 200)");
+  const validAdminReq = checkApiTokenAuth({ "x-admin-password": "admin" }, {});
+  assert(validAdminReq.status === 200, "Permintaan /api/token dengan header 'x-admin-password: admin' diterima (HTTP 200)");
+
+  const validLoginReq = checkApiTokenAuth({ "x-admin-password": "login" }, {});
+  assert(validLoginReq.status === 200, "Permintaan /api/token dengan header 'x-admin-password: login' diterima (HTTP 200)");
 
   // 10. Uji Pembersihan Markdown, Links, & Formatting untuk SSML Edge TTS
   console.log("\n--- 10. Uji Stripping Markdown & SSML XML Escaping ---");
@@ -498,7 +522,14 @@ async function runTtsTests() {
     "Flag hasUserInitiated bernilai true sehingga auto-greeting dicegah menimpa pertanyaan teks pengguna"
   );
 
-  // 13. Ringkasan
+  // 13. Uji Ketersediaan dan Konsistensi Tekstur Wajah Rig Celyn
+  console.log("\n--- 13. Uji Integritas Aset Tekstur Rigging Celyn ---");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig.png"), "Aset tekstur torso default ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_closed.png"), "Aset tekstur mata terpejam ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_sad.png"), "Aset tekstur wajah sedih / empati alami ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_sad_closed.png"), "Aset tekstur sedih mata terpejam ada");
+
+  // 14. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

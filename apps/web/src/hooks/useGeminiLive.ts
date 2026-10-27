@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
-import { getStoredAuthPassword } from "./useAuth";
+import { getStoredAuthPassword, getStoredAuthMode } from "./useAuth";
 import {
   ClientMessage,
   ServerMessage,
@@ -658,7 +658,11 @@ export function useGeminiLive({
               turns: [
                 {
                   role: "user",
-                  parts: [{ text: buildContextualGreetingPrompt() }],
+                  parts: [
+                    {
+                      text: buildContextualGreetingPrompt(new Date(), getStoredAuthMode()),
+                    },
+                  ],
                 },
               ],
               turnComplete: true,
@@ -701,10 +705,11 @@ export function useGeminiLive({
 
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const authPass = getStoredAuthPassword() || "admin";
+    const authMode = getStoredAuthMode();
     const voiceQuery = selectedVoice ? `&voice=${encodeURIComponent(selectedVoice)}` : "";
     const wsUrl =
       envWs ||
-      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}${voiceQuery}`;
+      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}&authMode=${authMode}${voiceQuery}`;
 
     let opened = false;
     const ws = new WebSocket(wsUrl);
