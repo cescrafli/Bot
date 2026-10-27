@@ -10,6 +10,7 @@ import {
   inferEmotionFromText,
   inferUserEmotion,
   buildContextualGreetingPrompt,
+  buildCelynSystemPrompt,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
@@ -286,7 +287,16 @@ export function useGeminiLive({
           // Auto-emotion inference jika LLM belum memanggil tool set_expression
           if (!directExplicitEmotionRef.current) {
             const detected = inferEmotionFromText(sentence);
-            if (
+            // Jika sebelumnya 'sad' dan kalimat berikutnya netral/penyemangat, pulihkan segera ke neutral
+            if (directCurrentEmotionRef.current === "sad" && detected === "neutral") {
+              directCurrentEmotionRef.current = "neutral";
+              handleServerMessage({
+                type: "tool_call",
+                id: "auto_relax_sad",
+                name: "set_expression",
+                args: { emotion: "neutral" },
+              });
+            } else if (
               detected !== "neutral" &&
               detected !== directCurrentEmotionRef.current
             ) {
@@ -328,7 +338,7 @@ export function useGeminiLive({
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           systemInstruction: {
-            parts: [{ text: CELYN_SYSTEM_PROMPT }],
+            parts: [{ text: buildCelynSystemPrompt(getStoredAuthMode()) }],
           },
           tools: [
             {
@@ -512,7 +522,10 @@ export function useGeminiLive({
                 return updated;
               });
 
+              // Kembalikan ekspresi wajah secara rileks ke netral setelah selesai bicara
+              // Untuk ekspresi 'sad', pulihkan lebih cepat (~2200ms) agar wajah tidak murung terlalu lama
               if (directRelaxTimerRef.current) clearTimeout(directRelaxTimerRef.current);
+              const relaxDelay = directCurrentEmotionRef.current === "sad" ? 2200 : 4500;
               directRelaxTimerRef.current = window.setTimeout(() => {
                 if (
                   directSessionRef.current &&
@@ -526,7 +539,7 @@ export function useGeminiLive({
                     args: { emotion: "neutral" },
                   });
                 }
-              }, 4500);
+              }, relaxDelay);
 
               if (useEdgeTts) {
                 flushDirectSentences(true);

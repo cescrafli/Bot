@@ -418,9 +418,19 @@ export function inferIndonesianProsody(
       volume = "+3%";
       break;
     case "sad":
-      rate = "-2%";
-      pitch = "-1Hz";
-      volume = "-2%";
+      // Kalimat empati menenangkan & memberi semangat lembut ("Iyaaa, yang sabar yaa...")
+      // Menggunakan intonasi hangat, tenang, dan stabil (pitch +0Hz, tidak tinggi dan tidak murung)
+      if (
+        /\b(sabar ya|iyaaa|iyaa|tetap semangat|semangat ya|istirahat dulu|tenang ya|jangan sedih|jangan dipikirin|aku temani|aku dengerin|pelan-pelan|tarik napas)\b/i.test(text)
+      ) {
+        rate = "+0%";
+        pitch = "+0Hz";
+        volume = "+0%";
+      } else {
+        rate = "-2%";
+        pitch = "-1Hz";
+        volume = "-2%";
+      }
       break;
     case "neutral":
     default:

@@ -11,6 +11,7 @@ import {
   inferUserEmotion,
   normalizeEmotion,
   buildContextualGreetingPrompt,
+  buildCelynSystemPrompt,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
@@ -97,7 +98,7 @@ export class GeminiSession {
           systemInstruction: {
             parts: [
               {
-                text: CELYN_SYSTEM_PROMPT,
+                text: buildCelynSystemPrompt(this.authMode),
               },
             ],
           },
@@ -289,7 +290,16 @@ export class GeminiSession {
       // Auto-emotion inference dari teks jika LLM belum memanggil tool set_expression
       if (!this.explicitEmotionUsedInTurn) {
         const detected = inferEmotionFromText(sentence);
-        if (detected !== "neutral" && detected !== this.currentEmotion) {
+        // Jika sebelumnya 'sad' dan kalimat berikutnya netral/penyemangat, pulihkan segera ke neutral
+        if (this.currentEmotion === "sad" && detected === "neutral") {
+          this.currentEmotion = "neutral";
+          this.sendToClient({
+            type: "tool_call",
+            id: "auto_relax_sad",
+            name: "set_expression",
+            args: { emotion: "neutral" },
+          });
+        } else if (detected !== "neutral" && detected !== this.currentEmotion) {
           this.currentEmotion = detected;
           this.sendToClient({
             type: "tool_call",
@@ -487,8 +497,10 @@ export class GeminiSession {
       this.isFirstChunkInTurn = true;
       this.explicitEmotionUsedInTurn = false;
 
-      // Kembalikan ekspresi wajah secara rileks ke netral setelah beberapa detik selesai bicara
+      // Kembalikan ekspresi wajah secara rileks ke netral setelah selesai bicara
+      // Untuk ekspresi 'sad', pulihkan lebih cepat (~2200ms) agar wajah tidak murung terlalu lama
       if (this.relaxEmotionTimer) clearTimeout(this.relaxEmotionTimer);
+      const relaxDelay = this.currentEmotion === "sad" ? 2200 : 4500;
       this.relaxEmotionTimer = setTimeout(() => {
         if (this.state === "ACTIVE" && this.currentEmotion !== "neutral") {
           this.currentEmotion = "neutral";
@@ -499,7 +511,7 @@ export class GeminiSession {
             args: { emotion: "neutral" },
           });
         }
-      }, 4500);
+      }, relaxDelay);
 
       if (this.useEdgeTts) {
         this.flushCompleteSentences(true);

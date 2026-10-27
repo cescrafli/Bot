@@ -8,6 +8,7 @@ import {
   VOICE_OPTIONS,
   isNativeGeminiVoice,
   CELYN_SYSTEM_PROMPT,
+  buildCelynSystemPrompt,
   extractIndonesianSentences,
   inferEmotionFromText,
   inferUserEmotion,
@@ -289,6 +290,13 @@ async function runTtsTests() {
     `Intonasi nada tanya dinaikkan +2Hz untuk keluwesan vokal pertanyaan Indonesia`
   );
 
+  // Uji Prosodi Kalimat Empati Menenangkan (Iyaaa, yang sabar yaa...)
+  const prosodyComfort = inferIndonesianProsody("Iyaaa, yang sabar yaa...", "sad");
+  assert(
+    prosodyComfort.pitch === "+0Hz" && prosodyComfort.rate === "+0%",
+    "Prosodi kalimat empati menenangkan ('Iyaaa, yang sabar yaa...') bernada stabil & hangat (pitch +0Hz, tidak tinggi)"
+  );
+
   // Uji Sapaan Kontekstual Waktu (Pagi / Siang / Sore / Malam)
   const morningGreeting = buildContextualGreetingPrompt(new Date("2026-10-25T08:00:00"));
   const nightGreeting = buildContextualGreetingPrompt(new Date("2026-10-25T21:00:00"));
@@ -297,10 +305,35 @@ async function runTtsTests() {
     `Sapaan pembuka dinamis menyesuaikan waktu pengguna (${morningGreeting.slice(0, 35)}...)`
   );
 
-  // Uji Aturan Identitas & Pencipta Celyn
+  // Uji Persona Identitas Khusus Mode Admin ('jocelyn' / Password 'admin')
+  const promptJocelyn = buildCelynSystemPrompt("jocelyn");
   assert(
-    CELYN_SYSTEM_PROMPT.includes("Aku Celyn, aku adalah AI yang merupakan referensi dari orang terkasih Rafli."),
-    "System prompt memuat jawaban identitas wajib: 'Aku Celyn, aku adalah AI yang merupakan referensi dari orang terkasih Rafli.'"
+    promptJocelyn.includes("Pembuat saya adalah Rafli, yang menggunakan referensi orang terkasih."),
+    "Mode admin memuat jawaban pembuat: 'Pembuat saya adalah Rafli, yang menggunakan referensi orang terkasih.'"
+  );
+  assert(
+    promptJocelyn.includes("menekuni di bidang rekan profesional tapi terkadang perasa. Pembuat saya menciptakan saya untuk selalu dapat menyemangati orang terkasihnya"),
+    "Mode admin memuat kisah orang terkasih: rekan profesional, terkadang perasa, dan diciptakan untuk menyemangatinya"
+  );
+
+  // Uji Persona Identitas Khusus Mode Login ('default' / Password 'login')
+  const promptDefault = buildCelynSystemPrompt("default");
+  assert(
+    promptDefault.includes("Aku dibuat oleh Rafli.") && promptDefault.includes("teman ngobrol visual AI"),
+    "Mode login memuat persona umum AI teman ngobrol buatan Rafli"
+  );
+  assert(
+    !promptDefault.includes("orang terkasih dari pembuat saya") &&
+    !promptDefault.includes("rekan profesional tapi terkadang perasa") &&
+    promptDefault.includes("JANGAN PERNAH menyebut frasa \"orang terkasih\", profesi \"rekan profesional\", atau sifat \"perasa\""),
+    "Mode login merahasiakan kisah orang terkasih, rekan profesional, dan perasa"
+  );
+
+  // Uji Instruksi Wajah Sedih Singkat & Intonasi Menenangkan pada System Prompt
+  assert(
+    promptDefault.includes("Jangan biarkan wajah sedih bertahan terlalu lama") &&
+    promptDefault.includes("Iyaaa, yang sabar yaa..."),
+    "System prompt memuat instruksi wajah sedih singkat dan intonasi menenangkan ('Iyaaa, yang sabar yaa...')"
   );
 
   // Uji Sapaan Khusus Jocelyn (Password 'admin') vs Normal (Password 'login')
