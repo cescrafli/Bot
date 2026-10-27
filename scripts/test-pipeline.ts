@@ -323,6 +323,13 @@ async function runTtsTests() {
     promptJocelyn.toLowerCase().includes("bebas berbicara lebih panjang, mengalir, dan hangat"),
     "Mode admin membebaskan panjang kalimat basa-basi (tidak dibatasi 1-2 kalimat pendek)"
   );
+  assert(
+    promptJocelyn.includes("dikasihi") &&
+    promptJocelyn.includes("penuh kasih") &&
+    !promptJocelyn.includes("disayangi Rafli") &&
+    !promptJocelyn.includes("orang yang dia sayang"),
+    "Mode admin menggunakan terminologi 'dikasihi' / 'penuh kasih' alih-alih 'disayang'"
+  );
 
   // Uji Persona Identitas Khusus Mode Login ('default' / Password 'login')
   const promptDefault = buildCelynSystemPrompt("default");
