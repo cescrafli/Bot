@@ -365,9 +365,12 @@ async function runTtsTests() {
   );
   assert(
     promptDefault.includes("software engineer") &&
-    promptDefault.includes("Gemini") &&
-    promptJocelyn.includes("software engineer"),
-    "Prompt menjelaskan bahwa Rafli adalah software engineer yang memprogram Celyn dengan integrasi Gemini"
+    promptJocelyn.includes("software engineer") &&
+    !promptDefault.includes("Gemini") &&
+    !promptDefault.includes("Google") &&
+    !promptJocelyn.includes("Gemini") &&
+    !promptJocelyn.includes("Google"),
+    "Prompt bebas 100% dari pembahasan Gemini/Google dan murni memuat Rafli sebagai software engineer pembuat Celyn"
   );
   assert(
     promptDefault.includes("Sesuaikan panjang jawaban secara adaptif"),
