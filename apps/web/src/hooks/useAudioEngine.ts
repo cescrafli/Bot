@@ -194,17 +194,20 @@ export function useAudioEngine({
     };
   }, [onVolumeChange, onIntonationChange]);
 
-  // Mengubah Int16Array PCM ke Base64
+  // Mengubah Int16Array PCM ke Base64 dengan chunked batch encoding (minim alokasi heap GC)
   const int16ToBase64 = (int16Array: Int16Array): string => {
     const uint8Array = new Uint8Array(
       int16Array.buffer,
       int16Array.byteOffset,
       int16Array.byteLength
     );
+    const CHUNK_SIZE = 0x8000;
     let binary = "";
-    const len = uint8Array.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(uint8Array[i]);
+    for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
+      binary += String.fromCharCode.apply(
+        null,
+        uint8Array.subarray(i, i + CHUNK_SIZE) as unknown as number[]
+      );
     }
     return btoa(binary);
   };

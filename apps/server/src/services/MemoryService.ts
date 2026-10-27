@@ -30,6 +30,13 @@ export class MemoryService {
   private sessionBuffers: Map<string, ChatMessage[]> = new Map();
   private isInitialized = false;
 
+  /**
+   * Status kesiapan koneksi dan skema database Turso.
+   */
+  isReady(): boolean {
+    return this.isInitialized && this.client !== null;
+  }
+
   private getClient(): Client | null {
     if (!this.client) {
       const url = process.env.TURSO_DATABASE_URL;

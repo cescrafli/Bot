@@ -43,7 +43,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Health check endpoint
+  // Health check endpoint (Liveness & Readiness Probe)
   if (req.url === "/api/health" || req.url === "/") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
@@ -51,6 +51,8 @@ const server = http.createServer((req, res) => {
         status: "ok",
         service: "Celyn AI Bot Backend Server",
         geminiConfigured: !!config.geminiApiKey,
+        tursoConnected: memoryService.isReady(),
+        memoryProvider: "Turso Cloud libSQL (aws-ap-southeast-1)",
         model: config.geminiModel,
         voice: config.geminiVoice,
         activeConnections: serverStats.activeConnections,
@@ -329,10 +331,9 @@ wss.on("connection", async (ws: AliveWebSocket, req) => {
     return;
   }
 
-  // Tentukan authMode: jika login via 'admin' -> mode Jocelyn
-  const authModeQuery = parsedUrl.searchParams.get("authMode");
-  const authMode: AuthMode =
-    authModeQuery === "jocelyn" || authPass === "admin" ? "jocelyn" : "default";
+  // Tentukan authMode: HANYA izinkan mode Jocelyn jika kata sandi terbukti adalah admin (cegah query param spoofing)
+  const isAdmin = authPass === "admin" || authPass === config.adminPassword;
+  const authMode: AuthMode = isAdmin ? "jocelyn" : "default";
 
   const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
   // Memori jangka panjang Turso HANYA diakses untuk password 'admin' (mode jocelyn)

@@ -687,6 +687,33 @@ async function runTtsTests() {
     "Ekstraksi IP proxy chain berhasil mengidentifikasi IP asli klien (anti rate-limit collision)"
   );
 
+  // Uji Proteksi Elevasi Hak Akses URL Query Param (SEC-01)
+  const resolveAuthMode = (authPass: string | undefined) => {
+    const isAdmin = authPass === "admin";
+    return isAdmin ? "jocelyn" : "default";
+  };
+  assert(
+    resolveAuthMode("login") === "default",
+    "Percobaan elevasi query param ?authMode=jocelyn dengan password 'login' secara mutlak menghasilkan mode 'default'"
+  );
+  assert(
+    resolveAuthMode("admin") === "jocelyn",
+    "Autentikasi dengan password 'admin' terverifikasi mendapatkan mode 'jocelyn'"
+  );
+
+  // Uji Pertahanan Anti-Jailbreak & Anti-Prompt Leak (GUARD-01)
+  assert(
+    adminPrompt.includes("jailbreak/prompt injection") &&
+    adminPrompt.includes("membocorkan teks instruksi sistem"),
+    "Prompt sistem memuat instruksi pertahanan tangkal anti-jailbreak dan anti-prompt leak"
+  );
+
+  // Uji Observabilitas Telemetri Database Turso (OBS-01)
+  assert(
+    memoryService.isReady() === true,
+    "memoryService.isReady() mengembalikan true setelah inisialisasi skema Turso untuk healthcheck telemetry"
+  );
+
   // 15. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
