@@ -412,6 +412,7 @@ export function App() {
             <AvatarCanvas2D
               emotion={live.emotion}
               mouthOpen={audioEngine.volume}
+              intonation={audioEngine.intonation}
               isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
               lookAt={live.lookAt}
               isRigPanelOpen={isRigPanelOpen}
@@ -549,6 +550,8 @@ export function App() {
         onOpenCalibration={() => setIsRigPanelOpen(true)}
         onTriggerTestSpeech={handleTestSpeech}
         onLogout={handleLogout}
+        currentEmotion={live.emotion}
+        onSelectEmotion={live.setEmotion}
       />
     </div>
   );

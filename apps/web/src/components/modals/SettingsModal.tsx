@@ -1,4 +1,5 @@
 import React from "react";
+import { EmotionType } from "@celyn/shared";
 import {
   X,
   Layers,
@@ -9,6 +10,7 @@ import {
   Keyboard,
   PowerOff,
   Lock,
+  Smile,
 } from "lucide-react";
 
 interface SettingsModalProps {
@@ -24,6 +26,8 @@ interface SettingsModalProps {
   onOpenCalibration: () => void;
   onTriggerTestSpeech?: () => void;
   onLogout: () => void;
+  currentEmotion?: EmotionType;
+  onSelectEmotion?: (emotion: EmotionType) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -39,6 +43,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenCalibration,
   onTriggerTestSpeech,
   onLogout,
+  currentEmotion,
+  onSelectEmotion,
 }) => {
   if (!isOpen) return null;
 
@@ -99,6 +105,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               Ganti ke {avatarMode === "2d" ? "3D" : "2D"}
             </button>
+          </div>
+
+          {/* Uji Coba Mimik Wajah & Emosi */}
+          <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2.5">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
+                <Smile className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-200">Uji Coba Mimik & Emosi</p>
+                <p className="text-[10px] text-slate-400">
+                  Uji perubahan mimik wajah & gerak tubuh 2.5D
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 pt-1">
+              {[
+                { id: "sad", label: "😢 Sedih / Empati" },
+                { id: "happy", label: "😊 Ceria / Senang" },
+                { id: "thinking", label: "🤔 Berpikir" },
+                { id: "surprised", label: "😲 Kaget" },
+                { id: "shy", label: "🥰 Tersipu" },
+                { id: "neutral", label: "✨ Netral / Siaga" },
+              ].map((emo) => (
+                <button
+                  key={emo.id}
+                  onClick={() => onSelectEmotion?.(emo.id as EmotionType)}
+                  className={`px-2 py-1.5 rounded-xl text-[11px] font-medium border transition-all cursor-pointer text-center ${
+                    currentEmotion === emo.id
+                      ? "bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm shadow-rose-500/20 font-semibold"
+                      : "bg-white/[0.02] text-slate-300 border-white/5 hover:border-white/20 hover:text-white"
+                  }`}
+                >
+                  {emo.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Tes Suara & Mulut */}

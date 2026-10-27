@@ -4,6 +4,7 @@ import { analyzeHumanVoiceFrame } from "@celyn/shared";
 interface UseAudioEngineOptions {
   onAudioChunk: (b64PCM16k: string) => void;
   onVolumeChange?: (rms: number) => void;
+  onIntonationChange?: (stress: number) => void;
   onBargeIn?: () => void;
   onAudioStreamEnd?: () => void;
 }
@@ -11,12 +12,14 @@ interface UseAudioEngineOptions {
 export function useAudioEngine({
   onAudioChunk,
   onVolumeChange,
+  onIntonationChange,
   onBargeIn,
   onAudioStreamEnd,
 }: UseAudioEngineOptions) {
   const [isMicActive, setIsMicActive] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0);
+  const [intonation, setIntonation] = useState(0);
 
   const isPlayingRef = useRef(false);
   useEffect(() => {
@@ -63,6 +66,7 @@ export function useAudioEngine({
   const masterGainRef = useRef<GainNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const lastVolumeRef = useRef<number>(0);
+  const lastIntonationRef = useRef<number>(0);
   const playbackEpochRef = useRef<number>(0);
   const decodeChainRef = useRef<Promise<void>>(Promise.resolve());
   const stopPlayingTimerRef = useRef<any>(null);
@@ -119,14 +123,18 @@ export function useAudioEngine({
   // Dilengkapi Deadband Filter untuk mencegah 60 FPS re-render berlebihan saat hening
   useEffect(() => {
     const dataArray = new Uint8Array(128);
+    const freqDataArray = new Uint8Array(128);
 
     const updateVolume = () => {
-      // Saat tidak memutar suara Celyn, kunci volume ke 0 tanpa trigger re-render
+      // Saat tidak memutar suara Celyn, kunci volume & intonasi ke 0 tanpa trigger re-render
       if (!isPlayingRef.current) {
-        if (lastVolumeRef.current !== 0) {
+        if (lastVolumeRef.current !== 0 || lastIntonationRef.current !== 0) {
           lastVolumeRef.current = 0;
+          lastIntonationRef.current = 0;
           setVolume(0);
+          setIntonation(0);
           onVolumeChange?.(0);
+          onIntonationChange?.(0);
         }
         animFrameRef.current = requestAnimationFrame(updateVolume);
         return;
@@ -157,6 +165,25 @@ export function useAudioEngine({
           setVolume(smoothed);
           onVolumeChange?.(smoothed);
         }
+
+        // ⚡ Analisis Spectral Flux & Intonation Stress untuk gerak aksentuasi vokal
+        analyserRef.current.getByteFrequencyData(freqDataArray);
+        let midEnergy = 0;
+        for (let i = 3; i < 24; i++) {
+          midEnergy += freqDataArray[i];
+        }
+        const avgMid = midEnergy / 21 / 255;
+        // Lonjakan energi vokal terhadap rata-rata = penekanan intonasi kata
+        const stress = Math.min(1, Math.max(0, (avgMid - 0.12) * 2.4));
+        const smoothedStress = lastIntonationRef.current * 0.65 + stress * 0.35;
+        if (
+          Math.abs(smoothedStress - lastIntonationRef.current) > 0.02 ||
+          (smoothedStress === 0 && lastIntonationRef.current > 0)
+        ) {
+          lastIntonationRef.current = smoothedStress;
+          setIntonation(smoothedStress);
+          onIntonationChange?.(smoothedStress);
+        }
       }
       animFrameRef.current = requestAnimationFrame(updateVolume);
     };
@@ -165,7 +192,7 @@ export function useAudioEngine({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [onVolumeChange]);
+  }, [onVolumeChange, onIntonationChange]);
 
   // Mengubah Int16Array PCM ke Base64
   const int16ToBase64 = (int16Array: Int16Array): string => {
@@ -671,6 +698,7 @@ export function useAudioEngine({
     isMicActive,
     isPlaying,
     volume,
+    intonation,
     unlockAudio,
     startMic,
     stopMic,

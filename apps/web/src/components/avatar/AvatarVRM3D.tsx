@@ -133,17 +133,39 @@ export const AvatarVRM3D: React.FC<AvatarVRM3DProps> = ({
               : 0;
           vrmRef.current.expressionManager.setValue("aa", filteredMouth);
           vrmRef.current.expressionManager.setValue("blink", blinkVal);
-          vrmRef.current.expressionManager.setValue("happy", curEmotion === "happy" ? 0.8 : 0);
-          vrmRef.current.expressionManager.setValue("surprised", curEmotion === "surprised" ? 0.8 : 0);
-          vrmRef.current.expressionManager.setValue("sad", curEmotion === "sad" ? 0.8 : 0);
+          vrmRef.current.expressionManager.setValue("happy", curEmotion === "happy" ? 0.85 : 0);
+          vrmRef.current.expressionManager.setValue("surprised", curEmotion === "surprised" ? 0.85 : 0);
+          vrmRef.current.expressionManager.setValue("sad", curEmotion === "sad" ? 0.85 : 0);
+          vrmRef.current.expressionManager.setValue("relaxed", curEmotion === "thinking" || curEmotion === "shy" ? 0.7 : 0);
           vrmRef.current.expressionManager.update();
         }
 
-        // Procedural spine breathing & idle motion
+        // Procedural humanoid bone posing (head nod, spine slump, idle motion)
         const spineNode = vrmRef.current.humanoid?.getNormalizedBoneNode("spine");
         if (spineNode) {
-          spineNode.rotation.x = Math.sin(elapsedTime * 1.8) * 0.018;
+          const slumpBonus = curEmotion === "sad" ? 0.08 : curEmotion === "happy" ? -0.04 : 0;
+          spineNode.rotation.x = Math.sin(elapsedTime * 1.8) * 0.018 + slumpBonus;
           spineNode.rotation.y = curLookAt ? (curLookAt.x - 0.5) * 0.12 : 0;
+        }
+
+        const headNode = vrmRef.current.humanoid?.getNormalizedBoneNode("head");
+        if (headNode) {
+          if (curEmotion === "sad") {
+            headNode.rotation.x = 0.15; // menunduk sayu
+            headNode.rotation.z = -0.05;
+          } else if (curEmotion === "thinking") {
+            headNode.rotation.z = 0.12; // miring berpikir
+            headNode.rotation.x = -0.08;
+          } else if (curEmotion === "happy") {
+            headNode.rotation.x = Math.sin(elapsedTime * 3.0) * 0.04 - 0.03;
+            headNode.rotation.z = 0;
+          } else if (curEmotion === "shy") {
+            headNode.rotation.x = 0.1;
+            headNode.rotation.y = -0.12;
+          } else {
+            headNode.rotation.x = 0;
+            headNode.rotation.z = 0;
+          }
         }
 
         // Update LookAt tatapan mata / kepala

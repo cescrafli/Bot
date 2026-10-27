@@ -7,6 +7,7 @@ import {
   ServerMessage,
   EmotionType,
   inferEmotionFromText,
+  inferUserEmotion,
   normalizeEmotion,
   buildContextualGreetingPrompt,
   CELYN_SYSTEM_PROMPT,
@@ -108,7 +109,7 @@ export class GeminiSession {
                     properties: {
                       emotion: {
                         type: Type.STRING,
-                        enum: ["neutral", "happy", "thinking", "surprised", "sad"],
+                        enum: ["neutral", "happy", "thinking", "surprised", "sad", "shy"],
                       },
                       intensity: { type: Type.NUMBER },
                     },
@@ -375,11 +376,24 @@ export class GeminiSession {
           speaker: "user",
           text: userText,
         });
-        // ⚡ Berikan feedback visual seketika bahwa ucapan telah didengar dan sedang diproses
+
+        // ⚡ Deteksi nada & emosi suara pengguna secara real-time
+        const userEmotion = inferUserEmotion(userText);
+        if (userEmotion.emotion !== "neutral") {
+          this.currentEmotion = userEmotion.suggestedCelynEmotion;
+          this.sendToClient({
+            type: "tool_call",
+            id: `user_tone_${Date.now()}`,
+            name: "set_expression",
+            args: { emotion: userEmotion.suggestedCelynEmotion },
+          });
+        }
+
+        // ⚡ Berikan feedback visual seketika bahwa ucapan telah didengar dan direspons
         this.sendToClient({
           type: "status",
           status: "thinking",
-          message: "Celyn sedang menyimak & merangkai jawaban...",
+          message: userEmotion.statusMessage,
         });
       }
     }
@@ -606,10 +620,23 @@ export class GeminiSession {
         this.isBargeInMuted = false;
         this.hasPendingToolCall = false;
         this.cancelPendingTts();
+
+        // ⚡ Deteksi nada & emosi teks pengguna secara instan (zero-latency empathy)
+        const userEmotion = inferUserEmotion(msg.text);
+        if (userEmotion.emotion !== "neutral") {
+          this.currentEmotion = userEmotion.suggestedCelynEmotion;
+          this.sendToClient({
+            type: "tool_call",
+            id: `user_text_tone_${Date.now()}`,
+            name: "set_expression",
+            args: { emotion: userEmotion.suggestedCelynEmotion },
+          });
+        }
+
         this.sendToClient({
           type: "status",
           status: "thinking",
-          message: "Celyn sedang menyimak & merangkai jawaban...",
+          message: userEmotion.statusMessage,
         });
         // Sertakan direktif verbal eksplisit agar model native audio selalu menghasilkan jawaban suara lisan
         const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;

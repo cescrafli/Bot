@@ -8,6 +8,7 @@ import {
   LookAtTarget,
   normalizeEmotion,
   inferEmotionFromText,
+  inferUserEmotion,
   buildContextualGreetingPrompt,
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
@@ -346,6 +347,7 @@ export function useGeminiLive({
                           "thinking",
                           "surprised",
                           "sad",
+                          "shy",
                         ],
                       },
                       intensity: { type: Type.NUMBER },
@@ -394,10 +396,23 @@ export function useGeminiLive({
                   speaker: "user",
                   text: userText,
                 });
+
+                // ⚡ Analisis nada emosi ucapan pengguna seketika
+                const userEmotion = inferUserEmotion(userText);
+                if (userEmotion.emotion !== "neutral") {
+                  directCurrentEmotionRef.current = userEmotion.suggestedCelynEmotion;
+                  handleServerMessage({
+                    type: "tool_call",
+                    id: `user_tone_${Date.now()}`,
+                    name: "set_expression",
+                    args: { emotion: userEmotion.suggestedCelynEmotion },
+                  });
+                }
+
                 handleServerMessage({
                   type: "status",
                   status: "thinking",
-                  message: "Celyn sedang menyimak & merangkai jawaban...",
+                  message: userEmotion.statusMessage,
                 });
               }
             }
@@ -815,10 +830,21 @@ export function useGeminiLive({
           directTtsTurnIdRef.current++;
           directTtsBufferRef.current = "";
           backupPcmChunksRef.current = [];
+          const userEmotion = inferUserEmotion(msg.text);
+          if (userEmotion.emotion !== "neutral") {
+            directCurrentEmotionRef.current = userEmotion.suggestedCelynEmotion;
+            handleServerMessage({
+              type: "tool_call",
+              id: `user_text_tone_${Date.now()}`,
+              name: "set_expression",
+              args: { emotion: userEmotion.suggestedCelynEmotion },
+            });
+          }
+
           handleServerMessage({
             type: "status",
             status: "thinking",
-            message: "Celyn sedang menyimak & merangkai jawaban...",
+            message: userEmotion.statusMessage,
           });
           const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;
           await session.sendClientContent({
@@ -916,6 +942,7 @@ export function useGeminiLive({
     modelInfo,
     connectionLabel,
     emotion,
+    setEmotion,
     lookAt,
     transcripts,
     connect,

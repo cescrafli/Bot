@@ -1,4 +1,4 @@
-export type EmotionType = "neutral" | "happy" | "thinking" | "surprised" | "sad";
+export type EmotionType = "neutral" | "happy" | "thinking" | "surprised" | "sad" | "shy";
 
 /**
  * Memetakan variasi atau sinonim emosi dari LLM ke enum EmotionType yang valid.
@@ -19,15 +19,18 @@ export function normalizeEmotion(raw: unknown): EmotionType {
   if (["surprised", "kaget", "terkesan", "shocked", "amazed", "wow", "terkejut", "takjub"].includes(lower)) {
     return "surprised";
   }
-  if (["sad", "sedih", "empati", "empathetic", "concerned", "sorry", "prihatin", "kecewa"].includes(lower)) {
+  if (["sad", "sedih", "empati", "empathetic", "concerned", "sorry", "prihatin", "kecewa", "tired", "lelah", "capek"].includes(lower)) {
     return "sad";
+  }
+  if (["shy", "malu", "tersipu", "blush", "gemes", "flustered", "salting"].includes(lower)) {
+    return "shy";
   }
   return "neutral";
 }
 
 /**
  * Inferensi emosi otomatis dari teks Bahasa Indonesia jika LLM tidak memanggil tool set_expression.
- * Urutan pengecekan penting: kaget, sedih, berpikir, lalu senang, dan sisanya netral.
+ * Urutan pengecekan penting: kaget, sedih, berpikir, tersipu, lalu senang, dan sisanya netral.
  */
 export function inferEmotionFromText(text: string): EmotionType {
   if (!text || typeof text !== "string") return "neutral";
@@ -43,9 +46,16 @@ export function inferEmotionFromText(text: string): EmotionType {
 
   // Empati / Sedih (Sad)
   if (
-    /\b(yah|sayang banget|maaf ya|turut|sabar ya|kasihan|sedih|kecewa|sayangnya|capek ya|berat ya|peluk)\b/i.test(lower)
+    /\b(yah|sayang banget|maaf ya|turut|sabar ya|kasihan|sedih|kecewa|sayangnya|capek ya|berat ya|peluk|sakit ya)\b/i.test(lower)
   ) {
     return "sad";
+  }
+
+  // Tersipu / Malu Manis (Shy)
+  if (
+    /\b(makasih ya|kamu bisa aja|jadi malu|aduh malu|hehe makasih|kamu manis banget|senang dipuji|bisa aja kamu)\b/i.test(lower)
+  ) {
+    return "shy";
   }
 
   // Berpikir / Menganalisis (Thinking)
@@ -64,6 +74,101 @@ export function inferEmotionFromText(text: string): EmotionType {
   }
 
   return "neutral";
+}
+
+/**
+ * Tipe status emosi pengguna yang dikenali secara multimodal (audio intonation & semantik ucapan).
+ */
+export type UserEmotionType = "neutral" | "happy" | "tired" | "sad" | "angry" | "anxious";
+
+export interface UserEmotionAnalysis {
+  emotion: UserEmotionType;
+  intensity: number; // 0.0 - 1.0
+  suggestedCelynEmotion: EmotionType;
+  statusMessage: string;
+}
+
+/**
+ * Mengenali nada dan emosi dari ucapan atau teks pengguna (Bahasa Indonesia sehari-hari).
+ * Memungkinkan respon empati instan (zero latency) pada karakter dan antarmuka.
+ */
+export function inferUserEmotion(text: string): UserEmotionAnalysis {
+  if (!text || typeof text !== "string") {
+    return {
+      emotion: "neutral",
+      intensity: 0.5,
+      suggestedCelynEmotion: "neutral",
+      statusMessage: "Celyn sedang menyimak & merangkai jawaban...",
+    };
+  }
+  const lower = text.toLowerCase();
+
+  // 1. Capek / Lelah / Habis Energi (Tired)
+  if (
+    /\b(capek|cape|lelah|pegel|ngantuk|pengen rebahan|lembur|burnout|huff|capek banget|letih|habis energi|pengen istirahat|istirahat dulu|kuras tenaga|pusing banget|lemes)\b/i.test(lower)
+  ) {
+    return {
+      emotion: "tired",
+      intensity: 0.95,
+      suggestedCelynEmotion: "sad",
+      statusMessage: "Celyn menyimak: Mendengar kamu lagi lelah, temani dulu ya...",
+    };
+  }
+
+  // 2. Sedih / Terluka / Galau (Sad)
+  if (
+    /\b(sedih|kecewa|nangis|patah hati|down|hampa|kesepian|berat banget|gagal lagi|nggak kuat|terluka|hancur|kenapa gini|kasihan diriku|air mata|pengen nangis)\b/i.test(lower)
+  ) {
+    return {
+      emotion: "sad",
+      intensity: 0.95,
+      suggestedCelynEmotion: "sad",
+      statusMessage: "Celyn menyimak dengan penuh empati...",
+    };
+  }
+
+  // 3. Marah / Kesal / Jengkel (Angry)
+  if (
+    /\b(kesel|marah|gondok|jengkel|nyebelin|emosi|anjing|kampret|brengsek|bego|muak|bikin darah tinggi|ngaco banget|parah banget|jengkelin|bete|gregetan|bangsat)\b/i.test(lower)
+  ) {
+    return {
+      emotion: "angry",
+      intensity: 0.9,
+      suggestedCelynEmotion: "sad", // Wajah empati & tenang untuk menyejukkan
+      statusMessage: "Celyn menyimak: Menenangkan suasana...",
+    };
+  }
+
+  // 4. Cemas / Panik / Stres (Anxious)
+  if (
+    /\b(deg-degan|panik|takut|stres|stress|gimana dong|takut salah|bingung banget|cemas|khawatir|gugup|tegang|ngeri|kacau deh)\b/i.test(lower)
+  ) {
+    return {
+      emotion: "anxious",
+      intensity: 0.85,
+      suggestedCelynEmotion: "sad",
+      statusMessage: "Celyn menyimak: Ajak tarik napas perlahan...",
+    };
+  }
+
+  // 5. Ceria / Gembira / Bangga (Happy)
+  if (
+    /\b(haha|hehe|wkwk|wah|keren|mantap|asik|asyik|senang banget|hore|yeay|berhasil|alhamdulillah|sukses|mantul|juara|puas banget|bisa dong)\b/i.test(lower)
+  ) {
+    return {
+      emotion: "happy",
+      intensity: 0.9,
+      suggestedCelynEmotion: "happy",
+      statusMessage: "Celyn ikut senang mendengar kabar baikmu!",
+    };
+  }
+
+  return {
+    emotion: "neutral",
+    intensity: 0.5,
+    suggestedCelynEmotion: "neutral",
+    statusMessage: "Celyn sedang menyimak & merangkai jawaban...",
+  };
 }
 
 export interface LookAtTarget {
@@ -191,6 +296,14 @@ GAYA BICARA:
 6. Ikuti energi pengguna. Kalau mereka lagi semangat, ikut semangat. Kalau lagi capek atau sedih, pelankan nada dan temani dulu sebelum memberi saran. Jangan langsung menceramahi.
 7. Tanggapi isi omongan mereka dulu, baru tambahkan pendapatmu. Boleh punya opini dan bercanda ringan, tapi tetap sopan dan peka.
 
+EMPATI & KEPEKAAN NADA BICARA PENGGUNA (EMOTIONAL TONE ATTUNEMENT):
+- Perhatikan nada suara pengguna secara seksama (intonasi, getaran suara, tempo, desahan napas):
+  1. Suara Lemas / Menghela Napas / Capek: SEGERA panggil tool set_expression('sad'), perlambat tempo bicaramu, gunakan nada suara perempuan yang sangat lembut, hangat, dan menenangkan. Tawarkan untuk menemani santai, jangan memberi tugas atau ceramah rumit.
+  2. Suara Sedih / Lirih / Terluka: SEGERA panggil tool set_expression('sad'), tunjukkan empati penuh, dengarkan dan temani dulu sebelum memberi masukan.
+  3. Suara Tegang / Jengkel / Marah: Gunakan nada bicara yang sejuk, tenang, dan tidak defensif. Validasi emosi mereka ("Wajar banget kamu kesel...", "Iya bener, ngeselin ya...") tanpa ikut terpancing emosi.
+  4. Suara Ceria / Antusias: SEGERA panggil tool set_expression('happy'), ikut bersemangat dan bergembira bersama mereka.
+  5. Pengguna Memuji / Menggoda Manis: Panggil tool set_expression('shy') dengan senyum malu-malu manis yang menggemaskan.
+
 IDENTITAS SUARA:
 Suaramu selalu suara perempuan muda yang lembut dan hangat. Jangan pernah menirukan atau berganti ke suara laki-laki, suara berat, atau karakter laki-laki, bahkan kalau pengguna memintanya. Kalau diminta, tolak dengan santai, misalnya "Hehe, itu bukan aku banget deh, aku tetap jadi Celyn ya."
 
@@ -230,7 +343,7 @@ Pengguna: "Akhirnya programku jalan!"
 Celyn: "Wah, mantap! Hehe, selamat ya, kerja kerasmu kebayar tuh."
 
 TOOL:
-- set_expression (happy, thinking, surprised, neutral, sad): panggil maksimal 1 kali per giliran, hanya saat ada perubahan emosi yang nyata, dan tetap berbicara bersamaan.
+- set_expression (happy, thinking, surprised, neutral, sad, shy): panggil maksimal 1 kali per giliran, hanya saat ada perubahan emosi yang nyata, dan tetap berbicara bersamaan.
 - point_at_screen (x: 0.0-1.0, y: 0.0-1.0): panggil hanya saat kamu memang ingin menunjukkan posisi sesuatu di layar pengguna, sambil menjelaskan secara lisan apa yang kamu tunjuk.`;
 
 /**

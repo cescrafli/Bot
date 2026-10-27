@@ -10,6 +10,7 @@ import {
   CELYN_SYSTEM_PROMPT,
   extractIndonesianSentences,
   inferEmotionFromText,
+  inferUserEmotion,
   inferIndonesianProsody,
   normalizeSpokenIndonesian,
   cleanAndEscapeForSsml,
@@ -94,7 +95,7 @@ const tools = [
     parameters: {
       type: "OBJECT",
       properties: {
-        emotion: { enum: ["neutral", "happy", "thinking", "surprised", "sad"] },
+        emotion: { enum: ["neutral", "happy", "thinking", "surprised", "sad", "shy"] },
       },
       required: ["emotion"],
     },
@@ -117,13 +118,28 @@ assert(tools[0].name === "set_expression", "Tool 'set_expression' tersedia");
 assert(tools[1].name === "point_at_screen", "Tool 'point_at_screen' tersedia");
 
 // 4. Uji Normalisasi & Pemetaan Sinonim Emosi Avatar
-console.log("\n--- 4. Uji Normalisasi Emosi Avatar ---");
+console.log("\n--- 4. Uji Normalisasi Emosi Avatar & Deteksi Emosi Pengguna ---");
 assert(normalizeEmotion("happy") === "happy", "Pemetaan 'happy' -> 'happy'");
 assert(normalizeEmotion("senang") === "happy", "Pemetaan sinonim bahasa Indonesia 'senang' -> 'happy'");
 assert(normalizeEmotion("mikir") === "thinking", "Pemetaan sinonim bahasa Indonesia 'mikir' -> 'thinking'");
 assert(normalizeEmotion("kaget") === "surprised", "Pemetaan sinonim bahasa Indonesia 'kaget' -> 'surprised'");
 assert(normalizeEmotion("sedih") === "sad", "Pemetaan sinonim bahasa Indonesia 'sedih' -> 'sad'");
+assert(normalizeEmotion("tersipu") === "shy", "Pemetaan sinonim bahasa Indonesia 'tersipu' -> 'shy'");
+assert(normalizeEmotion("malu") === "shy", "Pemetaan sinonim bahasa Indonesia 'malu' -> 'shy'");
 assert(normalizeEmotion("unknown_random_string") === "neutral", "Fallback emosi yang tidak dikenal -> 'neutral'");
+
+// 4.1 Uji Deteksi Nada & Emosi Pengguna (inferUserEmotion)
+const tiredAnalysis = inferUserEmotion("Hari ini capek banget kerjaan numpuk");
+assert(tiredAnalysis.emotion === "tired" && tiredAnalysis.suggestedCelynEmotion === "sad", "Deteksi nada capek/lelah berhasil (sugesti emosi Celyn: sad/empati)");
+
+const sadAnalysis = inferUserEmotion("Aku lagi sedih dan kecewa banget...");
+assert(sadAnalysis.emotion === "sad" && sadAnalysis.suggestedCelynEmotion === "sad", "Deteksi nada sedih/galau berhasil");
+
+const angryAnalysis = inferUserEmotion("Gila kesel banget gue sama dia!");
+assert(angryAnalysis.emotion === "angry" && angryAnalysis.suggestedCelynEmotion === "sad", "Deteksi nada marah/kesal berhasil (Celyn menenangkan)");
+
+const happyAnalysis = inferUserEmotion("Wah keren banget akhirnya berhasil!");
+assert(happyAnalysis.emotion === "happy" && happyAnalysis.suggestedCelynEmotion === "happy", "Deteksi nada gembira berhasil (Celyn ikut ceria)");
 
 // 5. Uji Katalog Multi-Voice Native Gemini & Sintesis Edge Neural
 async function runTtsTests() {

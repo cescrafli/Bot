@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { EmotionType, LookAtTarget } from "@celyn/shared";
 import { Sparkles, HelpCircle, Smile, AlertCircle, Heart, Sliders } from "lucide-react";
+import { AvatarFaceOverlay } from "./AvatarFaceOverlay";
 import {
   RigCalibrationPanel,
   RigConfig,
@@ -10,6 +11,7 @@ import {
 interface AvatarCanvas2DProps {
   emotion: EmotionType;
   mouthOpen: number; // 0.0 - 1.0 (RMS amplitude)
+  intonation?: number; // 0.0 - 1.0 (vocal emphasis & stress)
   isSpeaking: boolean;
   lookAt: LookAtTarget | null;
   isRigPanelOpen?: boolean;
@@ -19,6 +21,7 @@ interface AvatarCanvas2DProps {
 export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   emotion,
   mouthOpen,
+  intonation = 0,
   isSpeaking,
   lookAt,
   isRigPanelOpen: externalRigPanelOpen,
@@ -86,10 +89,10 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   }, [toggleRigPanel]);
 
   // Simpan props & config terbaru dalam ref agar loop 60 FPS membacanya langsung tanpa re-render React
-  const propsRef = useRef({ emotion, mouthOpen, isSpeaking, lookAt, rigConfig });
+  const propsRef = useRef({ emotion, mouthOpen, intonation, isSpeaking, lookAt, rigConfig });
   useEffect(() => {
-    propsRef.current = { emotion, mouthOpen, isSpeaking, lookAt, rigConfig };
-  }, [emotion, mouthOpen, isSpeaking, lookAt, rigConfig]);
+    propsRef.current = { emotion, mouthOpen, intonation, isSpeaking, lookAt, rigConfig };
+  }, [emotion, mouthOpen, intonation, isSpeaking, lookAt, rigConfig]);
 
   // Mouse & Touch gaze tracking (Dukungan Sentuh Jari di Layar HP tanpa re-render)
   useEffect(() => {
@@ -155,26 +158,119 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   }, []);
 
   // ⚡ ULTRA-SMOOTH GPU ANIMATION LOOP (0 React Re-renders / sec)
-  // Memanipulasi transform CSS secara langsung pada layer GPU compositor tanpa membakar CPU
+  // Memanipulasi transform 2.5D volumetrik secara langsung pada layer GPU compositor
   useEffect(() => {
     let animId: number;
     const startTime = performance.now();
 
+    // State lerp kinematika 2.5D volumetrik & intonasi vokal
+    let currPitch = 0;
+    let currYaw = 0;
+    let currRoll = 0;
+    let currDepthZ = 0;
+    let currSlumpY = 0;
+    let currShiftX = 0;
+    let currArmDamping = 1.0;
+
     const loop = (now: number) => {
       if (document.visibilityState !== "hidden") {
         const {
+          emotion: curEmotion,
           mouthOpen: curMouthOpen,
+          intonation: curIntonation = 0,
           isSpeaking: curIsSpeaking,
           lookAt: curLookAt,
           rigConfig: curRig,
         } = propsRef.current;
 
         const tSec = (now - startTime) / 1000;
-        const breath = Math.sin(tSec * curRig.breathSpeed);
 
         const gazeTarget = curLookAt
           ? { x: curLookAt.x, y: curLookAt.y }
           : mousePosRef.current;
+
+        // 🎯 1. Profil Target Kinematika Sesuai Emosi (Sedih, Ceria, Berpikir, Kaget, Tersipu, Netral)
+        let targetPitch = 0;
+        let targetYaw = (gazeTarget.x - 0.5) * 7.5;
+        let targetRoll = 0;
+        let targetDepthZ = 0;
+        let targetSlumpY = 0;
+        let targetShiftX = 0;
+        let targetSpeedMult = 1.0;
+        let targetArmDamping = 1.0;
+
+        if (curEmotion === "sad") {
+          // Sedih / Empati: Tubuh merosot, kepala menunduk sayu, helaan napas lambat
+          const sigh = Math.max(0, Math.sin(tSec * 0.72)) * 3.5;
+          targetPitch = 4.2;
+          targetYaw = (gazeTarget.x - 0.5) * 5.0;
+          targetRoll = -1.5;
+          targetDepthZ = -6.0;
+          targetSlumpY = 8.0 + sigh;
+          targetShiftX = -1.5;
+          targetSpeedMult = 0.85;
+          targetArmDamping = 0.45;
+        } else if (curEmotion === "happy") {
+          // Ceria / Gembira: Tubuh tegap maju ke depan, membal ritmis, ayunan lincah
+          const bounce = Math.sin(tSec * 2.8) * 1.5;
+          targetPitch = -2.0;
+          targetYaw = (gazeTarget.x - 0.5) * 9.0;
+          targetRoll = Math.sin(tSec * 2.2) * 1.6;
+          targetDepthZ = 12.0;
+          targetSlumpY = -3.5 + bounce;
+          targetShiftX = Math.sin(tSec * 1.4) * 2.5;
+          targetSpeedMult = 1.35;
+          targetArmDamping = 1.4;
+        } else if (curEmotion === "thinking") {
+          // Berpikir: Kepala miring menyamping, dagu terangkat sedikit, bobot geser ke sisi
+          targetPitch = -2.8;
+          targetYaw = (gazeTarget.x - 0.5) * 6.0;
+          targetRoll = 4.5; // Quizzical tilt
+          targetDepthZ = 2.0;
+          targetSlumpY = 1.0;
+          targetShiftX = -5.0;
+          targetSpeedMult = 0.95;
+          targetArmDamping = 0.85;
+        } else if (curEmotion === "surprised") {
+          // Kaget: Recoil sentakan ke belakang instan, kepala mundur
+          targetPitch = -4.5;
+          targetYaw = (gazeTarget.x - 0.5) * 4.0;
+          targetRoll = 0;
+          targetDepthZ = -22.0;
+          targetSlumpY = -5.0;
+          targetShiftX = 0;
+          targetSpeedMult = 1.6;
+          targetArmDamping = 1.5;
+        } else if (curEmotion === "shy") {
+          // Tersipu / Malu Manis: Sedikit memalingkan wajah, menunduk manis
+          targetPitch = 3.2;
+          targetYaw = -4.8;
+          targetRoll = 2.2;
+          targetDepthZ = 4.0;
+          targetSlumpY = 3.0;
+          targetShiftX = 2.0;
+          targetSpeedMult = 1.0;
+          targetArmDamping = 0.6;
+        }
+
+        // Lerp halus 60 FPS untuk seluruh parameter rotasi & posisi
+        const lerpFactor = 0.085;
+        currPitch += (targetPitch - currPitch) * lerpFactor;
+        currYaw += (targetYaw - currYaw) * lerpFactor;
+        currRoll += (targetRoll - currRoll) * lerpFactor;
+        currDepthZ += (targetDepthZ - currDepthZ) * lerpFactor;
+        currSlumpY += (targetSlumpY - currSlumpY) * lerpFactor;
+        currShiftX += (targetShiftX - currShiftX) * lerpFactor;
+        currArmDamping += (targetArmDamping - currArmDamping) * lerpFactor;
+
+        // ⚡ Aksentuasi Intonasi Vokal (Emphasis Micro-Nod saat kata ditekankan)
+        const intonationAccent = curIsSpeaking ? curIntonation * 3.4 : 0;
+        const totalPitch = currPitch + intonationAccent;
+        const accentDepthZ = curIsSpeaking ? curIntonation * 7.5 : 0;
+
+        // Napas prosedural yang dipengaruhi kecepatan emosi
+        const breathSpeed = curRig.breathSpeed * targetSpeedMult;
+        const breath = Math.sin(tSec * breathSpeed);
 
         // Active listening micro-nod saat mendengarkan
         const listeningNod = !curIsSpeaking
@@ -196,27 +292,34 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             ? Math.min(1, curMouthOpen * 2.5 * (0.8 + speechCadence * 0.25))
             : 0;
 
-        // Kinematika Lengan Kiri & Kanan
-        const armBreathL = -breath * 0.9;
-        const armBreathR = breath * 0.9;
+        // Kinematika Lengan Kiri & Kanan (Mengikuti Damping & Aksentuasi Intonasi)
+        const armBreathL = -breath * 0.9 * currArmDamping;
+        const armBreathR = breath * 0.9 * currArmDamping;
         const speechArmL = curIsSpeaking
-          ? Math.sin(tSec * 2.8) * (curRig.armMaxRot * 0.85) + dynamicMouthAmount * 1.5
+          ? (Math.sin(tSec * 2.8) * (curRig.armMaxRot * 0.85) + dynamicMouthAmount * 1.5 + curIntonation * 2.5) * currArmDamping
           : 0;
         const speechArmR = curIsSpeaking
-          ? -Math.cos(tSec * 2.4 + 0.4) * (curRig.armMaxRot * 0.8) - dynamicMouthAmount * 1.3
+          ? (-Math.cos(tSec * 2.4 + 0.4) * (curRig.armMaxRot * 0.8) - dynamicMouthAmount * 1.3 - curIntonation * 2.2) * currArmDamping
           : 0;
         const armGazeOffset = (gazeTarget.x - 0.5) * 1.6;
 
-        const armAngleLeft = Math.max(-6, Math.min(6, armBreathL + speechArmL + armGazeOffset));
-        const armAngleRight = Math.max(-6, Math.min(6, armBreathR + speechArmR + armGazeOffset));
+        // Gestur lengan thinking: lengan kanan terangkat ke arah dada/dagu
+        const thinkingArmBonus = curEmotion === "thinking" ? 4.8 : 0;
 
-        // 1. Update Torso Container Transform (GPU Layer)
+        const armAngleLeft = Math.max(-7, Math.min(7, armBreathL + speechArmL + armGazeOffset));
+        const armAngleRight = Math.max(-7, Math.min(7, armBreathR + speechArmR + armGazeOffset + thinkingArmBonus));
+
+        // 1. Update Torso Container Transform (2.5D Volumetric GPU Layer)
         if (torsoContainerRef.current) {
-          torsoContainerRef.current.style.transform = `translate3d(0, ${breathY.toFixed(
-            2
-          )}px, 0) scaleY(${breathScaleY.toFixed(3)}) scaleX(${breathScaleX.toFixed(
-            3
-          )}) rotate(${bodyTilt.toFixed(2)}deg)`;
+          torsoContainerRef.current.style.transform = `
+            perspective(900px)
+            translate3d(${currShiftX.toFixed(2)}px, ${(breathY + currSlumpY).toFixed(2)}px, ${(currDepthZ + accentDepthZ).toFixed(2)}px)
+            rotateX(${totalPitch.toFixed(2)}deg)
+            rotateY(${currYaw.toFixed(2)}deg)
+            rotateZ(${(bodyTilt + currRoll).toFixed(2)}deg)
+            scaleY(${breathScaleY.toFixed(3)})
+            scaleX(${breathScaleX.toFixed(3)})
+          `;
         }
 
         // 2. Update Lengan Kiri & Kanan
@@ -305,6 +408,13 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       borderColor: "border-blue-500/40",
       textColor: "text-blue-300",
     },
+    shy: {
+      label: "Tersipu",
+      icon: Heart,
+      glowColor: "rgba(244, 63, 94, 0.45)",
+      borderColor: "border-pink-500/40",
+      textColor: "text-pink-300",
+    },
   }[emotion] || {
     label: "Aktif",
     icon: Sparkles,
@@ -381,6 +491,19 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             alt="Celyn Avatar Body"
             className="w-full h-full object-contain filter drop-shadow-2xl relative z-10 select-none pointer-events-none"
             draggable={false}
+          />
+
+          {/* ============================================================= */}
+          {/* LAPISAN WAJAH PROSEDURAL DINAMIS (Alis, Mata, Rona & Bibir)  */}
+          {/* ============================================================= */}
+          <AvatarFaceOverlay
+            emotion={emotion}
+            isSpeaking={isSpeaking}
+            mouthOpen={mouthOpen}
+            intonation={intonation}
+            mouthPivotX={rigConfig.mouthPivotX}
+            mouthPivotY={rigConfig.mouthPivotY}
+            mouthScale={rigConfig.mouthScale}
           />
 
           {/* ============================================================= */}
