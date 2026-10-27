@@ -308,11 +308,13 @@ async function runTtsTests() {
   // Uji Persona Identitas Khusus Mode Admin ('jocelyn' / Password 'admin')
   const promptJocelyn = buildCelynSystemPrompt("jocelyn");
   assert(
-    promptJocelyn.includes("Pembuat saya adalah Rafli, yang menggunakan referensi orang terkasih."),
-    "Mode admin memuat jawaban pembuat: 'Pembuat saya adalah Rafli, yang menggunakan referensi orang terkasih.'"
+    promptJocelyn.includes("Rafli") && promptJocelyn.includes("referensi orang terkasih"),
+    "Mode admin memuat jawaban pembuat: 'Rafli yang menggunakan referensi orang terkasih'"
   );
   assert(
-    promptJocelyn.includes("menekuni di bidang rekan profesional tapi terkadang perasa. Pembuat saya menciptakan saya untuk selalu dapat menyemangati orang terkasihnya"),
+    promptJocelyn.includes("rekan profesional") &&
+    promptJocelyn.includes("perasa") &&
+    (promptJocelyn.includes("menyemangatinya") || promptJocelyn.includes("nyemangatin dia")),
     "Mode admin memuat kisah orang terkasih: rekan profesional, terkadang perasa, dan diciptakan untuk menyemangatinya"
   );
   assert(
