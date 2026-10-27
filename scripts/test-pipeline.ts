@@ -561,6 +561,12 @@ async function runTtsTests() {
   assert(fs.existsSync("apps/web/public/celyn_torso_rig_closed.png"), "Aset tekstur mata terpejam ada");
   assert(fs.existsSync("apps/web/public/celyn_torso_rig_sad.png"), "Aset tekstur wajah sedih / empati alami ada");
   assert(fs.existsSync("apps/web/public/celyn_torso_rig_sad_closed.png"), "Aset tekstur sedih mata terpejam ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_thinking.png"), "Aset tekstur wajah berpikir / analitis ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_thinking_closed.png"), "Aset tekstur berpikir mata terpejam ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_surprised.png"), "Aset tekstur wajah kaget / terkesan ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_surprised_closed.png"), "Aset tekstur kaget mata terpejam ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_shy.png"), "Aset tekstur wajah tersipu / malu manis ada");
+  assert(fs.existsSync("apps/web/public/celyn_torso_rig_shy_closed.png"), "Aset tekstur tersipu mata terpejam ada");
 
   // 14. Ringkasan
   console.log("\n=======================================================");

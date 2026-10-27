@@ -18,6 +18,8 @@ interface AvatarFaceOverlayProps {
  */
 export const AvatarFaceOverlay: React.FC<AvatarFaceOverlayProps> = ({
   emotion,
+  isSpeaking,
+  intonation,
 }) => {
   return (
     <div className="absolute inset-0 w-full h-full pointer-events-none z-25 overflow-hidden">
@@ -65,6 +67,19 @@ export const AvatarFaceOverlay: React.FC<AvatarFaceOverlayProps> = ({
             top: "21.5%",
             background: "radial-gradient(ellipse at 50% 50%, rgba(99,102,241,0.12) 0%, transparent 80%)",
             opacity: 0.8,
+          }}
+        />
+      )}
+
+      {/* Kilau Tatapan Mata Hidup Mengikuti Intonasi Vokal saat Berbicara */}
+      {isSpeaking && intonation > 0.15 && (
+        <div
+          className="absolute w-[18%] h-[3%] rounded-full blur-[2px] transition-opacity duration-150 pointer-events-none"
+          style={{
+            left: "41%",
+            top: "24.5%",
+            background: "radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.22) 0%, transparent 80%)",
+            opacity: Math.min(1, intonation * 1.1),
           }}
         />
       )}

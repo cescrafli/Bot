@@ -132,6 +132,12 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       "/celyn_torso_rig_closed.png",
       "/celyn_torso_rig_sad.png",
       "/celyn_torso_rig_sad_closed.png",
+      "/celyn_torso_rig_thinking.png",
+      "/celyn_torso_rig_thinking_closed.png",
+      "/celyn_torso_rig_surprised.png",
+      "/celyn_torso_rig_surprised_closed.png",
+      "/celyn_torso_rig_shy.png",
+      "/celyn_torso_rig_shy_closed.png",
       "/celyn_arm_l_clean.png",
       "/celyn_arm_r_clean.png",
     ].forEach((src) => {
@@ -484,23 +490,53 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           }}
         >
           {/* ============================================================= */}
-          {/* LAPISAN TUBUH UTAMA (Kepala, Leher, Badan, Rambut & Pakaian) */}
-          {/* Normal: Mata Terbuka (/celyn_torso_rig.png) */}
-          {/* Sedih: Tekstur Wajah Empatis Alami (/celyn_torso_rig_sad.png) */}
-          {/* Kedip (130ms): Mata Merem Alami (/celyn_torso_rig_closed.png / sad_closed.png) */}
+          {/* LAPISAN TUBUH UTAMA (DASAR: Netral / Senyum Ramah)            */}
+          {/* Selalu aktif di latar belakang (opacity: 1)                   */}
           {/* ============================================================= */}
           <img
-            src={
-              emotion === "sad"
-                ? isBlinking
-                  ? "/celyn_torso_rig_sad_closed.png"
-                  : "/celyn_torso_rig_sad.png"
-                : isBlinking
-                ? "/celyn_torso_rig_closed.png"
-                : "/celyn_torso_rig.png"
-            }
-            alt="Celyn Avatar Body"
+            src={isBlinking ? "/celyn_torso_rig_closed.png" : "/celyn_torso_rig.png"}
+            alt="Celyn Avatar Body Base"
             className="w-full h-full object-contain relative z-10 select-none pointer-events-none"
+            draggable={false}
+          />
+
+          {/* ============================================================= */}
+          {/* LAPISAN MIMIK WAJAH BERTRANSISI HALUS (GPU Crossfade Morph)  */}
+          {/* Transisi 450ms ease-in-out: Senyum -> Sedih/Berpikir/Kaget   */}
+          {/* ============================================================= */}
+          {/* 1. Layer Sedih / Empati */}
+          <img
+            src={isBlinking ? "/celyn_torso_rig_sad_closed.png" : "/celyn_torso_rig_sad.png"}
+            alt="Celyn Expression Sad"
+            className="absolute inset-0 w-full h-full object-contain z-11 select-none pointer-events-none transition-opacity duration-500 ease-in-out will-change-[opacity]"
+            style={{ opacity: emotion === "sad" ? 1 : 0 }}
+            draggable={false}
+          />
+
+          {/* 2. Layer Berpikir / Analitis */}
+          <img
+            src={isBlinking ? "/celyn_torso_rig_thinking_closed.png" : "/celyn_torso_rig_thinking.png"}
+            alt="Celyn Expression Thinking"
+            className="absolute inset-0 w-full h-full object-contain z-11 select-none pointer-events-none transition-opacity duration-500 ease-in-out will-change-[opacity]"
+            style={{ opacity: emotion === "thinking" ? 1 : 0 }}
+            draggable={false}
+          />
+
+          {/* 3. Layer Kaget / Terkesan */}
+          <img
+            src={isBlinking ? "/celyn_torso_rig_surprised_closed.png" : "/celyn_torso_rig_surprised.png"}
+            alt="Celyn Expression Surprised"
+            className="absolute inset-0 w-full h-full object-contain z-11 select-none pointer-events-none transition-opacity duration-500 ease-in-out will-change-[opacity]"
+            style={{ opacity: emotion === "surprised" ? 1 : 0 }}
+            draggable={false}
+          />
+
+          {/* 4. Layer Tersipu / Malu Manis */}
+          <img
+            src={isBlinking ? "/celyn_torso_rig_shy_closed.png" : "/celyn_torso_rig_shy.png"}
+            alt="Celyn Expression Shy"
+            className="absolute inset-0 w-full h-full object-contain z-11 select-none pointer-events-none transition-opacity duration-500 ease-in-out will-change-[opacity]"
+            style={{ opacity: emotion === "shy" ? 1 : 0 }}
             draggable={false}
           />
 
