@@ -135,6 +135,74 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Endpoint Simpan Log Giliran (Untuk Mode Serverless & Client Direct)
+  if (req.url === "/api/record" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body || "{}");
+        const rawHeader = req.headers["x-admin-password"];
+        const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+        const authPass = headerPass || parsed.password;
+
+        if (authPass !== "admin" && authPass !== config.adminPassword) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: false, message: "Ignored for non-admin" }));
+        }
+
+        const { sessionId, role, content } = parsed;
+        if (sessionId && role && content) {
+          await memoryService.recordTurn(sessionId, role, content);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: true }));
+        }
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Data tidak lengkap" }));
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message }));
+      }
+    });
+    return;
+  }
+
+  // Endpoint Meringkas Sesi Obrolan (Untuk Mode Serverless & Client Direct)
+  if (req.url === "/api/summarize" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body || "{}");
+        const rawHeader = req.headers["x-admin-password"];
+        const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+        const authPass = headerPass || parsed.password;
+
+        if (authPass !== "admin" && authPass !== config.adminPassword) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: false, message: "Ignored for non-admin" }));
+        }
+
+        const { sessionId } = parsed;
+        if (sessionId) {
+          await memoryService.summarizeAndPersistSession(sessionId);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: true }));
+        }
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "SessionId tidak disertakan" }));
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message }));
+      }
+    });
+    return;
+  }
+
   // Ephemeral Token endpoint (kompatibel dengan mode Vercel Serverless)
   if (req.url?.startsWith("/api/token")) {
     const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
@@ -336,11 +404,12 @@ wss.on("connection", async (ws: AliveWebSocket, req) => {
   const authMode: AuthMode = isAdmin ? "jocelyn" : "default";
 
   const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
+  const requestedSessionId = parsedUrl.searchParams.get("sessionId") || undefined;
   // Memori jangka panjang Turso HANYA diakses untuk password 'admin' (mode jocelyn)
   // Mode 'login' (default) selalu mulai dari awal tanpa memori Turso (zero data leak)
   const memoryContext =
     authMode === "jocelyn" ? await memoryService.getMemoryPromptBlock() : undefined;
-  const session = new GeminiSession(ws, requestedVoice, authMode, undefined, memoryContext);
+  const session = new GeminiSession(ws, requestedVoice, authMode, requestedSessionId, memoryContext);
   session.connect();
 
   // Idle timeout timer: jika tidak ada interaksi dalam 5 menit, putuskan sesi secara tertib

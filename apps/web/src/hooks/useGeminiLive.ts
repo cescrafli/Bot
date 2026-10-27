@@ -65,6 +65,31 @@ export function useGeminiLive({
   const sessionMaxDurationTimerRef = useRef<number | null>(null);
   const disconnectRef = useRef<() => void>(() => {});
 
+  const sessionIdRef = useRef<string>(
+    `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+  );
+  const directTurnCelynTextRef = useRef<string>("");
+
+  const recordTurnToServer = useCallback((role: "user" | "assistant", content: string) => {
+    if (getStoredAuthMode() !== "jocelyn") return;
+    const clean = content.trim();
+    if (!clean) return;
+    fetch("/api/record", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-password": getStoredAuthPassword() || "admin",
+      },
+      body: JSON.stringify({
+        sessionId: sessionIdRef.current,
+        role,
+        content: clean,
+      }),
+    }).catch((e) => {
+      console.warn("[RECORD] Gagal mencatat turn ke server:", e);
+    });
+  }, []);
+
   const clearSessionTimers = useCallback(() => {
     if (sessionWarningTimerRef.current) {
       clearTimeout(sessionWarningTimerRef.current);
@@ -399,6 +424,7 @@ export function useGeminiLive({
           onmessage: (msg: any) => {
             if (msg.serverContent?.interrupted) {
               bargeInMutedRef.current = false;
+              directTurnCelynTextRef.current = "";
               handleServerMessage({ type: "interrupted" });
               return;
             }
@@ -408,6 +434,7 @@ export function useGeminiLive({
               backupPcmChunksRef.current = [];
               const userText = msg.serverContent.inputTranscription.text.trim();
               if (userText) {
+                recordTurnToServer("user", userText);
                 handleServerMessage({
                   type: "transcript",
                   speaker: "user",
@@ -438,6 +465,7 @@ export function useGeminiLive({
               if (!bargeInMutedRef.current) {
                 const celynText = msg.serverContent.outputTranscription.text;
                 if (celynText) {
+                  directTurnCelynTextRef.current += celynText;
                   handleServerMessage({
                     type: "transcript",
                     speaker: "celyn",
@@ -490,6 +518,7 @@ export function useGeminiLive({
                 }
                 if (part.text && !msg.serverContent?.outputTranscription?.text) {
                   if (bargeInMutedRef.current) continue;
+                  directTurnCelynTextRef.current += part.text;
                   handleServerMessage({
                     type: "transcript",
                     speaker: "celyn",
@@ -505,6 +534,11 @@ export function useGeminiLive({
 
             if (msg.serverContent?.turnComplete) {
               bargeInMutedRef.current = false;
+
+              if (directTurnCelynTextRef.current.trim()) {
+                recordTurnToServer("assistant", directTurnCelynTextRef.current.trim());
+                directTurnCelynTextRef.current = "";
+              }
 
               // Jika baru saja mengeksekusi sub-turn pemanggilan tool, tahan status listening
               // agar tidak mendahului sub-turn jawaban suara yang akan segera dimulai model
@@ -699,7 +733,7 @@ export function useGeminiLive({
         err?.message || "Gagal terhubung ke server maupun Gemini Live API."
       );
     }
-  }, [handleServerMessage]);
+  }, [handleServerMessage, recordTurnToServer]);
 
   const connect = useCallback((selectedVoice?: string) => {
     if (
@@ -708,6 +742,9 @@ export function useGeminiLive({
     ) {
       return;
     }
+
+    sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    directTurnCelynTextRef.current = "";
 
     const envWs = import.meta.env.VITE_WS_URL;
     const isLocalhost =
@@ -729,23 +766,23 @@ export function useGeminiLive({
     const voiceQuery = selectedVoice ? `&voice=${encodeURIComponent(selectedVoice)}` : "";
     const wsUrl =
       envWs ||
-      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}&authMode=${authMode}${voiceQuery}`;
+      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}&authMode=${authMode}&sessionId=${encodeURIComponent(sessionIdRef.current)}${voiceQuery}`;
 
     let opened = false;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    // Timeout cepat 2.5 detik untuk fallback ke Serverless jika server lokal tidak merespons
+    // Timeout 6.5 detik untuk fallback ke Serverless jika server lokal lambat merespons
     const wsTimeout = window.setTimeout(() => {
       if (!opened && wsRef.current === ws) {
-        console.warn("⏱️ WebSocket local timeout (2.5s), beralih otomatis ke Serverless Ephemeral Token...");
+        console.warn("⏱️ WebSocket local timeout (6.5s), beralih otomatis ke Serverless Ephemeral Token...");
         try {
           ws.close();
         } catch {}
         wsRef.current = null;
         connectViaServerlessToken(selectedVoice);
       }
-    }, 2500);
+    }, 6500);
 
     ws.onopen = () => {
       clearTimeout(wsTimeout);
@@ -796,6 +833,9 @@ export function useGeminiLive({
     pendingQueueRef.current = [];
     directTtsTurnIdRef.current++;
     directTtsBufferRef.current = "";
+    const wasDirect = !!directSessionRef.current;
+    const endingSessionId = sessionIdRef.current;
+
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -809,6 +849,19 @@ export function useGeminiLive({
     setIsConnected(false);
     setStatus("idle");
     setStatusMessage("Sesi dihentikan.");
+
+    if (wasDirect && getStoredAuthMode() === "jocelyn") {
+      fetch("/api/summarize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-password": getStoredAuthPassword() || "admin",
+        },
+        body: JSON.stringify({ sessionId: endingSessionId }),
+      }).catch((e) => {
+        console.warn("[SUMMARIZE] Gagal merangkum sesi serverless:", e);
+      });
+    }
   }, [clearSessionTimers]);
 
   useEffect(() => {
@@ -855,6 +908,7 @@ export function useGeminiLive({
           directTtsTurnIdRef.current++;
           directTtsBufferRef.current = "";
           backupPcmChunksRef.current = [];
+          recordTurnToServer("user", msg.text);
           const userEmotion = inferUserEmotion(msg.text);
           if (userEmotion.emotion !== "neutral") {
             directCurrentEmotionRef.current = userEmotion.suggestedCelynEmotion;
@@ -890,7 +944,7 @@ export function useGeminiLive({
         pendingQueueRef.current.shift();
       }
     }
-  }, [handleServerMessage]);
+  }, [handleServerMessage, recordTurnToServer]);
 
   useEffect(() => {
     sendMessageRef.current = sendMessage;

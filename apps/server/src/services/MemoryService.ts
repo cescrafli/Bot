@@ -204,12 +204,15 @@ export class MemoryService {
     // Simpan ke tabel chat_logs di Turso
     const db = this.getClient();
     if (db) {
-      db.execute({
-        sql: "INSERT INTO chat_logs (session_id, role, content) VALUES (?, ?, ?)",
-        args: [sessionId, role, cleanContent],
-      }).catch((err) => {
+      try {
+        await db.execute({
+          sql: "INSERT INTO chat_logs (session_id, role, content) VALUES (?, ?, ?)",
+          args: [sessionId, role, cleanContent],
+        });
+        console.log(`[MEMORY] 💾 Chat log tersimpan: [${role}] "${cleanContent.slice(0, 50)}"`);
+      } catch (err) {
         console.warn("[MEMORY] ⚠️ Gagal menulis chat_log:", err);
-      });
+      }
     }
   }
 
