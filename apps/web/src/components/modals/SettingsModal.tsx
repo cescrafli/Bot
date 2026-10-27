@@ -58,7 +58,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-white tracking-wide">
-                Pengaturan Companion
+                Pengaturan
               </h2>
               <p className="text-[11px] text-slate-400">
                 Preferensi avatar & audio interaktif

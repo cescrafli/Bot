@@ -314,14 +314,9 @@ export function App() {
                 <span className="w-2 h-2 rounded-full bg-rose-400" />
               </div>
             </div>
-            <div className="flex items-baseline gap-2">
-              <span className="font-medium tracking-tight text-white text-sm md:text-base">
-                Celyn AI
-              </span>
-              <span className="text-[10px] tracking-widest uppercase text-slate-400 font-light">
-                Companion
-              </span>
-            </div>
+            <span className="font-medium tracking-tight text-white text-sm md:text-base">
+              Celyn AI
+            </span>
           </div>
 
           {/* Center: Clean Status & Audio Presence */}
@@ -456,7 +451,7 @@ export function App() {
 
         {/* Floating Subtitle & Ultra-Clean Control Dock */}
         <footer className="w-full flex flex-col items-center pb-2 shrink-0 gap-3">
-          {/* Floating Elegant Speech Subtitle (Companion Dialogue) */}
+          {/* Floating Elegant Speech Subtitle */}
           <SubtitleOverlay
             transcripts={live.transcripts}
             statusMessage={effectiveStatusMessage}
@@ -538,7 +533,7 @@ export function App() {
         onTestVoice={handleTestSpeech}
       />
 
-      {/* Modal Pengaturan Companion */}
+      {/* Modal Pengaturan */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
