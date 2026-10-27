@@ -18,6 +18,7 @@
     "dev": "node scripts/dev-all.mjs",
     "test:poc": "tsx scripts/test-poc-vision.ts",
     "test:pipeline": "tsx scripts/test-pipeline.ts",
+    "db:check": "tsx scripts/inspect-database.ts",
     "build": "npm --workspaces run build"
   },
   "keywords": [
