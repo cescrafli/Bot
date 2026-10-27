@@ -367,6 +367,31 @@ async function runTtsTests() {
     "Mode default mengadopsi ritme adaptif (tidak lagi dipangkas kaku 1-2 kalimat)"
   );
 
+  // Uji Variasi Fonetik Nama Celyn (Celine, Selin) & Eksklusi (Selina, Celini)
+  assert(
+    promptDefault.includes("Celyn = Celine = Selin") &&
+    promptDefault.includes("Selina") &&
+    promptDefault.includes("Celini"),
+    "Mode default mengenali variasi fonetik Celyn = Celine = Selin dan mengecualikan Selina / Celini"
+  );
+  assert(
+    promptDefault.includes("Celine itu siapa") &&
+    promptDefault.includes("Jangan pernah bingung atau mendadak diam lama"),
+    "Mode default memiliki instruksi respons instan tanpa diam lama saat ditanya identitas 'Celine itu siapa'"
+  );
+
+  // Uji Inisiatif Bertanya & Icebreaker Spontaneity
+  assert(
+    promptDefault.includes("INISIATIF BERTANYA & ICEBREAKER") &&
+    promptDefault.includes("JANGAN PERNAH DIAM ATAU RAGU") &&
+    promptDefault.includes("kamu ada pertanyaan buat aku"),
+    "System prompt memuat instruksi Inisiatif Bertanya & Icebreaker spontan saat diminta bertanya"
+  );
+  assert(
+    promptDefault.includes("Eh iya halo, denger kok!"),
+    "System prompt memuat penanganan selaan ramah kata 'Halo / Denger nggak'"
+  );
+
   // Uji Sapaan Khusus Jocelyn (Password 'admin') vs Normal (Password 'login')
   const jocelynGreeting = buildContextualGreetingPrompt(new Date(), "jocelyn");
   assert(

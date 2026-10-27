@@ -547,8 +547,8 @@ export function useAudioEngine({
             }
             preRollBufferRef.current = [];
           }
-          // Tahan gerbang tetap terbuka ~896ms (14 frame @ 64ms) agar jeda napas & jeda klausa alami tidak terpotong
-          voiceHangoverFramesRef.current = 14;
+          // Tahan gerbang tetap terbuka ~640ms (10 frame @ 64ms) agar jeda napas alami tidak terpotong namun tetap responsif
+          voiceHangoverFramesRef.current = 10;
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else if (voiceHangoverFramesRef.current > 0) {
           // Hangover tail: menjaga jeda mikro antar-kata dan gumaman lambat
@@ -558,9 +558,9 @@ export function useAudioEngine({
           // Gerbang tertutup: pengguna hening
           if (isGateOpenRef.current) {
             isGateOpenRef.current = false;
-            // Kirim 12 frame digital silence (~768ms) agar Server-Side VAD Gemini Live
-            // mendeteksi akhir giliran bicara secara bersih dan seketika
-            silenceFramesRemainingRef.current = 12;
+            // Kirim 8 frame digital silence (~512ms) agar Server-Side VAD Gemini Live
+            // mendeteksi akhir giliran bicara secara bersih, gesit, dan minim latency
+            silenceFramesRemainingRef.current = 8;
           }
 
           // Simpan ke ring buffer pre-roll (maksimal 4 frame = 256ms @ 64ms)
