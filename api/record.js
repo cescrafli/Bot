@@ -161,6 +161,116 @@ function extractFactsFromUtterance(text) {
     return results;
   }
 
+  // 3. Pola Proyek & Aktivitas yang Sedang Dikerjakan
+  const projectActionMatch = clean.match(
+    /(?:(?:lagi|sedang|mau|mencoba)\s+)?(?:ngerjain|mengerjakan|bikin|membuat|garap|menggarap|ngoding|belajar|menyelesaikan)\s+([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi)/i
+  );
+  if (projectActionMatch && projectActionMatch[1]) {
+    const rawProject = cleanSubjectAndAux(projectActionMatch[1]);
+    if (rawProject.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya|ngobrol|bicara|tugas)$/i.test(rawProject)) {
+      results.push({
+        fact: `Rafli sedang mengerjakan/membuat ${rawProject}`,
+        category: "proyek",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
+  const projectNounMatch = clean.match(
+    /(?:proyek|project|tugas|pekerjaan)(?:ku)?(?:\s+(?:saat ini|sekarang|baru))?\s*(?:adalah|itu)?\s*([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
+  );
+  if (projectNounMatch && projectNounMatch[1]) {
+    const rawProject = cleanSubjectAndAux(projectNounMatch[1]);
+    if (rawProject.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(rawProject)) {
+      results.push({
+        fact: `Proyek/pekerjaan Rafli: ${rawProject}`,
+        category: "proyek",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
+  // 4. Pola Cerita, Kejadian & Pengalaman Pribadi
+  const storyMatch = clean.match(
+    /(?:tadi(?:\s+(?:pagi|siang|sore|malam))?|kemarin(?:\s+(?:pagi|siang|sore|malam))?|semalam)\s+(?:(?:aku|saya|gue|gw)\s+)?(?:habis|sempat|ketemu|bertemu|beli|membeli|nonton|menonton|ke|pergi ke|mengalami)\s+([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi)/i
+  );
+  if (storyMatch && storyMatch[1]) {
+    const storyItem = cleanSubjectAndAux(storyMatch[1]);
+    if (storyItem.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(storyItem)) {
+      results.push({
+        fact: `Cerita/pengalaman Rafli: ${cleanItemText(storyMatch[0])}`,
+        category: "catatan",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
+  const incidentMatch = clean.match(
+    /(?:(?:tadi\s+)?di\s+(?:kantor|kerjaan|kampus|sekolah|rumah|jalan)\s+(?:ada\s+)?|(?:motor|mobil|laptop|komputer|hp)(?:ku)?\s+(?:tadi\s+)?(?:sempat\s+)?(?:rusak|mogok|error|bermasalah|bocor)\s*)([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
+  );
+  if (incidentMatch) {
+    const incidentText = cleanItemText(incidentMatch[0]);
+    if (incidentText.length >= 6) {
+      results.push({
+        fact: `Cerita/kejadian harian Rafli: ${incidentText}`,
+        category: "catatan",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
+  // 5. Pola Rencana & Keinginan
+  const planMatch = clean.match(
+    /(?:(?:nanti|besok|lusa|kemarin|tadi)(?:\s+(?:pagi|siang|sore|malam))?|minggu depan|bulan depan)\s+(?:(?:aku|saya|gue|gw)\s+)?(?:mau|pengen|ada rencana|akan|bakal)\s+([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
+  );
+  if (planMatch && planMatch[1]) {
+    const rawPlan = cleanSubjectAndAux(planMatch[1]);
+    if (rawPlan.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(rawPlan)) {
+      results.push({
+        fact: `Rencana Rafli: ${rawPlan}`,
+        category: "rencana",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
+  // 6. Pola Topik Pembahasan yang Sedang Didiskusikan
+  const topicMatch = clean.match(
+    /(?:(?:kita\s+)?(?:lagi\s+)?(?:bahas|ngomongin|bicarain|diskusiin)\s+(?:tentang\s+|soal\s+)?|(?:aku\s+)?(?:mau|pengen)\s+bahas\s+(?:tentang\s+|soal\s+)?)([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
+  );
+  if (topicMatch && topicMatch[1]) {
+    const rawTopic = cleanSubjectAndAux(topicMatch[1]);
+    if (rawTopic.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya|apa)$/i.test(rawTopic)) {
+      results.push({
+        fact: `Topik yang dibahas bersama Rafli: ${rawTopic}`,
+        category: "topik",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
+  // 7. Pola Entitas & Kepemilikan Personal (Hewan Peliharaan, Kendaraan, Gadget)
+  const entityMatch = clean.match(
+    /(?:kucing|anjing|peliharaan|motor|mobil|laptop|komputer|hp|ponsel)(?:ku)?\s+(?:namanya|merknya|tipe|warnanya)\s+([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$)/i
+  );
+  if (entityMatch && entityMatch[1]) {
+    const rawEntity = cleanItemText(entityMatch[0]);
+    if (rawEntity.length >= 4) {
+      results.push({
+        fact: `Informasi personal Rafli: ${rawEntity}`,
+        category: "catatan",
+        importance: 2,
+      });
+      return results;
+    }
+  }
+
   return results;
 }
 
@@ -220,7 +330,8 @@ export default async function handler(req, res) {
           const stopwords = new Set([
             "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
             "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
-            "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling"
+            "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
+            "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman"
           ]);
           const words = item.fact
             .toLowerCase()

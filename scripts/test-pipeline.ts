@@ -710,6 +710,27 @@ async function runTtsTests() {
     memPrompt.includes("WAJIB MENJAWAB PREFERENSI & KESUKAAN TENTANG CELYN"),
     "Memory prompt memuat fakta ikan untuk Rafli & Celyn serta panduan Rule 6 preferensi Celyn"
   );
+  // Uji Universal Cross-Session Topic & Discussion Recall Engine
+  const extractedProject = extractFactsFromUtterance("aku lagi ngerjain website bot AI Celyn pakai Vite dan React");
+  assert(
+    extractedProject.length > 0 && extractedProject[0].category === "proyek" && extractedProject[0].fact.includes("website bot AI Celyn"),
+    "Autonomous Memory Ingestion berhasil mengekstrak proyek yang sedang dikerjakan"
+  );
+  const extractedPlan = extractFactsFromUtterance("minggu depan ada rencana mau liburan ke Jogja");
+  assert(
+    extractedPlan.length > 0 && extractedPlan[0].category === "rencana" && extractedPlan[0].fact.includes("liburan ke Jogja"),
+    "Autonomous Memory Ingestion berhasil mengekstrak rencana/keinginan pengguna"
+  );
+  const extractedTopic = extractFactsFromUtterance("kita lagi bahas tentang arsitektur database Turso");
+  assert(
+    extractedTopic.length > 0 && extractedTopic[0].category === "topik" && extractedTopic[0].fact.includes("arsitektur database Turso"),
+    "Autonomous Memory Ingestion berhasil mengekstrak topik diskusi percakapan"
+  );
+  assert(
+    memPrompt.includes("Topik Obrolan & Riwayat Percakapan Terakhir") &&
+    memPrompt.includes("WAJIB MENGINGAT DAN MERESPONS SEMUA TOPIK PEMBAHASAN TANPA TERKECUALI (CROSS-SESSION TOPIC RECALL)"),
+    "Memory prompt memuat injeksi log obrolan real-time dan panduan mandatori Rule 7 Topic Recall"
+  );
   assert(
     !memPrompt.includes("Gemini") && !memPrompt.includes("Google"),
     "Blok memori bebas 100% dari penyebutan nama vendor Gemini/Google"

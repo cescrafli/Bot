@@ -159,7 +159,7 @@ export class GeminiSession {
                       },
                       category: {
                         type: Type.STRING,
-                        enum: ["preferensi", "jadwal", "identitas", "fakta", "catatan"],
+                        enum: ["preferensi", "jadwal", "identitas", "fakta", "catatan", "topik", "proyek", "rencana"],
                         description: "Kategori memori: 'preferensi' (makanan, minuman, kebiasaan), 'jadwal' (waktu/jam kegiatan), 'identitas' (tentang diri pengguna), atau 'catatan'",
                       },
                       importance: {

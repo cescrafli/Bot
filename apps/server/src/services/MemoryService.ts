@@ -164,13 +164,28 @@ export class MemoryService {
 
       // 1. Ambil fakta profil
       const factsRs = await db.execute(
-        "SELECT category, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 8"
+        "SELECT category, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 25"
       );
 
       // 2. Ambil ringkasan sesi terbaru
       const summariesRs = await db.execute(
-        "SELECT session_id, summary, user_mood, key_topics, created_at FROM session_summaries ORDER BY created_at DESC LIMIT 2"
+        "SELECT session_id, summary, user_mood, key_topics, created_at FROM session_summaries ORDER BY created_at DESC LIMIT 5"
       );
+
+      // 3. Ambil riwayat chat terbaru untuk recall real-time
+      let recentTurns: string[] = [];
+      try {
+        const logsRs = await db.execute(
+          "SELECT role, content, created_at FROM chat_logs ORDER BY id DESC LIMIT 12"
+        );
+        if (logsRs.rows.length > 0) {
+          recentTurns = logsRs.rows.reverse().map((r) => {
+            const timeStr = r.created_at ? String(r.created_at).slice(11, 16) : "";
+            const speaker = r.role === "user" ? "Pengguna (Rafli)" : "Celyn";
+            return `- [${timeStr}] ${speaker}: "${r.content}"`;
+          });
+        }
+      } catch {}
 
       const facts = factsRs.rows.map((row) => {
         const cat = String(row.category || "").toLowerCase();
@@ -178,6 +193,9 @@ export class MemoryService {
         if (cat === "preferensi") prefix = "[Preferensi & Kesukaan / Minuman & Makanan Favorit]";
         else if (cat === "jadwal") prefix = "[Jadwal & Pengingat Waktu]";
         else if (cat === "identitas") prefix = "[Identitas & Profil Pengguna]";
+        else if (cat === "proyek") prefix = "[Proyek & Pekerjaan yang Sedang Dikerjakan]";
+        else if (cat === "rencana") prefix = "[Rencana & Keinginan]";
+        else if (cat === "topik") prefix = "[Topik Pembahasan]";
         else if (cat === "fakta") prefix = "[Fakta Penting]";
         return `- ${prefix} ${row.fact}`;
       });
@@ -203,6 +221,10 @@ export class MemoryService {
         parts.push("Fakta Pengguna Yang Kamu Ingat:\n" + facts.join("\n"));
       }
 
+      if (recentTurns.length > 0) {
+        parts.push("Topik Obrolan & Riwayat Percakapan Terakhir (Gunakan untuk mengingat apa yang sedang/telah dibahas pengguna):\n" + recentTurns.join("\n"));
+      }
+
       if (summaries.length > 0) {
         parts.push("Percakapan Sebelumnya:\n" + summaries.join("\n"));
       }
@@ -221,7 +243,12 @@ export class MemoryService {
    - Semua fakta di atas yang mencantumkan "Celyn (orang terkasih Rafli)" adalah tentang dirimu sendiri / sosok terkasih yang kamu representasikan.
    - Jika pengguna bertanya tentang makanan/minuman/kopi kesukaan Celyn (misalnya: "makanan kesukaan Celyn apa?", "kamu suka makan apa?", "minuman favorit Celyn apa?"):
      Kamu WAJIB LANGSUNG MENJAWAB dengan ceria, hangat, dan yakin berdasarkan fakta di memorimu (contoh: jika ada fakta Celyn suka makan ikan, jawab: "Makanan kesukaanku itu ikan!" atau "Celyn kan suka makan ikan!"; jika ada fakta Celyn suka americano dingin, jawab: "Celyn suka minum americano dingin!").
-   - Jika ada fakta preferensi baik untuk Rafli maupun Celyn, bedakan dengan jelas: fakta tentang Rafli adalah kesukaan Rafli, dan fakta tentang Celyn adalah kesukaan Celyn!`);
+   - Jika ada fakta preferensi baik untuk Rafli maupun Celyn, bedakan dengan jelas: fakta tentang Rafli adalah kesukaan Rafli, dan fakta tentang Celyn adalah kesukaan Celyn!
+7. WAJIB MENGINGAT DAN MERESPONS SEMUA TOPIK PEMBAHASAN TANPA TERKECUALI (CROSS-SESSION TOPIC RECALL):
+   - Semua hal yang dibahas pengguna (proyek yang sedang dikerjakan, cerita harian, pengalaman, rencana, maupun riwayat percakapan terakhir di atas) WAJIB kamu ingat tanpa terkecuali.
+   - Jika pengguna me-recall topik sebelumnya (misalnya: "tadi kita bahas apa?", "kamu ingat nggak aku cerita apa tadi?", "waktu itu aku bilang apa tentang X?", "aku tadi lagi ngerjain apa?", "kamu masih ingat yang kita obrolin barusan?"):
+     Kamu WAJIB LANGSUNG MENJAWAB dengan hangat, akrab, detail, dan tepat sasaran berdasarkan riwayat obrolan dan catatan memori di atas!
+   - DILARANG KERAS menjawab "aku lupa", "tadi kita belum ngobrol apa-apa", atau pura-pura tidak tahu jika faktanya ada di riwayat obrolan atau daftar memori di atas!`);
 
       return parts.join("\n\n");
     } catch (err) {
@@ -294,9 +321,11 @@ export class MemoryService {
     const cleanFact = this.sanitizeText(fact.trim());
     if (!cleanFact || cleanFact.length < 3) return false;
 
-    const validCategory = ["preferensi", "jadwal", "identitas", "fakta", "catatan"].includes(category)
+    const validCategory = [
+      "preferensi", "jadwal", "identitas", "fakta", "catatan", "topik", "proyek", "rencana"
+    ].includes(category)
       ? category
-      : "fakta";
+      : "catatan";
     const validImportance = Math.min(3, Math.max(1, Number(importance) || 2));
     const wibNow = getWibTimestamp();
 
@@ -316,7 +345,8 @@ export class MemoryService {
       const stopwords = new Set([
         "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
         "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
-        "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling"
+        "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
+        "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman"
       ]);
       const words = cleanFact
         .toLowerCase()
