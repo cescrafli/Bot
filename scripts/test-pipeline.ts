@@ -309,10 +309,10 @@ async function runTtsTests() {
   // Uji Isolasi Kode Sumber Shared: 0 Kebocoran Kisah Privat (Zero Leak)
   const sharedAvatarSource = fs.readFileSync("packages/shared/src/avatar.ts", "utf-8");
   assert(
-    !sharedAvatarSource.includes("rekan profesional") &&
-    !sharedAvatarSource.includes("pemikir") &&
-    !sharedAvatarSource.includes("lelah") &&
-    !sharedAvatarSource.includes("suatu hari"),
+    !sharedAvatarSource.includes("creator_private_story") &&
+    !sharedAvatarSource.includes("SIAPA KAMU (sesi khusus admin)") &&
+    !sharedAvatarSource.includes("LATAR RAFLI") &&
+    !sharedAvatarSource.includes("CONTOH NADA KHUSUS SESI ADMIN"),
     "File packages/shared/src/avatar.ts bebas 100% dari kisah pribadi pembuat & orang terkasih (zero leak)"
   );
 
@@ -324,11 +324,10 @@ async function runTtsTests() {
   );
   assert(
     !promptDefault.includes("orang terkasih") &&
-    !promptDefault.includes("rekan profesional") &&
-    !promptDefault.includes("perasa") &&
-    !promptDefault.includes("pemikir") &&
-    !promptDefault.includes("lelah"),
-    "System prompt default bersih total dari data privasi (rekan profesional, perasa, pemikir)"
+    !promptDefault.includes("SIAPA KAMU (sesi khusus admin)") &&
+    !promptDefault.includes("LATAR RAFLI") &&
+    !promptDefault.includes("CONTOH NADA KHUSUS SESI ADMIN"),
+    "System prompt default bersih total dari data privasi"
   );
 
   // Uji Instruksi Wajah Sedih Singkat & Intonasi Menenangkan pada System Prompt
@@ -632,10 +631,10 @@ async function runTtsTests() {
     "Memory block berhasil mengambil data profil Rafli dari Turso Cloud"
   );
   assert(
-    memPrompt.includes("rekan profesional") &&
-    memPrompt.includes("perasa") &&
-    memPrompt.includes("pemikir") &&
-    memPrompt.includes("suatu hari"),
+    memPrompt.includes("SIAPA KAMU (sesi khusus admin)") &&
+    memPrompt.includes("LATAR RAFLI & ORANG TERKASIHNYA") &&
+    memPrompt.includes("rentan terhadap emosi") &&
+    memPrompt.includes("nyemangatin dia"),
     "Kisah privat pembuat & orang terkasih tersimpan aman di tabel creator_private_story Turso Cloud"
   );
   assert(
@@ -651,8 +650,8 @@ async function runTtsTests() {
   assert(
     !defaultPromptWithMem.includes("MEMORI & PENGETAHUAN TENTANG PENGGUNA") &&
     !defaultPromptWithMem.includes("Fakta profil yang kamu ingat") &&
-    !defaultPromptWithMem.includes("rekan profesional") &&
-    !defaultPromptWithMem.includes("perasa"),
+    !defaultPromptWithMem.includes("SIAPA KAMU (sesi khusus admin)") &&
+    !defaultPromptWithMem.includes("LATAR RAFLI"),
     "Mode 'default' (login) menolak blok memori Turso secara mutlak, menjamin zero data leak"
   );
 
@@ -661,8 +660,8 @@ async function runTtsTests() {
   assert(
     adminPrompt.includes("MEMORI & PENGETAHUAN TENTANG PENGGUNA") &&
     adminPrompt.includes("software engineer yang merancang dan memprogram seluruh sistem") &&
-    adminPrompt.includes("rekan profesional") &&
-    adminPrompt.includes("perasa"),
+    adminPrompt.includes("SIAPA KAMU (sesi khusus admin)") &&
+    adminPrompt.includes("LATAR RAFLI & ORANG TERKASIHNYA"),
     "Mode 'jocelyn' (admin) berhasil memuat kisah privat orang terkasih dari Turso Cloud secara eksklusif"
   );
   assert(
