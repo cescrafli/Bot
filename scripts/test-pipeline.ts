@@ -389,16 +389,19 @@ async function runTtsTests() {
     "System prompt memuat penanganan selaan ramah kata 'Halo / Denger nggak'"
   );
 
-  // Uji Sapaan Khusus Jocelyn (Password 'admin') vs Normal (Password 'login')
-  const jocelynGreeting = buildContextualGreetingPrompt(new Date(), "jocelyn");
+  // Uji Sapaan Khusus Admin (Password 'admin') vs Normal (Password 'login')
+  const adminGreeting = buildContextualGreetingPrompt(new Date(), "jocelyn");
   assert(
-    jocelynGreeting.includes("Jocelyn") && jocelynGreeting.includes("tetap semangat"),
-    "Sapaan khusus mode 'jocelyn' menyapa Jocelyn langsung dengan doa dan kobaran semangat"
+    adminGreeting.includes("bahagia terus menempuh hidupnya") &&
+    adminGreeting.includes("tetap semangat") &&
+    adminGreeting.includes("Rafli atau Celyn"),
+    "Sapaan khusus mode 'jocelyn' (admin) menyapa hangat dengan doa bahagia/sehat kemudian menanyakan Rafli atau Celyn"
   );
   const defaultGreeting = buildContextualGreetingPrompt(new Date(), "default");
   assert(
-    !defaultGreeting.includes("Jocelyn"),
-    "Sapaan mode default tidak menyebutkan pesan khusus Jocelyn"
+    !defaultGreeting.includes("Rafli atau Celyn") &&
+    !defaultGreeting.includes("menempuh hidupnya"),
+    "Sapaan mode default tidak memuat alur khusus admin"
   );
 
   // 7. Uji Human-Voice VAD & Deteksi Gumaman ("hmmm", "aaa") vs Penolakan Noise

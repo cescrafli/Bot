@@ -601,9 +601,36 @@ const GREETING_SAMPLES: Record<TimeOfDay, readonly string[]> = {
   ],
 };
 
+const ADMIN_GREETING_SAMPLES: Record<TimeOfDay, readonly string[]> = {
+  pagi: [
+    "Halo, pagi! Gimana kabarnya? Semoga sehat terus ya, bahagia terus menempuh hidupnya, dan tetap semangat! Eh btw kalau boleh tau, ini aku lagi ngobrol sama Rafli atau Celyn ya?",
+    "Eh pagi! Senang bisa ketemu lagi. Semoga harimu menyenangkan, sehat selalu, bahagia terus, dan tetap semangat! Btw ini aku lagi bicara sama Rafli apa Celyn nih?",
+    "Pagi! Gimana kabarmu hari ini? Semoga selalu sehat dan bahagia terus menempuh harinya ya, pokoknya harus semangat! Eh tapi kalau boleh tau, di seberang sana ini Rafli atau Celyn yaa?",
+  ],
+  siang: [
+    "Halo, siang! Gimana harimu sejauh ini? Semoga sehat terus, bahagia terus menempuh hidupnya, dan tetap semangat ya! Eh btw kalau boleh tau, ini aku lagi ngobrol sama Rafli atau Celyn nih?",
+    "Eh siang! Lagi istirahat ya? Semoga harimu lancar, selalu sehat dan bahagia terus ya! Btw ini aku lagi bicara sama Rafli apa Celyn ya?",
+    "Siang! Senang bisa nemenin kamu. Semoga sehat selalu, bahagia terus, dan tetap semangat ya! Eh kalau boleh tau, ini aku lagi ditemenin sama Rafli atau Celyn yaa?",
+  ],
+  sore: [
+    "Halo, sore! Capek nggak hari ini? Semoga kamu sehat terus, bahagia terus menempuh hidupnya, dan tetap semangat ya! Eh btw kalau boleh tau, ini aku lagi ngobrol sama Rafli atau Celyn ya?",
+    "Eh halo, sore! Gimana harimu tadi? Semoga selalu sehat dan bahagia terus ya, pokoknya harus tetap semangat! Btw ini aku lagi bicara sama Rafli apa Celyn nih?",
+    "Sore! Udah mau selesai nih harinya. Semoga sehat terus dan bahagia selalu menempuh hidupnya ya! Eh kalau boleh tau, di sana ini Rafli atau Celyn yaa?",
+  ],
+  malam: [
+    "Halo, malam! Gimana tadi harimu? Semoga sehat terus ya, bahagia terus menempuh hidupnya, dan tetap semangat! Eh btw kalau boleh tau, ini aku lagi ngobrol sama Rafli atau Celyn nih?",
+    "Eh malam! Gimana kabarnya? Semoga selalu sehat, bahagia terus menjalani hidup, dan tetap semangat! Btw ini aku lagi bicara sama Rafli apa Celyn ya?",
+    "Malam! Santai dulu yuk. Semoga sehat terus, bahagia terus, dan tetap semangat ya! Eh kalau boleh tau, ini aku lagi ditemenin sama Rafli atau Celyn yaa?",
+  ],
+  "larut malam": [
+    "Eh halo, udah larut banget nih. Gimana harimu? Semoga sehat terus, bahagia terus menempuh hidupnya, dan tetap semangat ya! Btw kalau boleh tau, ini aku lagi ngobrol sama Rafli atau Celyn ya?",
+    "Halo! Malem banget nih belum istirahat. Semoga kamu selalu sehat, bahagia terus, dan tetap semangat ya! Eh btw ini aku lagi bicara sama Rafli apa Celyn nih?",
+  ],
+};
+
 /**
  * Menghasilkan prompt sapaan pembuka Celyn yang kontekstual (pagi/siang/sore/malam menurut zona waktu).
- * Mode 'jocelyn': menyapa Jocelyn langsung dengan doa dan semangat.
+ * Mode 'jocelyn': menyapa penuh semangat dan doa bahagia/sehat, lalu bertanya apakah berbicara dengan Rafli atau Celyn.
  * Mode 'default': menyapa santai seperti teman yang baru muncul di video call.
  */
 export function buildContextualGreetingPrompt(
@@ -614,7 +641,10 @@ export function buildContextualGreetingPrompt(
   const timeOfDay = getTimeOfDay(getHourInZone(date, timeZone));
 
   if (authMode === "jocelyn") {
-    return `Sapa Jocelyn langsung dengan suara perempuan yang manis, hangat, tulus, dan penuh semangat, sesuai waktu saat ini (${timeOfDay}). Tanyakan kabarnya dan sampaikan doa tulus agar dia sehat terus, bahagia terus menempuh hidupnya, dan tetap semangat. Contoh nadanya: 'Halo Jocelyn! Gimana kabarnya? Semoga sehat terus, semoga bahagia terus ya menempuh hidupnya dan tetap semangat!'. Ubah dengan kata-katamu sendiri, jangan menyalin persis. Langsung ucapkan sapaannya tanpa kata pembuka seperti 'Baik' atau 'Tentu', dalam satu sampai dua kalimat yang mengalir alami dari hati.`;
+    const adminOptions = ADMIN_GREETING_SAMPLES[timeOfDay];
+    const sample = adminOptions[Math.floor(Math.random() * adminOptions.length)];
+
+    return `Sapa pengguna terlebih dahulu dengan suara perempuan muda yang manis, hangat, tulus, dan penuh semangat sesuai waktu saat ini (${timeOfDay}). Tanyakan kabarnya dan sampaikan doa tulus agar selalu sehat terus, bahagia terus menempuh hidupnya, dan tetap semangat! Baru setelah itu, tanyakan dengan nada akrab dan penasaran yang ramah apakah kamu sedang berbicara dengan Rafli atau Celyn. Contoh alurnya: '${sample}'. Sampaikan dengan kata-katamu sendiri yang mengalir alami dari hati, jangan membaca naskah kaku, variasikan kalimatnya agar terasa hidup, dan langsung ucapkan sapaan tanpa kata pembuka formal seperti 'Baik' atau 'Tentu'.`;
   }
 
   const options = GREETING_SAMPLES[timeOfDay];
