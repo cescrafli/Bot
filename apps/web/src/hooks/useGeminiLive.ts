@@ -104,9 +104,16 @@ export function useGeminiLive({
         content: clean,
         password: getStoredAuthPassword() || "admin",
       }),
-    }).catch((e) => {
-      console.warn("[RECORD] Gagal mencatat turn ke server:", e);
-    });
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error(`❌ [/api/record HTTP ${res.status}]:`, errData);
+        }
+      })
+      .catch((e) => {
+        console.warn("[RECORD] Gagal mencatat turn ke server:", e);
+      });
   }, []);
 
   const clearSessionTimers = useCallback(() => {
@@ -715,6 +722,9 @@ export function useGeminiLive({
                         if (data && data.ok) {
                           saved = true;
                         }
+                      } else {
+                        const errData = await res.json().catch(() => ({}));
+                        console.error(`❌ [/api/remember HTTP ${res.status}]:`, errData);
                       }
                     } catch (e) {
                       console.warn("Gagal simpan remember_fact via /api/remember:", e);
