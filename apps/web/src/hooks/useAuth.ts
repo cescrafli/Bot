@@ -32,6 +32,10 @@ export function isTokenValid(token: string | null): boolean {
 }
 
 export function getStoredAuthMode(): AuthMode {
+  const sessionPass = sessionStorage.getItem(AUTH_PASSWORD_KEY);
+  const localPass = localStorage.getItem(AUTH_PASSWORD_KEY);
+  if (sessionPass === "admin" || localPass === "admin") return "jocelyn";
+
   const sessionMode = sessionStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;
   if (sessionMode === "jocelyn" || sessionMode === "default") return sessionMode;
   const localMode = localStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;

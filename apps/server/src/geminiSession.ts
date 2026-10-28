@@ -637,15 +637,23 @@ export class GeminiSession {
           const category = String(sanitizedArgs.category || "fakta").trim();
           const importance = Number(sanitizedArgs.importance) || 2;
           console.log(`🧠 [Tool remember_fact] Menyimpan: [${category}] "${fact}"`);
-          if (this.authMode === "jocelyn" && fact) {
-            await memoryService.saveUserFact(fact, category, importance);
+          let saved = false;
+          if (fact) {
+            saved = await memoryService.saveUserFact(fact, category, importance);
           }
-          toolResponseOutput = {
-            status: "saved",
-            fact,
-            category,
-            instruction: "Fakta atau preferensi pengguna ini telah berhasil disimpan ke memori jangka panjang Turso. Sekarang berikan konfirmasi lisanmu secara hangat, santai, akrab, dan tulus kepada pengguna bahwa kamu sudah mengingatnya.",
-          };
+          if (saved) {
+            toolResponseOutput = {
+              status: "saved",
+              fact,
+              category,
+              instruction: "Fakta atau preferensi pengguna ini telah berhasil disimpan ke memori jangka panjang Turso. Sekarang berikan konfirmasi lisanmu secara hangat, santai, akrab, dan tulus kepada pengguna bahwa kamu sudah mengingatnya.",
+            };
+          } else {
+            toolResponseOutput = {
+              status: "error",
+              instruction: "Penyimpanan memori ke database sedang mengalami kendala. Sampaikan dengan santai dan jujur bahwa kamu sedang mencatatnya di ingatan sesi ini dulu.",
+            };
+          }
         }
 
         this.sendToClient({

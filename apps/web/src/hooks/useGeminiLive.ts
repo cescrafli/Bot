@@ -73,7 +73,10 @@ export function useGeminiLive({
   const lastRecordedTurnRef = useRef<{ role: string; content: string; time: number } | null>(null);
 
   const recordTurnToServer = useCallback((role: "user" | "assistant", content: string) => {
-    if (getStoredAuthMode() !== "jocelyn") return;
+    const authMode = getStoredAuthMode();
+    const authPass = getStoredAuthPassword();
+    const isJocelynOrAdmin = authMode === "jocelyn" || authPass === "admin";
+    if (!isJocelynOrAdmin) return;
     const clean = content.trim();
     if (!clean) return;
 
@@ -463,7 +466,7 @@ export function useGeminiLive({
             setStatus("listening");
             setStatusMessage("Celyn aktif dan siap mendengarkan ucapanmu!");
           },
-          onmessage: (msg: any) => {
+          onmessage: async (msg: any) => {
             if (msg.serverContent?.interrupted) {
               bargeInMutedRef.current = false;
               directTurnCelynTextRef.current = "";
@@ -689,25 +692,44 @@ export function useGeminiLive({
                   const category = String(fc.args?.category || "fakta").trim();
                   const importance = Number(fc.args?.importance) || 2;
                   console.log("🧠 [Direct Live Tool] Menyimpan memori:", { fact, category });
-                  if (getStoredAuthMode() === "jocelyn" && fact) {
-                    fetch("/api/remember", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        "x-admin-password": getStoredAuthPassword() || "admin",
-                      },
-                      body: JSON.stringify({ fact, category, importance }),
-                    }).catch((e) =>
-                      console.warn("Gagal simpan remember_fact via /api/remember:", e)
-                    );
+
+                  let saved = false;
+                  if (fact) {
+                    try {
+                      const res = await fetch("/api/remember", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "x-admin-password": getStoredAuthPassword() || "admin",
+                        },
+                        body: JSON.stringify({ fact, category, importance }),
+                      });
+                      if (res.ok) {
+                        const data = await res.json().catch(() => null);
+                        if (data && data.ok) {
+                          saved = true;
+                        }
+                      }
+                    } catch (e) {
+                      console.warn("Gagal simpan remember_fact via /api/remember:", e);
+                    }
                   }
-                  toolOutput = {
-                    status: "saved",
-                    fact,
-                    category,
-                    instruction:
-                      "Fakta atau preferensi pengguna ini telah berhasil disimpan ke memori jangka panjang Turso. Sekarang berikan konfirmasi lisanmu secara hangat, santai, akrab, dan tulus kepada pengguna bahwa kamu sudah mengingatnya.",
-                  };
+
+                  if (saved) {
+                    toolOutput = {
+                      status: "saved",
+                      fact,
+                      category,
+                      instruction:
+                        "Fakta atau preferensi pengguna ini telah berhasil disimpan ke memori jangka panjang Turso. Sekarang berikan konfirmasi lisanmu secara hangat, santai, akrab, dan tulus kepada pengguna bahwa kamu sudah mengingatnya.",
+                    };
+                  } else {
+                    toolOutput = {
+                      status: "error",
+                      instruction:
+                        "Penyimpanan memori ke database sedang mengalami kendala. Sampaikan dengan santai dan jujur bahwa kamu sedang mencatatnya di ingatan sesi ini dulu.",
+                    };
+                  }
                 }
 
                 if (directSessionRef.current) {
