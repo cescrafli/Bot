@@ -58,6 +58,27 @@ export function cleanSubjectAndAux(raw: string): string {
 }
 
 /**
+ * Deteksi Subjek Fakta Profil: "celyn" vs "rafli".
+ * Memastikan bahwa jika fakta diawali oleh nama Rafli tetapi menyebut Celyn di objek/keterangan
+ * (contoh: "Rafli suka minum americano dingin untuk menemani Celyn"),
+ * sistem tetap mendeteksinya sebagai fakta milik Rafli, bukan Celyn!
+ */
+export function detectFactSubject(fact: string): "celyn" | "rafli" {
+  if (!fact || typeof fact !== "string") return "rafli";
+  const clean = fact.trim().toLowerCase();
+  if (/^(?:celyn\b|kesukaan\s+celyn|minuman\s+celyn|makanan\s+celyn|kopi\s+celyn)/i.test(clean)) {
+    return "celyn";
+  }
+  if (/^(?:rafli\b|tugas\/pr\s+penting\s+rafli|rencana\s+rafli|catatan\s+penting\s+rafli|proyek\s+rafli|proyek\/pekerjaan\s+rafli|informasi\s+personal\s+rafli|cerita\/pengalaman\s+rafli|cerita\/kejadian\s+harian\s+rafli|pengguna\b)/i.test(clean)) {
+    return "rafli";
+  }
+  if ((clean.includes("celyn") || clean.includes("orang terkasih")) && !clean.includes("rafli")) {
+    return "celyn";
+  }
+  return "rafli";
+}
+
+/**
  * Filter Kalimat Tanya / Uji Recall / Pertanyaan Pengguna.
  * Jika kalimat merupakan pertanyaan (misal: "makanan kesukaan saya apa?", "coba tebak minuman kesukaan saya apa?"),
  * sistem TIDAK BOLEH mengekstraknya sebagai deklarasi fakta baru!

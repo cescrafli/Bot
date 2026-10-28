@@ -20,6 +20,9 @@ function getWibTimestamp() {
 
 const CLEANUP_FILLERS = /\s+(?:ya|nih|dong|lho|banget|sih|deh|kan|tuh|kok|hehe|haha|wkwk|tau|tahu|itu|ini)\s*$/i;
 
+const INVALID_ITEM_RE =
+  /^(?:apa|apakah|apaan|apa\s+ya|siapa|mana|gimana|bagaimana|berapa|kenapa|mengapa|kapan|sesuatu|hal|makanan|minuman|kopi|makanan\s+apa|minuman\s+apa|kopi\s+apa|apa\s+saja|apapun|itu|ini|dia|kamu|aku|saya|bukan|ku|nya)$/i;
+
 const PREAMBLE_PATTERNS = [
   /^(?:eh\s+celyn|celyn|halo\s+celyn|hai\s+celyn)\s*,?\s*/i,
   /^(?:kemarin|tadi|dulu|waktu\s+itu)\s+(?:aku|saya|gue|gw)?\s*(?:sempat|lagi|pas)?\s*(?:jalan-jalan|nongkrong|makan\s+siang|santai|ngobrol|mikir-mikir|kepikiran)?(?:\s+bareng\s+teman|\s+bareng\s+temen)?\s*,?\s*/i,
@@ -44,6 +47,58 @@ function cleanSubjectAndAux(raw) {
     s = s.replace(stripRegex, "").trim();
   }
   return s;
+}
+
+function isInterrogativeOrRecallQuestion(text) {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+
+  // Jika ada direktif eksplisit simpan (tolong ingat/catat), bukan sekadar pertanyaan
+  if (
+    /(?:tolong|bisa|coba|tolong\s+bisa)\s+(?:kamu\s+)?(?:ingat|catat|simpan|rekam|ingetin)/i.test(clean) &&
+    !/(?:ingat\s+(?:nggak|gak|enggak)|tahu\s+(?:nggak|gak|enggak)|coba\s+tebak)/i.test(clean)
+  ) {
+    return false;
+  }
+
+  // Pola pertanyaan recall / tebak-tebakan seputar preferensi / identitas
+  if (
+    /\b(?:tebak|coba\s+tebak|kamu\s+(?:tahu|tau)|(?:tahu|tau|ingat|inget)\s+(?:nggak|gak|enggak)|tahu\s+enggak|tau\s+enggak|ingat\s+enggak|inget\s+enggak)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  // Pola kalimat tanya preferensi (misal: "saya suka makanan apa?", "minuman kesukaan saya apa?", "makanan apa yang saya suka?")
+  if (
+    /\b(?:apa\s+(?:makanan|minuman|kopi|hobi|jadwal|kegiatan)|(?:makanan|minuman|kopi|hobi|jadwal)\s+(?:kesukaan|favorit)(?:ku|nya)?\s+apa|(?:makanan|minuman|kopi)\s+apa|suka\s+(?:makanan|minuman)?\s*apa)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  // Jika diakhiri tanda tanya dan mengandung kata tanya
+  if (
+    /\?\s*$/.test(clean) &&
+    /\b(?:apa|apakah|siapa|mana|gimana|bagaimana|berapa|kenapa|mengapa|kapan)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function detectFactSubject(fact) {
+  if (!fact || typeof fact !== "string") return "rafli";
+  const clean = fact.trim().toLowerCase();
+  if (/^(?:celyn\b|kesukaan\s+celyn|minuman\s+celyn|makanan\s+celyn|kopi\s+celyn)/i.test(clean)) {
+    return "celyn";
+  }
+  if (/^(?:rafli\b|tugas\/pr\s+penting\s+rafli|rencana\s+rafli|catatan\s+penting\s+rafli|proyek\s+rafli|proyek\/pekerjaan\s+rafli|informasi\s+personal\s+rafli|cerita\/pengalaman\s+rafli|cerita\/kejadian\s+harian\s+rafli|pengguna\b)/i.test(clean)) {
+    return "rafli";
+  }
+  if ((clean.includes("celyn") || clean.includes("orang terkasih")) && !clean.includes("rafli")) {
+    return "celyn";
+  }
+  return "rafli";
 }
 
 function isTechnicalOrGenericQuestion(text) {
@@ -127,7 +182,7 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
     }
     item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
     item = cleanSubjectAndAux(item);
-    if (item.length >= 2) {
+    if (item.length >= 2 && !INVALID_ITEM_RE.test(item)) {
       return `${subjek} suka ${action} ${item} (${tag})`;
     }
   }
@@ -135,7 +190,7 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   if (/\b(?:PR|tugas|soal\s+ujian)\b/i.test(clean)) {
     let task = cleanSubjectAndAux(clean);
     task = task.replace(/^(?:ada|punya|ngerjain|mengerjakan)\s+/i, "").trim();
-    if (task.length >= 2) {
+    if (task.length >= 2 && !INVALID_ITEM_RE.test(task)) {
       return `Tugas/PR penting Rafli: ${task}`;
     }
   }
@@ -155,16 +210,28 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   ) {
     let proj = cleanSubjectAndAux(clean);
     proj = proj.replace(/^(?:lagi|sedang)?\s*(?:ngerjain|mengerjakan|bikin|membuat|garap|ngoding)\s+/i, "").trim();
-    return `Rafli sedang mengerjakan/membuat ${proj}`;
+    if (proj.length >= 2 && !INVALID_ITEM_RE.test(proj)) {
+      return `Rafli sedang mengerjakan/membuat ${proj}`;
+    }
   }
 
   const cleanedItem = cleanSubjectAndAux(clean);
+  if (INVALID_ITEM_RE.test(cleanedItem)) return "";
   return `Catatan penting ${subjek}: ${cleanedItem}`;
 }
 
 async function smartUpsertUserProfile(db, fact, category = "fakta", importance = 2, wibNow) {
   const cleanFact = String(fact || "").trim();
   if (!cleanFact || cleanFact.length < 3) return null;
+
+  // Anti-corruption guardrail: refuse to store questions, recall tests, or garbage items
+  if (
+    isInterrogativeOrRecallQuestion(cleanFact) ||
+    /\b(?:makan\s+apa|minum\s+apa|suka\s+apa|apa\s+ya)\b/i.test(cleanFact) ||
+    /\?\s*$/.test(cleanFact)
+  ) {
+    return null;
+  }
 
   const validCategory = [
     "preferensi", "jadwal", "identitas", "fakta", "catatan", "topik", "proyek", "rencana"
@@ -189,35 +256,50 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
   }
 
   // 2. Level 2: Filter Konteks Cerdas (Smart Context Matching)
-  const lowerFact = cleanFact.toLowerCase();
-  const isCelyn = lowerFact.includes("celyn") || lowerFact.includes("orang terkasih");
+  const subject = detectFactSubject(cleanFact);
+  const isCelyn = subject === "celyn";
 
   let existingTargetId = null;
 
   // Domain A: Preferensi Minuman / Kopi
-  const isDrink = /minum|kopi|minuman|americano|espresso|latte|teh|jus|boba|air/i.test(cleanFact);
-  if (validCategory === "preferensi" && isDrink) {
+  const isDrink = /minum|kopi|minuman|americano|espresso|latte|teh|jus|boba|air|ngopi/i.test(cleanFact);
+  if (isDrink && (validCategory === "preferensi" || /suka\s+minum|minuman|kopi/i.test(cleanFact))) {
     const candidate = isCelyn
       ? await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%minum%' OR fact LIKE '%kopi%') AND fact LIKE 'Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
         )
       : await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%minum%' OR fact LIKE '%kopi%') AND fact NOT LIKE 'Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
         );
     if (candidate.rows.length > 0) {
       existingTargetId = Number(candidate.rows[0].id);
     }
   }
 
-  // Domain B: Preferensi Makanan
-  const isFood = /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sayur|buah|daging/i.test(cleanFact);
-  if (!existingTargetId && validCategory === "preferensi" && isFood) {
+  // Domain B: Preferensi Makanan (Non-Reason)
+  const isFood = /makan|makanan|doyan|sate|ikan|mie|ayam|nasi|sushi|sayur|buah|daging|steak|pizza|rendang|roti|bakso|soto|bebek/i.test(cleanFact);
+  const isReason = /alasan\s+kesukaan|karena\s+kenangan|karena\s+nenek|alasan\s+suka/i.test(cleanFact);
+  if (!existingTargetId && isFood && !isReason && (validCategory === "preferensi" || /suka\s+makan|makanan/i.test(cleanFact))) {
     const candidate = isCelyn
       ? await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%makan%') AND fact LIKE 'Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
         )
       : await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%makan%') AND fact NOT LIKE 'Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
+        );
+    if (candidate.rows.length > 0) {
+      existingTargetId = Number(candidate.rows[0].id);
+    }
+  }
+
+  // Domain B2: Alasan Preferensi Sentimental
+  if (!existingTargetId && isReason && (validCategory === "preferensi" || /alasan/i.test(cleanFact))) {
+    const candidate = isCelyn
+      ? await db.execute(
+          "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%alasan%') AND fact LIKE 'Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
+        )
+      : await db.execute(
+          "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%alasan%') AND fact NOT LIKE 'Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
         );
     if (candidate.rows.length > 0) {
       existingTargetId = Number(candidate.rows[0].id);
@@ -228,14 +310,40 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
   const isProject = validCategory === "proyek" || /mengerjakan|proyek|project|pekerjaan|ngoding|garap/i.test(cleanFact);
   if (!existingTargetId && isProject) {
     const candidate = await db.execute(
-      "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' LIMIT 1"
+      "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' OR fact LIKE '%pekerjaan%' LIMIT 1"
     );
     if (candidate.rows.length > 0) {
       existingTargetId = Number(candidate.rows[0].id);
     }
   }
 
-  // Domain D: Jadwal & Pengingat Waktu
+  // Domain D: Catatan Tugas / PR Pengguna
+  const isHomework = /\b(?:PR|tugas|soal\s+ujian)\b/i.test(cleanFact) || /Tugas\/PR\s+penting/i.test(cleanFact);
+  if (!existingTargetId && isHomework) {
+    const candidate = await db.execute(
+      "SELECT id, fact FROM user_profile WHERE fact LIKE '%Tugas/PR%' OR fact LIKE '%ada PR%' OR fact LIKE '%tugas penting%' LIMIT 1"
+    );
+    if (candidate.rows.length > 0) {
+      existingTargetId = Number(candidate.rows[0].id);
+    }
+  }
+
+  // Domain E: Catatan Kesehatan & Alergi
+  const isAllergy = /alergi|pantangan|tidak bisa makan|nggak bisa makan/i.test(cleanFact);
+  if (!existingTargetId && isAllergy) {
+    const candidate = isCelyn
+      ? await db.execute(
+          "SELECT id, fact FROM user_profile WHERE fact LIKE 'Celyn%' AND (fact LIKE '%alergi%' OR fact LIKE '%pantangan%') LIMIT 1"
+        )
+      : await db.execute(
+          "SELECT id, fact FROM user_profile WHERE fact NOT LIKE 'Celyn%' AND (fact LIKE '%alergi%' OR fact LIKE '%pantangan%') LIMIT 1"
+        );
+    if (candidate.rows.length > 0) {
+      existingTargetId = Number(candidate.rows[0].id);
+    }
+  }
+
+  // Domain F: Jadwal & Pengingat Waktu
   const isSchedule = validCategory === "jadwal" || /jadwal|pengingat|agenda/i.test(cleanFact);
   if (!existingTargetId && isSchedule) {
     const timeMatch = cleanFact.match(/(?:jam|pukul)\s*(\d+(?::\d+)?)/i);
@@ -248,16 +356,35 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
         existingTargetId = Number(candidate.rows[0].id);
       }
     }
+    if (!existingTargetId) {
+      const candidate = await db.execute(
+        "SELECT id, fact FROM user_profile WHERE category = 'jadwal' OR fact LIKE '%Pengingat kegiatan%' LIMIT 1"
+      );
+      if (candidate.rows.length > 0) {
+        existingTargetId = Number(candidate.rows[0].id);
+      }
+    }
   }
 
-  // Domain E: Pencocokan Kata Kunci Entitas Non-Stopwords
+  // Domain G: Topik Pembahasan
+  const isTopic = validCategory === "topik" || /topik\s+yang\s+dibahas/i.test(cleanFact);
+  if (!existingTargetId && isTopic) {
+    const candidate = await db.execute(
+      "SELECT id, fact FROM user_profile WHERE category = 'topik' OR fact LIKE '%Topik yang dibahas%' LIMIT 1"
+    );
+    if (candidate.rows.length > 0) {
+      existingTargetId = Number(candidate.rows[0].id);
+    }
+  }
+
+  // Domain H: Pencocokan Kata Kunci Entitas Non-Stopwords
   if (!existingTargetId) {
     const stopwords = new Set([
       "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
       "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
       "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
       "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman",
-      "catatan", "fakta", "informasi", "kegiatan", "penting"
+      "catatan", "fakta", "informasi", "kegiatan", "penting", "karena", "untuk", "dengan", "dan"
     ]);
     const words = cleanFact
       .toLowerCase()
@@ -268,12 +395,12 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
     for (const kw of words) {
       const candidate = isCelyn
         ? await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND fact LIKE ? LIMIT 1",
-            args: [validCategory, `%${kw}%`],
+            sql: "SELECT id, fact FROM user_profile WHERE fact LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
+            args: [`%${kw}%`],
           })
         : await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact NOT LIKE '%Celyn%' AND fact LIKE ? LIMIT 1",
-            args: [validCategory, `%${kw}%`],
+            sql: "SELECT id, fact FROM user_profile WHERE fact NOT LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
+            args: [`%${kw}%`],
           });
       if (candidate.rows.length > 0) {
         existingTargetId = Number(candidate.rows[0].id);
@@ -392,10 +519,12 @@ Format output WAJIB JSON:
     if (Array.isArray(parsed.newFacts)) {
       for (const fact of parsed.newFacts) {
         if (typeof fact === "string" && fact.length > 3) {
-          if (isTechnicalOrGenericQuestion(fact)) continue;
-          const distilled = summarizeFactEssence(fact, "catatan");
+          if (isTechnicalOrGenericQuestion(fact) || isInterrogativeOrRecallQuestion(fact)) continue;
+          const isDrinkOrFood = /minum|kopi|minuman|makan|makanan|doyan/i.test(fact);
+          const defaultCat = isDrinkOrFood ? "preferensi" : "catatan";
+          const distilled = summarizeFactEssence(fact, defaultCat);
           if (distilled && distilled.length > 5) {
-            await smartUpsertUserProfile(db, distilled, "catatan", 2, wibNow);
+            await smartUpsertUserProfile(db, distilled, defaultCat, 2, wibNow);
           }
         }
       }

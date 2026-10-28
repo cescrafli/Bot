@@ -10,6 +10,7 @@ import {
   isTechnicalOrGenericQuestion,
   isInterrogativeOrRecallQuestion,
   INVALID_ITEM_RE,
+  detectFactSubject,
   MemoryCategory,
 } from "@celyn/shared";
 
@@ -419,36 +420,36 @@ export class MemoryService {
 
       // 2. Level 2: Filter Konteks Cerdas (Smart Context Matching)
       // Jika konteks sudah ada di database, jangan buat baris ganda, cukup perbarui baris yang ada!
-      const lowerFact = cleanFact.toLowerCase();
-      const isCelyn = lowerFact.includes("celyn") || lowerFact.includes("orang terkasih");
+      const subject = detectFactSubject(cleanFact);
+      const isCelyn = subject === "celyn";
 
       let existingTargetId: number | null = null;
 
       // Domain A: Preferensi Minuman / Kopi
-      const isDrink = /minum|kopi|minuman|americano|espresso|latte|teh|jus|boba|air/i.test(cleanFact);
-      if (validCategory === "preferensi" && isDrink) {
+      const isDrink = /minum|kopi|minuman|americano|espresso|latte|teh|jus|boba|air|ngopi/i.test(cleanFact);
+      if (isDrink && (validCategory === "preferensi" || /suka\s+minum|minuman|kopi/i.test(cleanFact))) {
         const candidate = isCelyn
           ? await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%minum%' OR fact LIKE '%kopi%') AND fact LIKE 'Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
             )
           : await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%minum%' OR fact LIKE '%kopi%') AND fact NOT LIKE 'Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
             );
         if (candidate.rows.length > 0) {
           existingTargetId = Number(candidate.rows[0].id);
         }
       }
 
-      // Domain B: Preferensi Makanan
+      // Domain B: Preferensi Makanan (Non-Reason)
       const isFood = /makan|makanan|doyan|sate|ikan|mie|ayam|nasi|sushi|sayur|buah|daging|steak|pizza|rendang|roti|bakso|soto|bebek/i.test(cleanFact);
-      const isReason = /alasan\s+kesukaan|karena\s+kenangan|karena\s+nenek/i.test(cleanFact);
-      if (!existingTargetId && validCategory === "preferensi" && isFood && !isReason) {
+      const isReason = /alasan\s+kesukaan|karena\s+kenangan|karena\s+nenek|alasan\s+suka/i.test(cleanFact);
+      if (!existingTargetId && isFood && !isReason && (validCategory === "preferensi" || /suka\s+makan|makanan/i.test(cleanFact))) {
         const candidate = isCelyn
           ? await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%makan%') AND fact LIKE 'Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
             )
           : await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%makan%') AND fact NOT LIKE 'Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
             );
         if (candidate.rows.length > 0) {
           existingTargetId = Number(candidate.rows[0].id);
@@ -456,13 +457,13 @@ export class MemoryService {
       }
 
       // Domain B2: Alasan Preferensi Sentimental
-      if (!existingTargetId && validCategory === "preferensi" && isReason) {
+      if (!existingTargetId && isReason && (validCategory === "preferensi" || /alasan/i.test(cleanFact))) {
         const candidate = isCelyn
           ? await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND fact LIKE '%alasan kesukaan%' LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%alasan%') AND fact LIKE 'Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
             )
           : await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE (category = 'preferensi' OR fact LIKE '%alasan%') AND fact NOT LIKE 'Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
             );
         if (candidate.rows.length > 0) {
           existingTargetId = Number(candidate.rows[0].id);
@@ -473,14 +474,40 @@ export class MemoryService {
       const isProject = validCategory === "proyek" || /mengerjakan|proyek|project|pekerjaan|ngoding|garap/i.test(cleanFact);
       if (!existingTargetId && isProject) {
         const candidate = await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' OR fact LIKE '%pekerjaan%' LIMIT 1"
         );
         if (candidate.rows.length > 0) {
           existingTargetId = Number(candidate.rows[0].id);
         }
       }
 
-      // Domain D: Jadwal & Pengingat Waktu
+      // Domain D: Catatan Tugas / PR Pengguna
+      const isHomework = /\b(?:PR|tugas|soal\s+ujian)\b/i.test(cleanFact) || /Tugas\/PR\s+penting/i.test(cleanFact);
+      if (!existingTargetId && isHomework) {
+        const candidate = await db.execute(
+          "SELECT id, fact FROM user_profile WHERE fact LIKE '%Tugas/PR%' OR fact LIKE '%ada PR%' OR fact LIKE '%tugas penting%' LIMIT 1"
+        );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain E: Catatan Kesehatan & Alergi
+      const isAllergy = /alergi|pantangan|tidak bisa makan|nggak bisa makan/i.test(cleanFact);
+      if (!existingTargetId && isAllergy) {
+        const candidate = isCelyn
+          ? await db.execute(
+              "SELECT id, fact FROM user_profile WHERE fact LIKE 'Celyn%' AND (fact LIKE '%alergi%' OR fact LIKE '%pantangan%') LIMIT 1"
+            )
+          : await db.execute(
+              "SELECT id, fact FROM user_profile WHERE fact NOT LIKE 'Celyn%' AND (fact LIKE '%alergi%' OR fact LIKE '%pantangan%') LIMIT 1"
+            );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain F: Jadwal & Pengingat Waktu
       const isSchedule = validCategory === "jadwal" || /jadwal|pengingat|agenda/i.test(cleanFact);
       if (!existingTargetId && isSchedule) {
         const timeMatch = cleanFact.match(/(?:jam|pukul)\s*(\d+(?::\d+)?)/i);
@@ -493,16 +520,35 @@ export class MemoryService {
             existingTargetId = Number(candidate.rows[0].id);
           }
         }
+        if (!existingTargetId) {
+          const candidate = await db.execute(
+            "SELECT id, fact FROM user_profile WHERE category = 'jadwal' OR fact LIKE '%Pengingat kegiatan%' LIMIT 1"
+          );
+          if (candidate.rows.length > 0) {
+            existingTargetId = Number(candidate.rows[0].id);
+          }
+        }
       }
 
-      // Domain E: Pencocokan Kata Kunci Entitas Non-Stopwords
+      // Domain G: Topik Pembahasan
+      const isTopic = validCategory === "topik" || /topik\s+yang\s+dibahas/i.test(cleanFact);
+      if (!existingTargetId && isTopic) {
+        const candidate = await db.execute(
+          "SELECT id, fact FROM user_profile WHERE category = 'topik' OR fact LIKE '%Topik yang dibahas%' LIMIT 1"
+        );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain H: Pencocokan Kata Kunci Entitas Non-Stopwords
       if (!existingTargetId) {
         const stopwords = new Set([
           "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
           "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
           "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
           "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman",
-          "catatan", "fakta", "informasi", "kegiatan", "penting"
+          "catatan", "fakta", "informasi", "kegiatan", "penting", "karena", "untuk", "dengan", "dan"
         ]);
         const words = cleanFact
           .toLowerCase()
@@ -513,12 +559,12 @@ export class MemoryService {
         for (const kw of words) {
           const candidate = isCelyn
             ? await db.execute({
-                sql: "SELECT id, fact FROM user_profile WHERE category = ? AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND fact LIKE ? LIMIT 1",
-                args: [validCategory, `%${kw}%`],
+                sql: "SELECT id, fact FROM user_profile WHERE fact LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
+                args: [`%${kw}%`],
               })
             : await db.execute({
-                sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact NOT LIKE '%Celyn%' AND fact LIKE ? LIMIT 1",
-                args: [validCategory, `%${kw}%`],
+                sql: "SELECT id, fact FROM user_profile WHERE fact NOT LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
+                args: [`%${kw}%`],
               });
           if (candidate.rows.length > 0) {
             existingTargetId = Number(candidate.rows[0].id);

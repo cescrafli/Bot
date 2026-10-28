@@ -23,6 +23,7 @@ import {
   isTechnicalOrGenericQuestion,
   isInterrogativeOrRecallQuestion,
   INVALID_ITEM_RE,
+  detectFactSubject,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -780,6 +781,42 @@ async function runTtsTests() {
   assert(
     memPrompt.includes("sate maranggi"),
     "Blok memori Turso Cloud terverifikasi memuat fakta makanan kesukaan 'sate maranggi'"
+  );
+
+  // Uji Deteksi Subjek Presisi (detectFactSubject)
+  assert(
+    detectFactSubject("Rafli suka minum americano dingin (minuman/kopi kesukaan)") === "rafli",
+    "detectFactSubject presisi mengidentifikasi subjek Rafli"
+  );
+  assert(
+    detectFactSubject("Rafli suka minum americano dingin untuk mengurangi gula dan menemani Celyn minum americano dingin (minuman kesukaan)") === "rafli",
+    "detectFactSubject tidak tertipu oleh penyebutan kata 'Celyn' di objek/keterangan fakta Rafli"
+  );
+  assert(
+    detectFactSubject("Celyn (orang terkasih Rafli) suka minum matcha latte dingin (minuman/kopi kesukaan)") === "celyn",
+    "detectFactSubject presisi mengidentifikasi subjek Celyn"
+  );
+  assert(
+    detectFactSubject("Celyn suka makan ikan salmon") === "celyn",
+    "detectFactSubject mengidentifikasi preferensi Celyn yang diawali kata Celyn"
+  );
+
+  // Uji Smart Context Matching: Fakta dengan konteks sama TIDAK menambah baris baru, melainkan DI-UPDATE
+  const updatedDrink = await memoryService.saveUserFact(
+    "Rafli suka minum americano dingin untuk mengurangi gula dan menemani Celyn minum americano dingin (minuman kesukaan)",
+    "preferensi",
+    3
+  );
+  assert(
+    updatedDrink === true,
+    "Smart Context Update Engine sukses memperbarui baris preferensi minuman yang sudah ada"
+  );
+
+  // Kembalikan ke format ringkas kanonikal pada ID 3
+  await memoryService.saveUserFact(
+    "Rafli suka minum americano dingin (minuman/kopi kesukaan)",
+    "preferensi",
+    3
   );
 
   // Uji Pengenalan PR & Tugas Pengguna (Personal Homework/Tasks)
