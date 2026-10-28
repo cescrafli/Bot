@@ -20,13 +20,21 @@ async function getTursoMemoryBlock() {
     } catch {}
 
     const factsRs = await db.execute(
-      "SELECT fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 8"
+      "SELECT category, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 8"
     );
     const summariesRs = await db.execute(
       "SELECT summary, user_mood, created_at FROM session_summaries ORDER BY created_at DESC LIMIT 2"
     );
 
-    const facts = factsRs.rows.map((r) => `- ${r.fact}`);
+    const facts = factsRs.rows.map((r) => {
+      const cat = String(r.category || "").toLowerCase();
+      let prefix = "[Catatan]";
+      if (cat === "preferensi") prefix = "[Preferensi & Kesukaan / Minuman & Makanan Favorit]";
+      else if (cat === "jadwal") prefix = "[Jadwal & Pengingat Waktu]";
+      else if (cat === "identitas") prefix = "[Identitas & Profil Pengguna]";
+      else if (cat === "fakta") prefix = "[Fakta Penting]";
+      return `- ${prefix} ${r.fact}`;
+    });
     const summaries = summariesRs.rows.map((r) => {
       const dateStr = r.created_at ? String(r.created_at).slice(0, 10) : "";
       const mood = r.user_mood ? ` (Mood: ${r.user_mood})` : "";
@@ -52,7 +60,12 @@ async function getTursoMemoryBlock() {
 1. Bersikaplah seperti teman dekat yang mengingat cerita sebelumnya secara tulus.
 2. JANGAN PERNAH terdengar seperti robot atau membaca database.
 3. JANGAN PERNAH menyebutkan atau membahas model AI pihak ketiga atau perusahaan luar. Kamu adalah Celyn, AI yang dirancang dan diprogram murni oleh Rafli.
-4. Gunakan memori ini jika relevan untuk menyapa atau menanggapi obrolan pengguna.`);
+4. Gunakan memori ini jika relevan untuk menyapa atau menanggapi obrolan pengguna.
+5. WAJIB MENJAWAB PREFERENSI & KESUKAAN PENGGUNA DENGAN TEGAS & YAKIN:
+   - Semua fakta di atas tentang "Rafli" adalah tentang pengguna (kamu/lawan bicaramu saat ini di sesi admin).
+   - Jika pengguna bertanya tentang kesukaannya, minuman favorit, kopi kesukaan/favorit, makanan, hobi, jadwal, atau fakta yang ada di daftar memori di atas (misalnya: "kamu tau kopi kesukaanku apa?", "kopi favoritku apa?", "aku suka apa?"):
+     Kamu WAJIB LANGSUNG MENJAWAB dengan tegas, hangat, akrab, dan yakin berdasarkan fakta di memorimu (contoh: "Kamu kan suka minum americano dingin!" atau "Kopi kesukaanmu kan americano dingin!").
+   - DILARANG KERAS menjawab "belum tahu spesifiknya", "belum tahu", "lupa", atau pura-pura belum tahu jika faktanya sudah ada di daftar memori di atas!`);
 
     return parts.join("\n\n");
   } catch (err) {

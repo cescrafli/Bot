@@ -650,6 +650,16 @@ async function runTtsTests() {
     "Blok memori memuat instruksi tegas Anti-Vendor & Anti-Third-Party Guardrail"
   );
   assert(
+    memPrompt.includes("Preferensi & Kesukaan / Minuman & Makanan Favorit") &&
+    memPrompt.includes("americano dingin"),
+    "Memory block memuat kategori preferensi terformat lengkap dengan fakta kopi kesukaan americano dingin"
+  );
+  assert(
+    memPrompt.includes("WAJIB MENJAWAB PREFERENSI & KESUKAAN PENGGUNA DENGAN TEGAS & YAKIN") &&
+    memPrompt.includes("Kopi kesukaanmu kan americano dingin!"),
+    "Memory block memuat panduan recall mandatori anti-ragu untuk preferensi pengguna"
+  );
+  assert(
     !memPrompt.includes("Gemini") && !memPrompt.includes("Google"),
     "Blok memori bebas 100% dari penyebutan nama vendor Gemini/Google"
   );

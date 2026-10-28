@@ -422,7 +422,7 @@ export function useGeminiLive({
                       fact: {
                         type: Type.STRING,
                         description:
-                          "Isi fakta atau preferensi yang harus diingat secara jelas dan ringkas (contoh: 'Rafli suka minum americano dingin', 'Rafli ada jadwal meeting jam 8 malam')",
+                          "Isi fakta atau preferensi yang harus diingat secara jelas dan ringkas (contoh: 'Rafli suka minum americano dingin (kopi/minuman kesukaan)', 'Rafli ada jadwal meeting jam 8 malam')",
                       },
                       category: {
                         type: Type.STRING,
