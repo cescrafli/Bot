@@ -1,57 +1,65 @@
 # Celyn AI Bot
 
-Teman ngobrol visual AI interaktif yang dirancang untuk berbicara langsung lewat suara, berekspresi secara visual, dan mengingat hal-hal penting seputar keseharianmu.
+Teman ngobrol visual AI interaktif yang bisa berbicara dua arah lewat suara langsung (real-time voice), berekspresi secara visual, serta mengingat obrolan dan preferensimu secara mandiri.
 
 ![Celyn AI](apps/web/public/celyn_avatar.png)
 
 ---
 
-## Yang Bisa Dilakukan Celyn
+## Fitur Utama
 
-- 🎙️ **Ngobrol Suara Langsung**: Berbicara dua arah layaknya teleponan tanpa jeda kaku. Celyn bisa disela kapan saja saat kamu mulai bicara.
-- 🎭 **Avatar 2.5D & 3D**: Ekspresi wajah dan gerak bibir dinamis (senang, mikir, kaget, sedih, malu) dengan dukungan model 3D VRM.
-- 🧠 **Memori Jangka Panjang**: Celyn otomatis merangkum dan mengingat preferensi, makanan/minuman kesukaan, cerita harian, jadwal, dan tugas pentingmu ke database cloud (Turso).
-- 🖥️ **Bisa Lihat Layar (Screen Share)**: Nemenin kamu saat koding, membaca dokumen, atau membahas materi di layar dengan konsumsi token yang hemat.
-- 💬 **Fleksibel & Terbuka**: Siap menjawab berbagai hal—mulai dari koding, sains, fakta umum, hingga obrolan santai dan teman curhat.
-
----
-
-## Struktur Folder
-
-Proyek ini menggunakan arsitektur monorepo sederhana:
-
-- **`apps/web`**: Frontend antarmuka avatar, visual canvas, dan audio streaming (React, Vite, Tailwind CSS, Three.js).
-- **`apps/server`**: Server backend lokal dan WebSocket proxy (Node.js, TypeScript).
-- **`packages/shared`**: Modul bersama berisi kepribadian Celyn, aturan memori, dan fungsi utilitas.
-- **`api/`**: Serverless functions untuk deployment Vercel (`/api/token`, `/api/record`, `/api/remember`, `/api/summarize`, `/api/health`).
-- **`scripts/`**: Kumpulan script pengujian otomatis (`test-pipeline.ts`) dan utilitas database.
+- 🎙️ **Real-Time Voice Streaming**: Ngobrol dua arah dengan latensi rendah layaknya telepon biasa. Mendukung selaan langsung (interruption handling) kapan pun kamu mulai bicara.
+- 🎭 **Visual Avatar (2.5D Canvas & 3D VRM)**: Ekspresi wajah dan gerak bibir (lip-sync) responsif mengikuti emosi obrolan (senang, mikir, kaget, sedih, tersipu).
+- 🧠 **Smart Autonomous Memory (Turso Cloud)**:
+  - Otomatis merangkum preferensi, jadwal, hobi, dan tugas ke database cloud tanpa perlu diperintah manual.
+  - Dilengkapi filter anti-soal teknis dan anti-interogatif agar pertanyaan/tebakan tidak merusak data profil.
+  - *Smart Context Update*: Jika konteks topik sudah pernah dicatat, data lama otomatis diperbarui tanpa membuat baris duplikat.
+  - Mengingat hingga 200 putaran riwayat percakapan terakhir (*cross-session topic recall*).
+- 🖥️ **Screen Share Aware**: Celyn bisa melihat layarmu saat koding, browsing, atau membaca tugas dengan algoritma *change detection* hemat token.
+- 🌐 **Deployment Fleksibel**: Siap dijalankan di komputer lokal (Node.js + Express) maupun dideploy langsung ke cloud via Vercel Serverless.
 
 ---
 
-## Cara Menjalankan di Komputer Lokal
+## Struktur Proyek
+
+Monorepo berbasis npm workspaces:
+
+- **`apps/web`**: Frontend React, Vite, Tailwind CSS, Three.js (VRM 3D), dan Web Audio API.
+- **`apps/server`**: Server backend Node.js, Express, WebSocket, dan Edge TTS proxy.
+- **`packages/shared`**: Modul bersama berisi aturan persona Celyn, ekstraktor memori, prosodi suara, dan tipedata.
+- **`api/`**: Serverless functions untuk Vercel (`token`, `record`, `remember`, `summarize`, `health`).
+- **`scripts/`**: Kumpulan script uji pipeline otomatis (`test-pipeline.ts`) dan pemeliharaan database.
+
+---
+
+## Cara Menjalankan di Lokal
 
 ### 1. Kebutuhan Sistem
-- **Node.js** v18 atau yang lebih baru.
-- **Gemini API Key** (dapat dibuat gratis di [Google AI Studio](https://aistudio.google.com/)).
-- *(Opsional untuk memori cloud)* Database **Turso** (dapat dibuat gratis di [turso.tech](https://turso.tech)).
+- **Node.js** v18+
+- **Gemini API Key** (gratis di [Google AI Studio](https://aistudio.google.com/))
+- *(Opsional)* Database **Turso** untuk memori cloud permanen ([turso.tech](https://turso.tech))
 
-### 2. Install Dependensi
+### 2. Instalasi
 ```bash
+git clone https://github.com/cescrafli/Bot.git
+cd Bot
 npm install
 ```
 
-### 3. Konfigurasi Lingkungan (`.env`)
-Buat file `.env` di folder utama:
+### 3. Konfigurasi Environment (`.env`)
+Salin atau buat file `.env` di direktori utama:
 
 ```env
 # Gemini API Key (Wajib)
-GEMINI_API_KEY=isi_dengan_api_key_gemini_kamu
+GEMINI_API_KEY=isi_api_key_kamu_di_sini
+GEMINI_MODEL=gemini-3.8-live
+GEMINI_VOICE=Aoede
 
-# Konfigurasi Database Turso (Untuk Memori Jangka Panjang)
-TURSO_DATABASE_URL=libsql://nama-db.turso.io
-TURSO_AUTH_TOKEN=isi_dengan_token_turso_kamu
+# Database Turso (Opsional untuk memori permanen)
+TURSO_DATABASE_URL=libsql://nama-db-kamu.turso.io
+TURSO_AUTH_TOKEN=isi_token_turso_kamu
 
-# Password Akses Sesi Admin
+# Password Sesi Admin
 ADMIN_PASSWORD=admin
 
 # Port Server Lokal
@@ -59,24 +67,21 @@ PORT=3001
 ```
 
 ### 4. Jalankan Aplikasi
-Jalankan backend dan frontend sekaligus dengan satu perintah:
-
 ```bash
 npm run dev
 ```
-
-Buka browser di **`http://localhost:5173`**.
+Akses antarmuka web di **`http://localhost:5173`**.
 
 ---
 
-## Perintah Penting
+## Perintah npm
 
-| Perintah | Deskripsi |
+| Perintah | Fungsi |
 |---|---|
-| `npm run dev` | Menjalankan web client dan backend server secara bersamaan |
-| `npm run test:pipeline` | Menjalankan seluruh pengujian otomatis sistem |
-| `npm run build` | Melakukan kompilasi build produksi untuk semua workspace |
-| `npm run db:check` | Memeriksa isi memori yang tersimpan di database Turso |
+| `npm run dev` | Menjalankan client dan backend bersamaan |
+| `npm run test:pipeline` | Menjalankan smoke test terpadu (audio, emosi, prompt, dan database) |
+| `npm run build` | Melakukan build produksi seluruh paket |
+| `npm run db:check` | Memeriksa isi memori yang tersimpan di Turso Cloud |
 
 ---
 
