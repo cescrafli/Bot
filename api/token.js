@@ -29,7 +29,7 @@ async function getTursoMemoryBlock() {
     let recentTurns = [];
     try {
       const logsRs = await db.execute(
-        "SELECT role, content, created_at FROM chat_logs ORDER BY id DESC LIMIT 25"
+        "SELECT role, content, created_at FROM chat_logs ORDER BY id DESC LIMIT 200"
       );
       if (logsRs.rows.length > 0) {
         recentTurns = logsRs.rows.reverse().map((r) => {
