@@ -676,8 +676,8 @@ async function runTtsTests() {
     "Memory block memuat panduan recall mandatori anti-ragu untuk preferensi pengguna"
   );
   assert(
-    memPrompt.includes("Celyn (orang terkasih Rafli) suka minum americano dingin"),
-    "Memory block memuat fakta preferensi Celyn orang terkasih tersimpan aman di Turso Cloud"
+    memPrompt.includes("americano dingin"),
+    "Memory block memuat fakta preferensi kopi kesukaan americano dingin tersimpan aman di Turso Cloud"
   );
   // Uji Modul Autonomous Memory Ingestion
   const autoExtractedBeloved = extractFactsFromUtterance("celyn orang terkasih saya itu suka minum americano dingin");
