@@ -42,7 +42,7 @@ export type ServerMessage =
   | {
       type: "tool_call";
       id?: string;
-      name: "set_expression" | "point_at_screen";
+      name: "set_expression" | "point_at_screen" | "remember_fact";
       args: Record<string, unknown>;
     }
   | {

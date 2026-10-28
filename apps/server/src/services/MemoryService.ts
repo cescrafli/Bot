@@ -3,7 +3,7 @@ dotenv.config();
 
 import { createClient, Client } from "@libsql/client";
 import { GoogleGenAI } from "@google/genai";
-import { getWibTimestamp } from "@celyn/shared";
+import { getWibTimestamp, extractFactsFromUtterance } from "@celyn/shared";
 
 export interface UserFact {
   id?: number;
@@ -251,11 +251,33 @@ export class MemoryService {
         console.warn("[MEMORY] ⚠️ Gagal menulis chat_log:", err);
       }
     }
+
+    // ⚡ Autonomous Memory Ingestion (Zero-Manual Input):
+    // Setiap kali pengguna berbicara atau mengetik kalimat seputar preferensi/jadwal/fakta,
+    // sistem di latar belakang otomatis mengekstrak fakta dan menyimpannya langsung ke database Turso!
+    if (role === "user") {
+      this.autoExtractAndSaveFacts(cleanContent).catch((err) => {
+        console.warn("[MEMORY] ⚠️ Gagal auto-ekstraksi fakta:", err);
+      });
+    }
+  }
+
+  /**
+   * Ekstraksi dan penyimpanan memori otomatis di latar belakang tanpa input manual.
+   */
+  async autoExtractAndSaveFacts(userUtterance: string): Promise<void> {
+    const extracted = extractFactsFromUtterance(userUtterance);
+    if (extracted.length === 0) return;
+
+    for (const item of extracted) {
+      console.log(`[MEMORY] 🤖 [Auto-Memory Engine] Terdeteksi fakta/preferensi baru: [${item.category}] "${item.fact}"`);
+      await this.saveUserFact(item.fact, item.category, item.importance);
+    }
   }
 
   /**
    * Menyimpan fakta, preferensi, atau jadwal pengguna secara real-time ke Turso Cloud
-   * ketika pengguna memintanya ("Celyn tolong ingat...", "ingat ya...").
+   * dengan Smart Upsert & Anti-Collision (membedakan Rafli vs Celyn dan entitas unik).
    */
   public async saveUserFact(
     fact: string,
@@ -278,13 +300,50 @@ export class MemoryService {
     }
 
     try {
-      // Periksa apakah sudah ada fakta dengan kata kunci serupa di kategori yang sama
-      const existing = await db.execute({
-        sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE ? LIMIT 1",
-        args: [validCategory, `%${cleanFact.slice(0, 30)}%`],
-      });
+      // Smart Entity Matching:
+      // Bedakan subjek 'Celyn' vs 'Rafli', dan cari kata kunci entitas unik (misal: 'americano', 'mie ayam', 'jam 8')
+      const isCelyn = cleanFact.toLowerCase().includes("celyn");
+      const isRafli = cleanFact.toLowerCase().includes("rafli");
 
-      if (existing.rows.length > 0) {
+      // Ekstrak kata kunci inti
+      const stopwords = new Set([
+        "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
+        "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan"
+      ]);
+      const words = cleanFact
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !stopwords.has(w));
+
+      const entityKeyword = words[0] || "";
+
+      let existing;
+      if (entityKeyword) {
+        if (isCelyn) {
+          existing = await db.execute({
+            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE '%Celyn%' AND fact LIKE ? LIMIT 1",
+            args: [validCategory, `%${entityKeyword}%`],
+          });
+        } else if (isRafli) {
+          existing = await db.execute({
+            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE '%Rafli%' AND fact LIKE ? LIMIT 1",
+            args: [validCategory, `%${entityKeyword}%`],
+          });
+        } else {
+          existing = await db.execute({
+            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE ? LIMIT 1",
+            args: [validCategory, `%${entityKeyword}%`],
+          });
+        }
+      } else {
+        existing = await db.execute({
+          sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE ? LIMIT 1",
+          args: [validCategory, `%${cleanFact.slice(0, 30)}%`],
+        });
+      }
+
+      if (existing && existing.rows.length > 0) {
         const id = existing.rows[0].id;
         await db.execute({
           sql: "UPDATE user_profile SET fact = ?, importance = ?, updated_at = ? WHERE id = ?",

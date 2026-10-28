@@ -18,6 +18,7 @@ import {
   buildExpressiveSsml,
   buildContextualGreetingPrompt,
   analyzeHumanVoiceFrame,
+  extractFactsFromUtterance,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -114,11 +115,24 @@ const tools = [
       required: ["x", "y"],
     },
   },
+  {
+    name: "remember_fact",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        fact: { type: "STRING" },
+        category: { enum: ["preferensi", "jadwal", "identitas", "fakta", "catatan"] },
+        importance: { type: "NUMBER" },
+      },
+      required: ["fact"],
+    },
+  },
 ];
 
-assert(tools.length === 2, "Tepat 2 tool AI terdaftar untuk Celyn");
+assert(tools.length === 3, "Tepat 3 tool AI terdaftar untuk Celyn");
 assert(tools[0].name === "set_expression", "Tool 'set_expression' tersedia");
 assert(tools[1].name === "point_at_screen", "Tool 'point_at_screen' tersedia");
+assert(tools[2].name === "remember_fact", "Tool 'remember_fact' tersedia untuk memori otonom");
 
 // 4. Uji Normalisasi & Pemetaan Sinonim Emosi Avatar
 console.log("\n--- 4. Uji Normalisasi Emosi Avatar & Deteksi Emosi Pengguna ---");
@@ -658,6 +672,24 @@ async function runTtsTests() {
     memPrompt.includes("WAJIB MENJAWAB PREFERENSI & KESUKAAN PENGGUNA DENGAN TEGAS & YAKIN") &&
     memPrompt.includes("Kopi kesukaanmu kan americano dingin!"),
     "Memory block memuat panduan recall mandatori anti-ragu untuk preferensi pengguna"
+  );
+  assert(
+    memPrompt.includes("Celyn (orang terkasih Rafli) suka minum americano dingin"),
+    "Memory block memuat fakta preferensi Celyn orang terkasih tersimpan aman di Turso Cloud"
+  );
+  // Uji Modul Autonomous Memory Ingestion
+  const autoExtractedBeloved = extractFactsFromUtterance("celyn orang terkasih saya itu suka minum americano dingin");
+  assert(
+    autoExtractedBeloved.length > 0 &&
+    autoExtractedBeloved[0].fact.includes("Celyn (orang terkasih Rafli)") &&
+    autoExtractedBeloved[0].fact.includes("americano dingin"),
+    "Autonomous Memory Ingestion berhasil mengekstrak fakta orang terkasih tanpa input manual"
+  );
+  const autoExtractedUser = extractFactsFromUtterance("aku suka makan nasi padang lauk rendang");
+  assert(
+    autoExtractedUser.length > 0 &&
+    autoExtractedUser[0].fact.includes("Rafli suka makan nasi padang"),
+    "Autonomous Memory Ingestion berhasil mengekstrak preferensi makanan pengguna tanpa perintah manual"
   );
   assert(
     !memPrompt.includes("Gemini") && !memPrompt.includes("Google"),
