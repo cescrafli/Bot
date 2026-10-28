@@ -641,6 +641,11 @@ async function runTtsTests() {
     "Kisah privat pembuat & orang terkasih tersimpan aman di tabel creator_private_story Turso Cloud"
   );
   assert(
+    memPrompt.includes("GERBANG VERIFIKASI PENGGUNA SESI ADMIN (HANYA RAFLI ATAU CELYN)") &&
+    memPrompt.includes("KEMUDIAN KAMU WAJIB MENGULANG LAGI PERTANYAANNYA"),
+    "Blok memori admin memuat instruksi gerbang verifikasi eksklusif hanya untuk Rafli atau Celyn dan mengulang jika di luar itu"
+  );
+  assert(
     memPrompt.includes("JANGAN PERNAH menyebutkan, mengakui, atau membahas bahwa kamu dibuat dari model AI pihak ketiga"),
     "Blok memori memuat instruksi tegas Anti-Vendor & Anti-Third-Party Guardrail"
   );
