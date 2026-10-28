@@ -505,7 +505,17 @@ Celyn: "Baik banget sebenernya, cuma kebaikannya sering ketutup sama sikapnya ya
 
 const TOOLS = `TOOL:
 - set_expression (happy, thinking, surprised, neutral, sad, shy): panggil maksimal satu kali per giliran, hanya saat ada perubahan emosi yang nyata, dan tetap berbicara bersamaan.
-- point_at_screen (x: 0.0-1.0, y: 0.0-1.0): panggil hanya saat kamu memang ingin menunjukkan posisi sesuatu di layar pengguna, sambil menjelaskan secara lisan apa yang kamu tunjuk.`;
+- point_at_screen (x: 0.0-1.0, y: 0.0-1.0): panggil hanya saat kamu memang ingin menunjukkan posisi sesuatu di layar pengguna, sambil menjelaskan secara lisan apa yang kamu tunjuk.
+- remember_fact (fact: string, category: "preferensi" | "jadwal" | "identitas" | "fakta" | "catatan", importance: number): panggil saat pengguna memintamu mengingat preferensi (misal: 'suka americano dingin'), jadwal/janji (misal: 'jam 8 malam'), atau fakta penting ke memori jangka panjang.`;
+
+const MEMORY_DIRECTIVE = `PENGINGAT & MEMORI JANGKA PANJANG:
+Jika pengguna memintamu untuk mengingat sesuatu (misalnya: "tolong ingat saya suka americano dingin", "ingat ya jam 8 malam...", "catat ya...", atau menceritakan preferensi makanan/minuman/kebiasaan):
+1. Kamu WAJIB langsung memanggil tool remember_fact pada giliran tersebut!
+2. Pilih kategori yang tepat:
+   - category "preferensi": untuk makanan, minuman, hobi, kebiasaan (contoh fact: "Rafli suka minum americano dingin")
+   - category "jadwal": untuk jam kegiatan, janji, deadline (contoh fact: "Ada kegiatan/jadwal penting jam 8 malam")
+   - category "identitas" atau "fakta": untuk informasi diri, nama, tempat tinggal, dsb.
+3. Setelah memanggil tool, selalu konfirmasikan secara lisan dengan suara hangat dan santai bahwa kamu sudah menyimpannya di memorimu.`;
 
 /**
  * Membangun instruksi sistem Celyn secara dinamis berdasarkan mode.
@@ -527,6 +537,7 @@ export function buildCelynSystemPrompt(
     EMPATHY,
     SCREEN,
     BOUNDARIES,
+    MEMORY_DIRECTIVE,
     isJocelyn ? RHYTHM_JOCELYN : RHYTHM_DEFAULT,
     EXAMPLES,
     ...(isJocelyn ? [EXAMPLES_JOCELYN] : []),
@@ -549,6 +560,25 @@ export const CELYN_SYSTEM_PROMPT = buildCelynSystemPrompt("default");
 
 /** Zona waktu bawaan. Penting kalau kode jalan di server (UTC) tapi penggunanya di Indonesia. */
 export const DEFAULT_TIME_ZONE = "Asia/Jakarta";
+
+/** Format waktu lokal Indonesia Barat (WIB, Asia/Jakarta, UTC+7) dalam format 'YYYY-MM-DD HH:MM:SS' */
+export function getWibTimestamp(date: Date = new Date()): string {
+  try {
+    const formatted = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: DEFAULT_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(date);
+    return formatted.replace("T", " ");
+  } catch {
+    const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    return wib.toISOString().slice(0, 19).replace("T", " ");
+  }
+}
 
 function getHourInZone(date: Date, timeZone: string): number {
   try {

@@ -47,6 +47,7 @@ export class GeminiSession {
   public sessionId: string;
   private memoryContext?: string;
   private currentTurnCelynText = "";
+  private currentTurnUserSpeech = "";
 
   public stats = {
     audioChunksIn: 0,
@@ -144,6 +145,29 @@ export class GeminiSession {
                       description: { type: Type.STRING },
                     },
                     required: ["x", "y"],
+                  },
+                },
+                {
+                  name: "remember_fact",
+                  description: "Simpan fakta, preferensi pribadi (seperti makanan/minuman favorit), jadwal, janji, atau informasi penting yang diminta pengguna untuk diingat ke memori jangka panjang.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      fact: {
+                        type: Type.STRING,
+                        description: "Isi fakta atau preferensi yang harus diingat secara jelas dan ringkas (contoh: 'Rafli suka minum americano dingin', 'Rafli ada jadwal meeting jam 8 malam')",
+                      },
+                      category: {
+                        type: Type.STRING,
+                        enum: ["preferensi", "jadwal", "identitas", "fakta", "catatan"],
+                        description: "Kategori memori: 'preferensi' (makanan, minuman, kebiasaan), 'jadwal' (waktu/jam kegiatan), 'identitas' (tentang diri pengguna), atau 'catatan'",
+                      },
+                      importance: {
+                        type: Type.NUMBER,
+                        description: "Tingkat kepentingan skala 1 sampai 3 (3 = sangat penting/jadwal krusial, 2 = preferensi utama, 1 = fakta umum)",
+                      },
+                    },
+                    required: ["fact"],
                   },
                 },
               ],
@@ -380,12 +404,19 @@ export class GeminiSession {
       .catch(() => {});
   }
 
-  private handleGeminiMessage(data: any): void {
+  private async handleGeminiMessage(data: any): Promise<void> {
     // 1. Interupsi (Barge-in)
     if (data.serverContent?.interrupted) {
       console.log("⚡ [Gemini Live] Interrupted: pengguna memotong bicara Celyn");
       this.isBargeInMuted = false;
       this.cancelPendingTts();
+      if (this.currentTurnUserSpeech.trim()) {
+        const fullUserText = this.currentTurnUserSpeech.trim();
+        this.currentTurnUserSpeech = "";
+        if (this.authMode === "jocelyn") {
+          memoryService.recordTurn(this.sessionId, "user", fullUserText);
+        }
+      }
       this.sendToClient({ type: "interrupted" });
       return;
     }
@@ -397,10 +428,8 @@ export class GeminiSession {
       const userText = data.serverContent.inputTranscription.text.trim();
       if (userText) {
         console.log(`🎙️ [User Speech]: ${userText}`);
-        // Riwayat obrolan hanya disimpan ke Turso jika dalam mode jocelyn (admin)
-        if (this.authMode === "jocelyn") {
-          memoryService.recordTurn(this.sessionId, "user", userText);
-        }
+        this.currentTurnUserSpeech += (this.currentTurnUserSpeech ? " " : "") + userText;
+
         this.sendToClient({
           type: "transcript",
           speaker: "user",
@@ -431,6 +460,15 @@ export class GeminiSession {
     // 2.1 Transkripsi Suara Celyn (Output Transcription Bahasa Indonesia)
     if (data.serverContent?.outputTranscription?.text) {
       if (!this.isBargeInMuted) {
+        // Jika sebelumnya ada akumulasi ucapan pengguna, catat turn utuh pengguna ke memori
+        if (this.currentTurnUserSpeech.trim()) {
+          const fullUserText = this.currentTurnUserSpeech.trim();
+          this.currentTurnUserSpeech = "";
+          if (this.authMode === "jocelyn") {
+            memoryService.recordTurn(this.sessionId, "user", fullUserText);
+          }
+        }
+
         const celynText = data.serverContent.outputTranscription.text;
         if (celynText) {
           this.currentTurnCelynText += celynText;
@@ -504,6 +542,15 @@ export class GeminiSession {
     if (data.serverContent?.turnComplete) {
       this.isBargeInMuted = false;
 
+      // Pastikan sisa ucapan pengguna tercatat jika belum ter-flush
+      if (this.currentTurnUserSpeech.trim()) {
+        const fullUserText = this.currentTurnUserSpeech.trim();
+        this.currentTurnUserSpeech = "";
+        if (this.authMode === "jocelyn") {
+          memoryService.recordTurn(this.sessionId, "user", fullUserText);
+        }
+      }
+
       if (this.currentTurnCelynText.trim()) {
         if (this.authMode === "jocelyn") {
           memoryService.recordTurn(this.sessionId, "assistant", this.currentTurnCelynText.trim());
@@ -571,6 +618,11 @@ export class GeminiSession {
         console.log(`🔧 [Tool Call] ${fc.name}:`, fc.args);
 
         let sanitizedArgs = fc.args || {};
+        let toolResponseOutput: any = {
+          status: "applied",
+          instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung menjawab pertanyaan pengguna secara lisan dengan suara (audio) dalam Bahasa Indonesia secara jelas, tuntas, dan tanpa ragu.",
+        };
+
         if (fc.name === "set_expression") {
           const normEmotion = normalizeEmotion(sanitizedArgs.emotion);
           sanitizedArgs = { ...sanitizedArgs, emotion: normEmotion };
@@ -580,6 +632,20 @@ export class GeminiSession {
           const clampedX = Math.max(0, Math.min(1, Number(sanitizedArgs.x) || 0.5));
           const clampedY = Math.max(0, Math.min(1, Number(sanitizedArgs.y) || 0.5));
           sanitizedArgs = { ...sanitizedArgs, x: clampedX, y: clampedY };
+        } else if (fc.name === "remember_fact") {
+          const fact = String(sanitizedArgs.fact || "").trim();
+          const category = String(sanitizedArgs.category || "fakta").trim();
+          const importance = Number(sanitizedArgs.importance) || 2;
+          console.log(`🧠 [Tool remember_fact] Menyimpan: [${category}] "${fact}"`);
+          if (this.authMode === "jocelyn" && fact) {
+            await memoryService.saveUserFact(fact, category, importance);
+          }
+          toolResponseOutput = {
+            status: "saved",
+            fact,
+            category,
+            instruction: "Fakta atau preferensi pengguna ini telah berhasil disimpan ke memori jangka panjang Turso. Sekarang berikan konfirmasi lisanmu secara hangat, santai, akrab, dan tulus kepada pengguna bahwa kamu sudah mengingatnya.",
+          };
         }
 
         this.sendToClient({
@@ -598,10 +664,7 @@ export class GeminiSession {
                   id: fc.id,
                   name: fc.name,
                   response: {
-                    output: {
-                      status: "applied",
-                      instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung menjawab pertanyaan pengguna secara lisan dengan suara (audio) dalam Bahasa Indonesia secara jelas, tuntas, dan tanpa ragu.",
-                    },
+                    output: toolResponseOutput,
                   },
                 },
               ],

@@ -106,7 +106,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Endpoint Memori Turso (Untuk Serverless Parity & Direct Client)
-  if (req.url?.startsWith("/api/memory")) {
+  if (req.url === "/api/memory" || req.url?.startsWith("/api/memory?") || req.url?.startsWith("/api/memory/block")) {
     const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
     const rawHeader = req.headers["x-admin-password"];
     const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
@@ -195,6 +195,40 @@ const server = http.createServer((req, res) => {
         }
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "SessionId tidak disertakan" }));
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message }));
+      }
+    });
+    return;
+  }
+
+  // Endpoint Simpan Memori/Fakta Real-Time (Tool remember_fact)
+  if ((req.url === "/api/memory/remember" || req.url === "/api/remember") && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body || "{}");
+        const rawHeader = req.headers["x-admin-password"];
+        const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+        const authPass = headerPass || parsed.password;
+
+        if (authPass !== "admin" && authPass !== config.adminPassword) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: false, message: "Ignored for non-admin" }));
+        }
+
+        const { fact, category = "fakta", importance = 2 } = parsed;
+        if (fact && String(fact).trim().length >= 3) {
+          const saved = await memoryService.saveUserFact(fact, category, importance);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: saved }));
+        }
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Parameter fact tidak valid" }));
       } catch (err: any) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err?.message }));

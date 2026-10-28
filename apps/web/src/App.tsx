@@ -266,10 +266,10 @@ export function App() {
 
   // Handler Login dengan Auto-Unlock AudioContext (User Gesture Sah Browser)
   const handleLogin = useCallback(
-    (password: string) => {
+    (password: string, rememberMe = true) => {
       // ⚡ Buka kunci AudioContext seketika saat klik Login agar browser mengizinkan audio out tanpa open mic
       audioEngine.unlockAudio();
-      return auth.login(password);
+      return auth.login(password, rememberMe);
     },
     [audioEngine, auth]
   );

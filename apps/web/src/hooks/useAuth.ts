@@ -36,6 +36,19 @@ export function getStoredAuthMode(): AuthMode {
   if (sessionMode === "jocelyn" || sessionMode === "default") return sessionMode;
   const localMode = localStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;
   if (localMode === "jocelyn" || localMode === "default") return localMode;
+
+  // Fallback pengaman: Periksa token auth yang tersimpan jika key mode belum sinkron
+  const token = sessionStorage.getItem(AUTH_STORAGE_KEY) || localStorage.getItem(AUTH_STORAGE_KEY);
+  if (token) {
+    try {
+      const decoded = atob(token);
+      const parts = decoded.split(":");
+      if (parts[2] === "jocelyn" || parts[2] === "default") {
+        return parts[2] as AuthMode;
+      }
+    } catch {}
+  }
+
   return "default";
 }
 

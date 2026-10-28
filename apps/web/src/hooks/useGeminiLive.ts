@@ -69,6 +69,7 @@ export function useGeminiLive({
     `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
   );
   const directTurnCelynTextRef = useRef<string>("");
+  const directUserTurnBufferRef = useRef<string>("");
 
   const recordTurnToServer = useCallback((role: "user" | "assistant", content: string) => {
     if (getStoredAuthMode() !== "jocelyn") return;
@@ -411,6 +412,33 @@ export function useGeminiLive({
                     required: ["x", "y"],
                   },
                 },
+                {
+                  name: "remember_fact",
+                  description:
+                    "Simpan fakta, preferensi pribadi (seperti makanan/minuman favorit), jadwal, janji, atau informasi penting yang diminta pengguna untuk diingat ke memori jangka panjang.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      fact: {
+                        type: Type.STRING,
+                        description:
+                          "Isi fakta atau preferensi yang harus diingat secara jelas dan ringkas (contoh: 'Rafli suka minum americano dingin', 'Rafli ada jadwal meeting jam 8 malam')",
+                      },
+                      category: {
+                        type: Type.STRING,
+                        enum: ["preferensi", "jadwal", "identitas", "fakta", "catatan"],
+                        description:
+                          "Kategori memori: 'preferensi' (makanan, minuman, kebiasaan), 'jadwal' (waktu/jam kegiatan), 'identitas' (tentang diri pengguna), atau 'catatan'",
+                      },
+                      importance: {
+                        type: Type.NUMBER,
+                        description:
+                          "Tingkat kepentingan skala 1 sampai 3 (3 = sangat penting/jadwal krusial, 2 = preferensi utama, 1 = fakta umum)",
+                      },
+                    },
+                    required: ["fact"],
+                  },
+                },
               ],
             },
           ],
@@ -425,6 +453,10 @@ export function useGeminiLive({
             if (msg.serverContent?.interrupted) {
               bargeInMutedRef.current = false;
               directTurnCelynTextRef.current = "";
+              if (directUserTurnBufferRef.current.trim()) {
+                recordTurnToServer("user", directUserTurnBufferRef.current.trim());
+                directUserTurnBufferRef.current = "";
+              }
               handleServerMessage({ type: "interrupted" });
               return;
             }
@@ -434,7 +466,7 @@ export function useGeminiLive({
               backupPcmChunksRef.current = [];
               const userText = msg.serverContent.inputTranscription.text.trim();
               if (userText) {
-                recordTurnToServer("user", userText);
+                directUserTurnBufferRef.current += (directUserTurnBufferRef.current ? " " : "") + userText;
                 handleServerMessage({
                   type: "transcript",
                   speaker: "user",
@@ -462,6 +494,11 @@ export function useGeminiLive({
             }
 
             if (msg.serverContent?.outputTranscription?.text) {
+              if (directUserTurnBufferRef.current.trim()) {
+                recordTurnToServer("user", directUserTurnBufferRef.current.trim());
+                directUserTurnBufferRef.current = "";
+              }
+
               if (!bargeInMutedRef.current) {
                 const celynText = msg.serverContent.outputTranscription.text;
                 if (celynText) {
@@ -534,6 +571,11 @@ export function useGeminiLive({
 
             if (msg.serverContent?.turnComplete) {
               bargeInMutedRef.current = false;
+
+              if (directUserTurnBufferRef.current.trim()) {
+                recordTurnToServer("user", directUserTurnBufferRef.current.trim());
+                directUserTurnBufferRef.current = "";
+              }
 
               if (directTurnCelynTextRef.current.trim()) {
                 recordTurnToServer("assistant", directTurnCelynTextRef.current.trim());
@@ -622,6 +664,38 @@ export function useGeminiLive({
                   args: fc.args || {},
                 });
 
+                let toolOutput: any = {
+                  status: "applied",
+                  instruction:
+                    "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung memberikan respon lisanmu dengan suara (audio) dalam Bahasa Indonesia.",
+                };
+
+                if (fc.name === "remember_fact") {
+                  const fact = String(fc.args?.fact || "").trim();
+                  const category = String(fc.args?.category || "fakta").trim();
+                  const importance = Number(fc.args?.importance) || 2;
+                  console.log("🧠 [Direct Live Tool] Menyimpan memori:", { fact, category });
+                  if (getStoredAuthMode() === "jocelyn" && fact) {
+                    fetch("/api/memory/remember", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "x-admin-password": getStoredAuthPassword() || "admin",
+                      },
+                      body: JSON.stringify({ fact, category, importance }),
+                    }).catch((e) =>
+                      console.warn("Gagal simpan remember_fact via /api/memory/remember:", e)
+                    );
+                  }
+                  toolOutput = {
+                    status: "saved",
+                    fact,
+                    category,
+                    instruction:
+                      "Fakta atau preferensi pengguna ini telah berhasil disimpan ke memori jangka panjang Turso. Sekarang berikan konfirmasi lisanmu secara hangat, santai, akrab, dan tulus kepada pengguna bahwa kamu sudah mengingatnya.",
+                  };
+                }
+
                 if (directSessionRef.current) {
                   try {
                     directSessionRef.current.sendToolResponse({
@@ -630,10 +704,7 @@ export function useGeminiLive({
                           id: fc.id,
                           name: fc.name,
                           response: {
-                            output: {
-                              status: "applied",
-                              instruction: "Ekspresi visual berhasil diterapkan. Sekarang kamu WAJIB langsung memberikan respon lisanmu dengan suara (audio) dalam Bahasa Indonesia.",
-                            },
+                            output: toolOutput,
                           },
                         },
                       ],
@@ -908,6 +979,7 @@ export function useGeminiLive({
           directTtsTurnIdRef.current++;
           directTtsBufferRef.current = "";
           backupPcmChunksRef.current = [];
+          directUserTurnBufferRef.current = "";
           recordTurnToServer("user", msg.text);
           const userEmotion = inferUserEmotion(msg.text);
           if (userEmotion.emotion !== "neutral") {

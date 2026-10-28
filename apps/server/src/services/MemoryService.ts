@@ -3,6 +3,7 @@ dotenv.config();
 
 import { createClient, Client } from "@libsql/client";
 import { GoogleGenAI } from "@google/genai";
+import { getWibTimestamp } from "@celyn/shared";
 
 export interface UserFact {
   id?: number;
@@ -201,18 +202,71 @@ export class MemoryService {
     buffer.push({ role, content: cleanContent });
     this.sessionBuffers.set(sessionId, buffer);
 
-    // Simpan ke tabel chat_logs di Turso
+    // Simpan ke tabel chat_logs di Turso dengan timestamp lokal WIB (Asia/Jakarta, UTC+7)
     const db = this.getClient();
     if (db) {
+      const wibNow = getWibTimestamp();
       try {
         await db.execute({
-          sql: "INSERT INTO chat_logs (session_id, role, content) VALUES (?, ?, ?)",
-          args: [sessionId, role, cleanContent],
+          sql: "INSERT INTO chat_logs (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+          args: [sessionId, role, cleanContent, wibNow],
         });
-        console.log(`[MEMORY] 💾 Chat log tersimpan: [${role}] "${cleanContent.slice(0, 50)}"`);
+        console.log(`[MEMORY] 💾 Chat log tersimpan (${wibNow} WIB): [${role}] "${cleanContent.slice(0, 50)}"`);
       } catch (err) {
         console.warn("[MEMORY] ⚠️ Gagal menulis chat_log:", err);
       }
+    }
+  }
+
+  /**
+   * Menyimpan fakta, preferensi, atau jadwal pengguna secara real-time ke Turso Cloud
+   * ketika pengguna memintanya ("Celyn tolong ingat...", "ingat ya...").
+   */
+  public async saveUserFact(
+    fact: string,
+    category: string = "fakta",
+    importance: number = 2
+  ): Promise<boolean> {
+    const cleanFact = this.sanitizeText(fact.trim());
+    if (!cleanFact || cleanFact.length < 3) return false;
+
+    const validCategory = ["preferensi", "jadwal", "identitas", "fakta", "catatan"].includes(category)
+      ? category
+      : "fakta";
+    const validImportance = Math.min(3, Math.max(1, Number(importance) || 2));
+    const wibNow = getWibTimestamp();
+
+    const db = this.getClient();
+    if (!db) {
+      console.warn("[MEMORY] ⚠️ Database client belum siap untuk menyimpan fakta:", cleanFact);
+      return false;
+    }
+
+    try {
+      // Periksa apakah sudah ada fakta dengan kata kunci serupa di kategori yang sama
+      const existing = await db.execute({
+        sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE ? LIMIT 1",
+        args: [validCategory, `%${cleanFact.slice(0, 30)}%`],
+      });
+
+      if (existing.rows.length > 0) {
+        const id = existing.rows[0].id;
+        await db.execute({
+          sql: "UPDATE user_profile SET fact = ?, importance = ?, updated_at = ? WHERE id = ?",
+          args: [cleanFact, validImportance, wibNow, id],
+        });
+        console.log(`[MEMORY] 🔄 Preferensi/fakta ID ${id} diperbarui: [${validCategory}] "${cleanFact}" (${wibNow} WIB)`);
+      } else {
+        await db.execute({
+          sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance, updated_at) VALUES (?, ?, ?, ?)",
+          args: [validCategory, cleanFact, validImportance, wibNow],
+        });
+        console.log(`[MEMORY] 🧠 Fakta/preferensi baru tersimpan: [${validCategory}] "${cleanFact}" (${wibNow} WIB)`);
+      }
+      return true;
+    } catch (err) {
+      console.error("[MEMORY] ❌ Gagal menyimpan fakta user_profile:", err);
+      return false;
     }
   }
 
@@ -331,13 +385,15 @@ Format output WAJIB JSON:
         // Fallback cerdas lokal jika API AI sedang sibuk (503/404)
         const firstUserMsg = buffer.find((m) => m.role === "user")?.content || "Obrolan santai";
         const cleanPreview = firstUserMsg.slice(0, 80);
+        const wibNow = getWibTimestamp();
         await db.execute({
-          sql: "INSERT INTO session_summaries (session_id, summary, user_mood, key_topics) VALUES (?, ?, ?, ?)",
+          sql: "INSERT INTO session_summaries (session_id, summary, user_mood, key_topics, created_at) VALUES (?, ?, ?, ?, ?)",
           args: [
             sessionId,
             `Pengguna dan Celyn sempat mengobrol hangat seputar: "${cleanPreview}"`,
             "santai",
             "obrolan santai",
+            wibNow,
           ],
         });
         await this.pruneOldLogs();
@@ -350,13 +406,14 @@ Format output WAJIB JSON:
       const cleanMood = this.sanitizeText(parsed.userMood || "santai");
       const cleanTopics = this.sanitizeText(parsed.keyTopics || "");
       const rawFacts: any[] = Array.isArray(parsed.newFacts) ? parsed.newFacts : [];
+      const wibNow = getWibTimestamp();
 
       if (cleanSummary) {
         await db.execute({
-          sql: "INSERT INTO session_summaries (session_id, summary, user_mood, key_topics) VALUES (?, ?, ?, ?)",
-          args: [sessionId, cleanSummary, cleanMood, cleanTopics],
+          sql: "INSERT INTO session_summaries (session_id, summary, user_mood, key_topics, created_at) VALUES (?, ?, ?, ?, ?)",
+          args: [sessionId, cleanSummary, cleanMood, cleanTopics, wibNow],
         });
-        console.log(`[MEMORY] 📝 Ringkasan sesi tersimpan: "${cleanSummary}"`);
+        console.log(`[MEMORY] 📝 Ringkasan sesi tersimpan (${wibNow} WIB): "${cleanSummary}"`);
       }
 
       for (const item of rawFacts) {
@@ -368,14 +425,14 @@ Format output WAJIB JSON:
         if (cleanFact.length > 5) {
           if (!Number.isNaN(supersedesId) && supersedesId > 0) {
             await db.execute({
-              sql: "UPDATE user_profile SET fact = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-              args: [cleanFact, supersedesId],
+              sql: "UPDATE user_profile SET fact = ?, updated_at = ? WHERE id = ?",
+              args: [cleanFact, wibNow, supersedesId],
             });
             console.log(`[MEMORY] 🔄 Fakta ID ${supersedesId} diperbarui: "${cleanFact}"`);
           } else {
             await db.execute({
-              sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance) VALUES (?, ?, ?)",
-              args: ["fakta", cleanFact, 1],
+              sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance, updated_at) VALUES (?, ?, ?, ?)",
+              args: ["fakta", cleanFact, 1, wibNow],
             });
             console.log(`[MEMORY] 💡 Fakta baru pengguna tercatat: "${cleanFact}"`);
           }
