@@ -274,11 +274,36 @@ export class MemoryService {
     if (db) {
       const wibNow = getWibTimestamp();
       try {
-        await db.execute({
-          sql: "INSERT INTO chat_logs (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-          args: [sessionId, role, cleanContent, wibNow],
+        // Pencegahan duplikasi chat_logs: Cek apakah turn identik sudah ada di sesi yang sama atau dalam 20 detik terakhir
+        const lastIdentical = await db.execute({
+          sql: "SELECT id, session_id, created_at FROM chat_logs WHERE role = ? AND content = ? ORDER BY id DESC LIMIT 1",
+          args: [role, cleanContent],
         });
-        console.log(`[MEMORY] 💾 Chat log tersimpan (${wibNow} WIB): [${role}] "${cleanContent.slice(0, 50)}"`);
+
+        let isDuplicate = false;
+        if (lastIdentical.rows.length > 0) {
+          const row = lastIdentical.rows[0];
+          const sameSession = String(row.session_id) === sessionId;
+          const rowCreatedAt = String(row.created_at || "");
+          const rowTime = new Date(rowCreatedAt.replace(" ", "T") + "+07:00").getTime();
+          const nowTime = Date.now();
+          const diffSeconds = isNaN(rowTime) ? 999 : Math.abs(nowTime - rowTime) / 1000;
+
+          if (sameSession || diffSeconds <= 20) {
+            isDuplicate = true;
+            console.log(
+              `[MEMORY] ⏭️ Duplikasi chat_log dicegah: [${role}] "${cleanContent.slice(0, 40)}" (selisih ${diffSeconds.toFixed(1)}s, sameSession: ${sameSession})`
+            );
+          }
+        }
+
+        if (!isDuplicate) {
+          await db.execute({
+            sql: "INSERT INTO chat_logs (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            args: [sessionId, role, cleanContent, wibNow],
+          });
+          console.log(`[MEMORY] 💾 Chat log tersimpan (${wibNow} WIB): [${role}] "${cleanContent.slice(0, 50)}"`);
+        }
       } catch (err) {
         console.warn("[MEMORY] ⚠️ Gagal menulis chat_log:", err);
       }
@@ -311,7 +336,8 @@ export class MemoryService {
 
   /**
    * Menyimpan fakta, preferensi, atau jadwal pengguna secara real-time ke Turso Cloud
-   * dengan Smart Upsert & Anti-Collision (membedakan Rafli vs Celyn dan entitas unik).
+   * dengan Filter-Before-Write & Smart Context Update Engine (membedakan Rafli vs Celyn).
+   * Jika konteks fakta sudah ada di database, data TIDAK di-insert ulang melainkan di-update!
    */
   public async saveUserFact(
     fact: string,
@@ -336,65 +362,135 @@ export class MemoryService {
     }
 
     try {
-      // Smart Entity Matching:
-      // Bedakan subjek 'Celyn' vs 'Rafli', dan cari kata kunci entitas unik (misal: 'americano', 'mie ayam', 'jam 8')
-      const isCelyn = cleanFact.toLowerCase().includes("celyn");
-      const isRafli = cleanFact.toLowerCase().includes("rafli");
+      // 1. Level 1: Filter Sebelum Simpan - Exact Match Check (case-insensitive & trimmed)
+      const exactMatch = await db.execute({
+        sql: "SELECT id, importance FROM user_profile WHERE LOWER(TRIM(fact)) = LOWER(TRIM(?)) LIMIT 1",
+        args: [cleanFact],
+      });
 
-      // Ekstrak kata kunci inti
-      const stopwords = new Set([
-        "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
-        "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
-        "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
-        "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman"
-      ]);
-      const words = cleanFact
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter((w) => w.length >= 3 && !stopwords.has(w));
-
-      const entityKeyword = words[0] || "";
-
-      let existing;
-      if (entityKeyword) {
-        if (isCelyn) {
-          existing = await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE '%Celyn%' AND fact LIKE ? LIMIT 1",
-            args: [validCategory, `%${entityKeyword}%`],
-          });
-        } else if (isRafli) {
-          existing = await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE '%Rafli%' AND fact LIKE ? LIMIT 1",
-            args: [validCategory, `%${entityKeyword}%`],
-          });
-        } else {
-          existing = await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE ? LIMIT 1",
-            args: [validCategory, `%${entityKeyword}%`],
-          });
-        }
-      } else {
-        existing = await db.execute({
-          sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE ? LIMIT 1",
-          args: [validCategory, `%${cleanFact.slice(0, 30)}%`],
+      if (exactMatch.rows.length > 0) {
+        const id = Number(exactMatch.rows[0].id);
+        const existingImp = Number(exactMatch.rows[0].importance || 1);
+        const finalImp = Math.max(existingImp, validImportance);
+        await db.execute({
+          sql: "UPDATE user_profile SET importance = ?, updated_at = ? WHERE id = ?",
+          args: [finalImp, wibNow, id],
         });
+        console.log(`[MEMORY] 🔄 Fakta persis sudah ada di database (ID ${id}), diperbarui timestamp & importance: "${cleanFact}" (${wibNow} WIB)`);
+        return true;
       }
 
-      if (existing && existing.rows.length > 0) {
-        const id = existing.rows[0].id;
+      // 2. Level 2: Filter Konteks Cerdas (Smart Context Matching)
+      // Jika konteks sudah ada di database, jangan buat baris ganda, cukup perbarui baris yang ada!
+      const lowerFact = cleanFact.toLowerCase();
+      const isCelyn = lowerFact.includes("celyn") || lowerFact.includes("orang terkasih");
+
+      let existingTargetId: number | null = null;
+
+      // Domain A: Preferensi Minuman / Kopi
+      const isDrink = /minum|kopi|minuman|americano|espresso|latte|teh|jus|boba|air/i.test(cleanFact);
+      if (validCategory === "preferensi" && isDrink) {
+        const candidate = isCelyn
+          ? await db.execute(
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
+            )
+          : await db.execute(
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%minum%' OR fact LIKE '%kopi%' OR fact LIKE '%minuman%') LIMIT 1"
+            );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain B: Preferensi Makanan
+      const isFood = /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sayur|buah|daging/i.test(cleanFact);
+      if (!existingTargetId && validCategory === "preferensi" && isFood) {
+        const candidate = isCelyn
+          ? await db.execute(
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+            )
+          : await db.execute(
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+            );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain C: Proyek & Pekerjaan yang Sedang Digarap
+      const isProject = validCategory === "proyek" || /mengerjakan|proyek|project|pekerjaan|ngoding|garap/i.test(cleanFact);
+      if (!existingTargetId && isProject) {
+        const candidate = await db.execute(
+          "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' LIMIT 1"
+        );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain D: Jadwal & Pengingat Waktu
+      const isSchedule = validCategory === "jadwal" || /jadwal|pengingat|agenda/i.test(cleanFact);
+      if (!existingTargetId && isSchedule) {
+        const timeMatch = cleanFact.match(/(?:jam|pukul)\s*(\d+(?::\d+)?)/i);
+        if (timeMatch && timeMatch[1]) {
+          const candidate = await db.execute({
+            sql: "SELECT id, fact FROM user_profile WHERE (category = 'jadwal' OR fact LIKE '%jadwal%' OR fact LIKE '%pengingat%') AND fact LIKE ? LIMIT 1",
+            args: [`%${timeMatch[1]}%`],
+          });
+          if (candidate.rows.length > 0) {
+            existingTargetId = Number(candidate.rows[0].id);
+          }
+        }
+      }
+
+      // Domain E: Pencocokan Kata Kunci Entitas Non-Stopwords
+      if (!existingTargetId) {
+        const stopwords = new Set([
+          "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
+          "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
+          "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
+          "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman",
+          "catatan", "fakta", "informasi", "kegiatan", "penting"
+        ]);
+        const words = cleanFact
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter((w) => w.length >= 3 && !stopwords.has(w));
+
+        for (const kw of words) {
+          const candidate = isCelyn
+            ? await db.execute({
+                sql: "SELECT id, fact FROM user_profile WHERE category = ? AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND fact LIKE ? LIMIT 1",
+                args: [validCategory, `%${kw}%`],
+              })
+            : await db.execute({
+                sql: "SELECT id, fact FROM user_profile WHERE category = ? AND fact NOT LIKE '%Celyn%' AND fact LIKE ? LIMIT 1",
+                args: [validCategory, `%${kw}%`],
+              });
+          if (candidate.rows.length > 0) {
+            existingTargetId = Number(candidate.rows[0].id);
+            break;
+          }
+        }
+      }
+
+      // 3. Jika konteks sudah ada di database, perbarui baris tersebut (tidak perlu diinput ke db paling di update saja)
+      if (existingTargetId) {
         await db.execute({
           sql: "UPDATE user_profile SET fact = ?, importance = ?, updated_at = ? WHERE id = ?",
-          args: [cleanFact, validImportance, wibNow, id],
+          args: [cleanFact, validImportance, wibNow, existingTargetId],
         });
-        console.log(`[MEMORY] 🔄 Preferensi/fakta ID ${id} diperbarui: [${validCategory}] "${cleanFact}" (${wibNow} WIB)`);
-      } else {
-        await db.execute({
-          sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance, updated_at) VALUES (?, ?, ?, ?)",
-          args: [validCategory, cleanFact, validImportance, wibNow],
-        });
-        console.log(`[MEMORY] 🧠 Fakta/preferensi baru tersimpan: [${validCategory}] "${cleanFact}" (${wibNow} WIB)`);
+        console.log(`[MEMORY] 🔄 Konteks sudah ada di database (ID ${existingTargetId}), baris diperbarui: [${validCategory}] "${cleanFact}" (${wibNow} WIB)`);
+        return true;
       }
+
+      // 4. Jika konteks benar-benar baru, simpan baris baru ke database
+      await db.execute({
+        sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance, updated_at) VALUES (?, ?, ?, ?)",
+        args: [validCategory, cleanFact, validImportance, wibNow],
+      });
+      console.log(`[MEMORY] 🧠 Fakta baru tersimpan ke database: [${validCategory}] "${cleanFact}" (${wibNow} WIB)`);
       return true;
     } catch (err) {
       console.error("[MEMORY] ❌ Gagal menyimpan fakta user_profile:", err);
@@ -562,11 +658,8 @@ Format output WAJIB JSON:
             });
             console.log(`[MEMORY] 🔄 Fakta ID ${supersedesId} diperbarui: "${cleanFact}"`);
           } else {
-            await db.execute({
-              sql: "INSERT OR IGNORE INTO user_profile (category, fact, importance, updated_at) VALUES (?, ?, ?, ?)",
-              args: ["fakta", cleanFact, 1, wibNow],
-            });
-            console.log(`[MEMORY] 💡 Fakta baru pengguna tercatat: "${cleanFact}"`);
+            // Gunakan saveUserFact agar melalui Level 1 exact match & Level 2 smart context update!
+            await this.saveUserFact(cleanFact, "fakta", 2);
           }
         }
       }

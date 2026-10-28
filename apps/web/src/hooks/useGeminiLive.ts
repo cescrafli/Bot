@@ -70,11 +70,25 @@ export function useGeminiLive({
   );
   const directTurnCelynTextRef = useRef<string>("");
   const directUserTurnBufferRef = useRef<string>("");
+  const lastRecordedTurnRef = useRef<{ role: string; content: string; time: number } | null>(null);
 
   const recordTurnToServer = useCallback((role: "user" | "assistant", content: string) => {
     if (getStoredAuthMode() !== "jocelyn") return;
     const clean = content.trim();
     if (!clean) return;
+
+    // Client-side debounce to prevent dual transcription/turnComplete duplicate flushes
+    const now = Date.now();
+    if (
+      lastRecordedTurnRef.current &&
+      lastRecordedTurnRef.current.role === role &&
+      lastRecordedTurnRef.current.content === clean &&
+      now - lastRecordedTurnRef.current.time < 15000
+    ) {
+      return;
+    }
+    lastRecordedTurnRef.current = { role, content: clean, time: now };
+
     fetch("/api/record", {
       method: "POST",
       headers: {

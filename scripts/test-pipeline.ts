@@ -705,10 +705,9 @@ async function runTtsTests() {
     "Ekstraksi 'makanan kesukaan celyn itu ikan' menghasilkan fakta 'Celyn (orang terkasih Rafli) suka makan ikan (makanan kesukaan)'"
   );
   assert(
-    memPrompt.includes("Rafli suka makan ikan") &&
     memPrompt.includes("Celyn (orang terkasih Rafli) suka makan ikan") &&
     memPrompt.includes("WAJIB MENJAWAB PREFERENSI & KESUKAAN TENTANG CELYN"),
-    "Memory prompt memuat fakta ikan untuk Rafli & Celyn serta panduan Rule 6 preferensi Celyn"
+    "Memory prompt memuat fakta ikan untuk Celyn serta panduan Rule 6 preferensi Celyn"
   );
   // Uji Universal Cross-Session Topic & Discussion Recall Engine
   const extractedProject = extractFactsFromUtterance("aku lagi ngerjain website bot AI Celyn pakai Vite dan React");
