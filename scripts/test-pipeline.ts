@@ -21,6 +21,8 @@ import {
   extractFactsFromUtterance,
   summarizeFactEssence,
   isTechnicalOrGenericQuestion,
+  isInterrogativeOrRecallQuestion,
+  INVALID_ITEM_RE,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -744,6 +746,42 @@ async function runTtsTests() {
   const techQuestion = extractFactsFromUtterance("apa itu REST API dan bagaimana cara kerjanya?");
   assert(techQuestion.length === 0, "Pertanyaan teknikal/definisi umum diabaikan dari user_profile");
 
+  // Uji Filter Cerdas Anti-Interogatif & Uji Recall (Mencegah kata tanya 'apa' menimpa database)
+  const recallQ1 = extractFactsFromUtterance("makanan kesukaan saya apa?");
+  assert(recallQ1.length === 0, "Pertanyaan 'makanan kesukaan saya apa?' ditolak 100% dan tidak disimpan sebagai fakta");
+  const recallQ2 = extractFactsFromUtterance("Saya suka makanan apa?");
+  assert(recallQ2.length === 0, "Pertanyaan 'Saya suka makanan apa?' ditolak dan tidak merusak user_profile");
+  const recallQ3 = extractFactsFromUtterance("Coba kamu tebak makanan kesukaan saya apa dan alasan saya suka makanan itu karena apa?");
+  assert(recallQ3.length === 0, "Pertanyaan uji tebak preferensi & alasan ditolak dan tidak diekstrak sebagai fakta");
+  const recallQ4 = extractFactsFromUtterance("Minuman kesukaan saya apa ya Celyn?");
+  assert(recallQ4.length === 0, "Pertanyaan recall 'Minuman kesukaan saya apa ya Celyn?' ditolak");
+  assert(
+    isInterrogativeOrRecallQuestion("kamu tahu nggak makanan kesukaan saya apa?") === true,
+    "isInterrogativeOrRecallQuestion berhasil mendeteksi uji recall pengguna"
+  );
+  assert(
+    isInterrogativeOrRecallQuestion("coba tebak kopi kesukaanku apa") === true,
+    "isInterrogativeOrRecallQuestion berhasil mendeteksi pertanyaan tebakan preferensi"
+  );
+
+  // Uji Ekstraksi Makanan Kesukaan & Alasan Sentimental (Sate Maranggi & Nenek)
+  const sateEx = extractFactsFromUtterance("makanan kesukaanku sate maranggi");
+  assert(
+    sateEx.length > 0 && sateEx[0].fact === "Rafli suka makan sate maranggi (makanan kesukaan)",
+    "Ekstraksi 'makanan kesukaanku sate maranggi' menghasilkan fakta kanonikal 'Rafli suka makan sate maranggi (makanan kesukaan)'"
+  );
+  const sateReasonEx = extractFactsFromUtterance("Saya suka sate maranggi itu karena kenangan bersama nenek saya.");
+  assert(
+    sateReasonEx.length > 0 && sateReasonEx[0].fact.includes("menyukai sate maranggi karena kenangan bersama nenek"),
+    "Ekstraksi alasan sentimental kesukaan ('karena kenangan bersama nenek') berhasil dicatat presisi"
+  );
+
+  // Uji Verifikasi Memori Turso Cloud Memuat Sate Maranggi
+  assert(
+    memPrompt.includes("sate maranggi"),
+    "Blok memori Turso Cloud terverifikasi memuat fakta makanan kesukaan 'sate maranggi'"
+  );
+
   // Uji Pengenalan PR & Tugas Pengguna (Personal Homework/Tasks)
   const homeworkEx = extractFactsFromUtterance("Celyn aku ada PR matematika tentang matriks buat besok");
   assert(
@@ -860,6 +898,7 @@ async function runTtsTests() {
     process.exit(1);
   } else {
     console.log("🎉 SEMUA UJI PIPELINE BERHASIL DENGAN SEMPURNA!");
+    process.exit(0);
   }
 }
 

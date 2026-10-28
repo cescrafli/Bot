@@ -8,6 +8,8 @@ import {
   extractFactsFromUtterance,
   summarizeFactEssence,
   isTechnicalOrGenericQuestion,
+  isInterrogativeOrRecallQuestion,
+  INVALID_ITEM_RE,
   MemoryCategory,
 } from "@celyn/shared";
 
@@ -182,7 +184,7 @@ export class MemoryService {
       let recentTurns: string[] = [];
       try {
         const logsRs = await db.execute(
-          "SELECT role, content, created_at FROM chat_logs ORDER BY id DESC LIMIT 12"
+          "SELECT role, content, created_at FROM chat_logs ORDER BY id DESC LIMIT 25"
         );
         if (logsRs.rows.length > 0) {
           recentTurns = logsRs.rows.reverse().map((r) => {
@@ -359,6 +361,16 @@ export class MemoryService {
       return false;
     }
 
+    // Filter Anti-Interogatif & Uji Recall (Mencegah kata tanya 'apa' / tebak-tebakan merusak profil)
+    if (
+      isInterrogativeOrRecallQuestion(rawFact) ||
+      /\b(?:makan\s+apa|minum\s+apa|suka\s+apa|apa\s+ya)\b/i.test(rawFact) ||
+      /\?\s*$/.test(rawFact)
+    ) {
+      console.log(`[MEMORY] ⏭️ Kalimat interogatif/recall diabaikan dari user_profile: "${rawFact}"`);
+      return false;
+    }
+
     const validCategory = [
       "preferensi", "jadwal", "identitas", "fakta", "catatan", "topik", "proyek", "rencana"
     ].includes(category)
@@ -367,7 +379,15 @@ export class MemoryService {
 
     // Rangkum Intisari Fakta Sebelum Simpan
     const cleanFact = summarizeFactEssence(rawFact, validCategory as MemoryCategory);
-    if (!cleanFact || cleanFact.length < 3) return false;
+    if (
+      !cleanFact ||
+      cleanFact.length < 3 ||
+      isInterrogativeOrRecallQuestion(cleanFact) ||
+      /\b(?:makan\s+apa|minum\s+apa|suka\s+apa|apa\s+ya)\b/i.test(cleanFact) ||
+      /\?\s*$/.test(cleanFact)
+    ) {
+      return false;
+    }
 
     const validImportance = Math.min(3, Math.max(1, Number(importance) || 2));
     const wibNow = getWibTimestamp();
@@ -421,13 +441,28 @@ export class MemoryService {
 
       // Domain B: Preferensi Makanan
       const isFood = /makan|makanan|doyan|sate|ikan|mie|ayam|nasi|sushi|sayur|buah|daging|steak|pizza|rendang|roti|bakso|soto|bebek/i.test(cleanFact);
-      if (!existingTargetId && validCategory === "preferensi" && isFood) {
+      const isReason = /alasan\s+kesukaan|karena\s+kenangan|karena\s+nenek/i.test(cleanFact);
+      if (!existingTargetId && validCategory === "preferensi" && isFood && !isReason) {
         const candidate = isCelyn
           ? await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
             )
           : await db.execute(
-              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
+            );
+        if (candidate.rows.length > 0) {
+          existingTargetId = Number(candidate.rows[0].id);
+        }
+      }
+
+      // Domain B2: Alasan Preferensi Sentimental
+      if (!existingTargetId && validCategory === "preferensi" && isReason) {
+        const candidate = isCelyn
+          ? await db.execute(
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND fact LIKE '%alasan kesukaan%' LIMIT 1"
+            )
+          : await db.execute(
+              "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
             );
         if (candidate.rows.length > 0) {
           existingTargetId = Number(candidate.rows[0].id);

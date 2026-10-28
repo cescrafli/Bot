@@ -19,6 +19,9 @@ function getWibTimestamp() {
 
 const CLEANUP_FILLERS = /\s+(?:ya|nih|dong|lho|banget|sih|deh|kan|tuh|kok|hehe|haha|wkwk|tau|tahu|itu|ini)\s*$/i;
 
+const INVALID_ITEM_RE =
+  /^(?:apa|apakah|apaan|apa\s+ya|siapa|mana|gimana|bagaimana|berapa|kenapa|mengapa|kapan|sesuatu|hal|makanan|minuman|kopi|makanan\s+apa|minuman\s+apa|kopi\s+apa|apa\s+saja|apapun|itu|ini|dia|kamu|aku|saya|bukan|ku|nya)$/i;
+
 const PREAMBLE_PATTERNS = [
   /^(?:eh\s+celyn|celyn|halo\s+celyn|hai\s+celyn)\s*,?\s*/i,
   /^(?:kemarin|tadi|dulu|waktu\s+itu)\s+(?:aku|saya|gue|gw)?\s*(?:sempat|lagi|pas)?\s*(?:jalan-jalan|nongkrong|makan\s+siang|santai|ngobrol|mikir-mikir|kepikiran)?(?:\s+bareng\s+teman|\s+bareng\s+temen)?\s*,?\s*/i,
@@ -43,6 +46,43 @@ function cleanSubjectAndAux(raw) {
     s = s.replace(stripRegex, "").trim();
   }
   return s;
+}
+
+function isInterrogativeOrRecallQuestion(text) {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+
+  // Jika ada direktif eksplisit simpan (tolong ingat/catat), bukan sekadar pertanyaan
+  if (
+    /(?:tolong|bisa|coba|tolong\s+bisa)\s+(?:kamu\s+)?(?:ingat|catat|simpan|rekam|ingetin)/i.test(clean) &&
+    !/(?:ingat\s+(?:nggak|gak|enggak)|tahu\s+(?:nggak|gak|enggak)|coba\s+tebak)/i.test(clean)
+  ) {
+    return false;
+  }
+
+  // Pola pertanyaan recall / tebak-tebakan seputar preferensi / identitas
+  if (
+    /\b(?:tebak|coba\s+tebak|kamu\s+(?:tahu|tau)|(?:tahu|tau|ingat|inget)\s+(?:nggak|gak|enggak)|tahu\s+enggak|tau\s+enggak|ingat\s+enggak|inget\s+enggak)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  // Pola kalimat tanya preferensi (misal: "saya suka makanan apa?", "minuman kesukaan saya apa?", "makanan apa yang saya suka?")
+  if (
+    /\b(?:apa\s+(?:makanan|minuman|kopi|hobi|jadwal|kegiatan)|(?:makanan|minuman|kopi|hobi|jadwal)\s+(?:kesukaan|favorit)(?:ku|nya)?\s+apa|(?:makanan|minuman|kopi)\s+apa|suka\s+(?:makanan|minuman)?\s*apa)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  // Jika diakhiri tanda tanya dan mengandung kata tanya
+  if (
+    /\?\s*$/.test(clean) &&
+    /\b(?:apa|apakah|siapa|mana|gimana|bagaimana|berapa|kenapa|mengapa|kapan)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isTechnicalOrGenericQuestion(text) {
@@ -135,7 +175,7 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
     }
     item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
     item = cleanSubjectAndAux(item);
-    if (item.length >= 2) {
+    if (item.length >= 2 && !INVALID_ITEM_RE.test(item)) {
       return `${subjek} suka ${action} ${item} (${tag})`;
     }
   }
@@ -144,7 +184,7 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   if (/\b(?:PR|tugas|soal\s+ujian)\b/i.test(clean)) {
     let task = cleanSubjectAndAux(clean);
     task = task.replace(/^(?:ada|punya|ngerjain|mengerjakan)\s+/i, "").trim();
-    if (task.length >= 2) {
+    if (task.length >= 2 && !INVALID_ITEM_RE.test(task)) {
       return `Tugas/PR penting Rafli: ${task}`;
     }
   }
@@ -166,11 +206,14 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   ) {
     let proj = cleanSubjectAndAux(clean);
     proj = proj.replace(/^(?:lagi|sedang)?\s*(?:ngerjain|mengerjakan|bikin|membuat|garap|ngoding)\s+/i, "").trim();
-    return `Rafli sedang mengerjakan/membuat ${proj}`;
+    if (proj.length >= 2 && !INVALID_ITEM_RE.test(proj)) {
+      return `Rafli sedang mengerjakan/membuat ${proj}`;
+    }
   }
 
   // 8. Default: Catatan penting intisari
   const cleanedItem = cleanSubjectAndAux(clean);
+  if (INVALID_ITEM_RE.test(cleanedItem)) return "";
   return `Catatan penting ${subjek}: ${cleanedItem}`;
 }
 
@@ -179,8 +222,13 @@ function extractFactsFromUtterance(text) {
   const clean = text.trim();
   if (clean.length < 5) return [];
 
-  // Filter 0: Jika pertanyaan teknikal / hitungan matematika biasa, JANGAN simpan!
+  // Filter 0.1: Jika pertanyaan teknikal / hitungan matematika biasa, JANGAN simpan!
   if (isTechnicalOrGenericQuestion(clean)) {
+    return [];
+  }
+
+  // Filter 0.2: Jika ujaran adalah kalimat tanya / uji recall (misal: "makanan kesukaan saya apa?"), MUTLAK TOLAK!
+  if (isInterrogativeOrRecallQuestion(clean)) {
     return [];
   }
 
@@ -238,7 +286,7 @@ function extractFactsFromUtterance(text) {
         item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
         item = cleanSubjectAndAux(item);
 
-        if (item.length >= 2) {
+        if (item.length >= 2 && !INVALID_ITEM_RE.test(item)) {
           results.push({
             fact: `${subjek} suka ${action} ${item} (${tag})`,
             category: "preferensi",
@@ -260,12 +308,15 @@ function extractFactsFromUtterance(text) {
 
       // Prioritas 0.4: Konten direktif umum
       const subjek = isAboutBeloved ? "Celyn (orang terkasih Rafli)" : "Rafli";
-      results.push({
-        fact: `Catatan penting ${subjek}: ${cleanSubjectAndAux(rawContent)}`,
-        category: "catatan",
-        importance: 3,
-      });
-      return results;
+      const cleanGeneral = cleanSubjectAndAux(rawContent);
+      if (!INVALID_ITEM_RE.test(cleanGeneral)) {
+        results.push({
+          fact: `Catatan penting ${subjek}: ${cleanGeneral}`,
+          category: "catatan",
+          importance: 3,
+        });
+        return results;
+      }
     }
   }
 
@@ -287,13 +338,31 @@ function extractFactsFromUtterance(text) {
     }
   }
 
+  // 2. Pola Alasan Preferensi Sentimental: "(alasan ... suka [item] ... karena [alasan])" OR "(suka [item] karena [alasan])"
+  const reasonPrefMatch = clean.match(
+    /(?:alasan\s+(?:saya|aku|celyn|jocelyn|rafli)?\s*(?:suka|doyan|minum|makan)\s+([a-zA-Z0-9\s]+?)\s+(?:karena|adalah|yaitu|ialah)\s+([^.,!?\n]+))|(?:(?:saya|aku|celyn|jocelyn|rafli)\s+(?:suka|doyan|minum|makan)\s+([a-zA-Z0-9\s]+?)\s+(?:itu\s+)?karena\s+([^.,!?\n]+))/i
+  );
+  if (reasonPrefMatch) {
+    const rawTarget = cleanSubjectAndAux(reasonPrefMatch[1] || reasonPrefMatch[3] || "");
+    const rawReason = cleanItemText(reasonPrefMatch[2] || reasonPrefMatch[4] || "");
+    if (rawTarget.length >= 2 && !INVALID_ITEM_RE.test(rawTarget) && rawReason.length >= 3) {
+      const subjek = isAboutBeloved ? "Celyn (orang terkasih Rafli)" : "Rafli";
+      results.push({
+        fact: `${subjek} menyukai ${rawTarget} karena ${rawReason} (alasan kesukaan)`,
+        category: "preferensi",
+        importance: 3,
+      });
+      return results;
+    }
+  }
+
   // Pola A: "(makanan/minuman/kopi)? (kesukaan/favorit) ... adalah/itu/yaitu [item]"
   const prefNounMatch = clean.match(
     /\b(?:(?:makanan|minuman|kopi)\s+)?(?:kesukaan|favorit|paling pas di lidah|pas di lidah|cocok di lidah)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+bukan\s+|\s+karena|\s+deh|\s+tolong|\s+ya)/i
   );
   if (prefNounMatch && prefNounMatch[1]) {
     let rawItem = cleanSubjectAndAux(prefNounMatch[1]);
-    if (rawItem.length >= 2 && !/^(itu|ini|dia|kamu|aku|saya|bukan|ku|nya)$/i.test(rawItem)) {
+    if (rawItem.length >= 2 && !INVALID_ITEM_RE.test(rawItem)) {
       const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(clean) || /kopi|minuman/i.test(prefNounMatch[0]) || /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(rawItem);
       const action = isDrink ? "minum" : "makan";
       const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
@@ -315,7 +384,7 @@ function extractFactsFromUtterance(text) {
   );
   if (prefVerbMatch && prefVerbMatch[1]) {
     const rawItem = cleanSubjectAndAux(prefVerbMatch[1]);
-    if (rawItem.length >= 2 && !/^(itu|ini|dia|kamu|aku|saya|ngobrol|bicara|bukan)$/i.test(rawItem)) {
+    if (rawItem.length >= 2 && !INVALID_ITEM_RE.test(rawItem)) {
       const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|air|susu/i.test(rawItem) || /minum|ngopi/i.test(clean);
       const action = isDrink ? "minum" : "makan";
       const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
@@ -340,7 +409,7 @@ function extractFactsFromUtterance(text) {
   if (prefInversMatch && prefInversMatch[1]) {
     let rawItem = cleanSubjectAndAux(prefInversMatch[1]);
     rawItem = rawItem.replace(/^(?:ingat|tolong ingat|catat)\s+(?:ya\s+)?(?:kalau\s+|bahwa\s+)?/i, "").trim();
-    if (rawItem.length >= 2 && !/^(itu|ini|dia|kamu|aku|saya|bukan|apa|ku|nya)$/i.test(rawItem)) {
+    if (rawItem.length >= 2 && !INVALID_ITEM_RE.test(rawItem)) {
       const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(clean) || /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(rawItem);
       const action = isDrink ? "minum" : "makan";
       const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
@@ -362,7 +431,7 @@ function extractFactsFromUtterance(text) {
   );
   if (allergyMatch && allergyMatch[1]) {
     const item = cleanSubjectAndAux(allergyMatch[1]);
-    if (item.length >= 2) {
+    if (item.length >= 2 && !INVALID_ITEM_RE.test(item)) {
       const subjek = isAboutBeloved ? "Celyn (orang terkasih Rafli)" : "Rafli";
       results.push({
         fact: `${subjek} alergi ${item} (catatan kesehatan/alergi)`,
@@ -396,7 +465,7 @@ function extractFactsFromUtterance(text) {
   );
   if (projectActionMatch && projectActionMatch[1]) {
     const rawProject = cleanSubjectAndAux(projectActionMatch[1]);
-    if (rawProject.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya|ngobrol|bicara|tugas)$/i.test(rawProject)) {
+    if (rawProject.length >= 3 && !INVALID_ITEM_RE.test(rawProject)) {
       results.push({
         fact: `Rafli sedang mengerjakan/membuat ${rawProject}`,
         category: "proyek",
@@ -411,7 +480,7 @@ function extractFactsFromUtterance(text) {
   );
   if (projectNounMatch && projectNounMatch[1]) {
     const rawProject = cleanSubjectAndAux(projectNounMatch[1]);
-    if (rawProject.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(rawProject)) {
+    if (rawProject.length >= 3 && !INVALID_ITEM_RE.test(rawProject)) {
       results.push({
         fact: `Proyek/pekerjaan Rafli: ${rawProject}`,
         category: "proyek",
@@ -427,7 +496,7 @@ function extractFactsFromUtterance(text) {
   );
   if (storyMatch && storyMatch[1]) {
     const storyItem = cleanSubjectAndAux(storyMatch[1]);
-    if (storyItem.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(storyItem)) {
+    if (storyItem.length >= 3 && !INVALID_ITEM_RE.test(storyItem)) {
       results.push({
         fact: `Cerita/pengalaman Rafli: ${cleanItemText(storyMatch[0])}`,
         category: "catatan",
@@ -458,7 +527,7 @@ function extractFactsFromUtterance(text) {
   );
   if (planMatch && planMatch[1]) {
     const rawPlan = cleanSubjectAndAux(planMatch[1]);
-    if (rawPlan.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(rawPlan)) {
+    if (rawPlan.length >= 3 && !INVALID_ITEM_RE.test(rawPlan)) {
       results.push({
         fact: `Rencana Rafli: ${rawPlan}`,
         category: "rencana",
@@ -474,7 +543,7 @@ function extractFactsFromUtterance(text) {
   );
   if (topicMatch && topicMatch[1]) {
     const rawTopic = cleanSubjectAndAux(topicMatch[1]);
-    if (rawTopic.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya|apa)$/i.test(rawTopic)) {
+    if (rawTopic.length >= 3 && !INVALID_ITEM_RE.test(rawTopic)) {
       results.push({
         fact: `Topik yang dibahas bersama Rafli: ${rawTopic}`,
         category: "topik",
@@ -506,6 +575,15 @@ function extractFactsFromUtterance(text) {
 async function smartUpsertUserProfile(db, fact, category = "fakta", importance = 2, wibNow) {
   const cleanFact = String(fact || "").trim();
   if (!cleanFact || cleanFact.length < 3) return null;
+
+  // Anti-corruption guardrail: refuse to store questions, recall tests, or garbage items
+  if (
+    isInterrogativeOrRecallQuestion(cleanFact) ||
+    /\b(?:makan\s+apa|minum\s+apa|suka\s+apa|apa\s+ya)\b/i.test(cleanFact) ||
+    /\?\s*$/.test(cleanFact)
+  ) {
+    return null;
+  }
 
   const validCategory = [
     "preferensi", "jadwal", "identitas", "fakta", "catatan", "topik", "proyek", "rencana"
@@ -552,13 +630,28 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
 
   // Domain B: Preferensi Makanan
   const isFood = /makan|makanan|doyan|sate|ikan|mie|ayam|nasi|sushi|sayur|buah|daging|steak|pizza|rendang|roti|bakso|soto|bebek/i.test(cleanFact);
-  if (!existingTargetId && validCategory === "preferensi" && isFood) {
+  const isReason = /alasan\s+kesukaan|karena\s+kenangan|karena\s+nenek/i.test(cleanFact);
+  if (!existingTargetId && validCategory === "preferensi" && isFood && !isReason) {
     const candidate = isCelyn
       ? await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
         )
       : await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') LIMIT 1"
+          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND (fact LIKE '%makan%' OR fact LIKE '%makanan%') AND fact NOT LIKE '%alasan kesukaan%' LIMIT 1"
+        );
+    if (candidate.rows.length > 0) {
+      existingTargetId = Number(candidate.rows[0].id);
+    }
+  }
+
+  // Domain B2: Alasan Preferensi Sentimental
+  if (!existingTargetId && validCategory === "preferensi" && isReason) {
+    const candidate = isCelyn
+      ? await db.execute(
+          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND (fact LIKE '%Celyn%' OR fact LIKE '%orang terkasih%') AND fact LIKE '%alasan kesukaan%' LIMIT 1"
+        )
+      : await db.execute(
+          "SELECT id, fact FROM user_profile WHERE category = 'preferensi' AND fact NOT LIKE '%Celyn%' AND fact LIKE '%alasan kesukaan%' LIMIT 1"
         );
     if (candidate.rows.length > 0) {
       existingTargetId = Number(candidate.rows[0].id);
