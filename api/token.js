@@ -11,6 +11,14 @@ async function getTursoMemoryBlock() {
 
   try {
     const db = createClient({ url, authToken });
+    let privateStories = [];
+    try {
+      const storiesRs = await db.execute(
+        "SELECT content FROM creator_private_story ORDER BY id ASC"
+      );
+      privateStories = storiesRs.rows.map((r) => String(r.content || "")).filter(Boolean);
+    } catch {}
+
     const factsRs = await db.execute(
       "SELECT fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 8"
     );
@@ -25,16 +33,28 @@ async function getTursoMemoryBlock() {
       return `* [${dateStr}] ${r.summary}${mood}`;
     });
 
-    if (facts.length === 0 && summaries.length === 0) return null;
+    if (facts.length === 0 && summaries.length === 0 && privateStories.length === 0) return null;
 
-    return [
-      "### MEMORI & PENGETAHUAN TENTANG PENGGUNA (Gunakan Secara Alami & Hangat):",
-      facts.length > 0 ? "Fakta Pengguna Yang Kamu Ingat:\n" + facts.join("\n") : "",
-      summaries.length > 0 ? "Percakapan Sebelumnya:\n" + summaries.join("\n") : "",
-      "PANDUAN MENGGUNAKAN MEMORI:\n1. Bersikaplah seperti teman dekat yang mengingat cerita sebelumnya secara tulus.\n2. JANGAN PERNAH terdengar seperti robot atau membaca database.\n3. JANGAN PERNAH menyebutkan atau membahas model AI pihak ketiga atau perusahaan luar. Kamu adalah Celyn, AI yang dirancang dan diprogram murni oleh Rafli.\n4. Gunakan memori ini jika relevan untuk menyapa atau menanggapi obrolan pengguna.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const parts = [];
+    if (privateStories.length > 0) {
+      parts.push(privateStories.join("\n\n"));
+    }
+
+    parts.push("### MEMORI & PENGETAHUAN TENTANG PENGGUNA (Gunakan Secara Alami & Hangat):");
+    if (facts.length > 0) {
+      parts.push("Fakta Pengguna Yang Kamu Ingat:\n" + facts.join("\n"));
+    }
+    if (summaries.length > 0) {
+      parts.push("Percakapan Sebelumnya:\n" + summaries.join("\n"));
+    }
+
+    parts.push(`PANDUAN MENGGUNAKAN MEMORI:
+1. Bersikaplah seperti teman dekat yang mengingat cerita sebelumnya secara tulus.
+2. JANGAN PERNAH terdengar seperti robot atau membaca database.
+3. JANGAN PERNAH menyebutkan atau membahas model AI pihak ketiga atau perusahaan luar. Kamu adalah Celyn, AI yang dirancang dan diprogram murni oleh Rafli.
+4. Gunakan memori ini jika relevan untuk menyapa atau menanggapi obrolan pengguna.`);
+
+    return parts.join("\n\n");
   } catch (err) {
     console.warn("[Vercel API /api/token] Gagal mengambil memori Turso:", err?.message || err);
     return null;

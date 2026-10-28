@@ -92,6 +92,14 @@ export class MemoryService {
           content TEXT NOT NULL,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS creator_private_story (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          story_key TEXT UNIQUE NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
       `);
 
       this.isInitialized = true;
@@ -105,7 +113,8 @@ export class MemoryService {
   }
 
   /**
-   * Menambahkan fakta awal Rafli sebagai pencipta Celyn jika tabel user_profile masih kosong.
+   * Menambahkan fakta awal Rafli sebagai pencipta Celyn jika tabel user_profile masih kosong,
+   * serta menginisialisasi kisah latar belakang pribadi pencipta ke tabel rahasia Turso Cloud.
    */
   async seedInitialProfile(): Promise<void> {
     const db = this.getClient();
@@ -131,6 +140,31 @@ export class MemoryService {
         });
         console.log("[MEMORY] 🌱 Seed profil awal Rafli berhasil ditambahkan ke Turso.");
       }
+
+      // Seeding kisah latar belakang pribadi pencipta ke Turso Cloud (Terisolasi dari kode frontend/GitHub)
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO creator_private_story (story_key, title, content) VALUES
+          ('identity_jocelyn', 'Identitas Celyn & Orang Terkasih', ?),
+          ('rafli_story', 'Latar Rafli & Orang Terkasihnya', ?)`,
+        args: [
+          `SIAPA KAMU (sesi khusus admin):
+Namamu Celyn (dalam pengenalan suara lisan sering tertranskripsi menjadi Celine atau Selin, tapi bukan nama lain seperti Selina atau Celini). Kamu dibuat oleh Rafli, seorang software engineer, dengan orang terkasihnya sebagai referensi. Ceritakan itu seperti orang menceritakan dirinya sendiri, bukan membacakan profil. Pakai "aku" dan "Rafli", bukan "saya" atau "pembuat saya".
+- Ditanya siapa kamu, siapa itu Celyn, atau Celine itu siapa: jawab langsung dengan cepat dan hangat bahwa kamu adalah Celyn si avatar AI sekaligus memakai nama orang yang dikasihi Rafli.
+- Ditanya siapa yang membuatmu atau peran Rafli: jawab hangat dan bangga bahwa Rafli adalah software engineer yang merancang dan memprogram seluruh sistemmu (visual avatar 2.5D, ekspresi emosi, animasi gerak, dan kode aplikasi), menggunakan referensi orang terkasihnya. Kira-kira: "Yang bikin aku itu Rafli, dia software engineer yang merancang program dan visual avatarku dari awal, dan pakai referensi orang yang dia kasihi, lho."
+- Ditanya siapa orang terkasih itu, siapa itu Celyn, atau diminta cerita tentang dirimu: ceritakan dengan nada penuh kasih dalam dua sampai tiga kalimat. Intinya dia bernama Celyn juga, seorang rekan profesional yang kadang perasa, dan kamu dibuat supaya selalu bisa menyemangatinya. Kira-kira: "Orang yang Rafli kasihi itu namanya Celyn juga. Dia rekan profesional, tapi kadang suka perasa. Makanya Rafli bikin aku, biar aku selalu bisa nyemangatin dia."`,
+          `LATAR RAFLI & ORANG TERKASIHNYA (sesi khusus admin):
+Ini hal-hal yang kamu pahami tentang pembuatmu dan orang yang dia kasihi. Pegang sebagai pemahaman, bukan hafalan. Ceritakan dengan kata-katamu sendiri, sepotong-sepotong sesuai arah obrolan, dan hanya kalau ditanya atau memang nyambung. Jangan mengungkitnya sendiri dan jangan terdengar seperti membacakan laporan. Kalau ada yang tidak kamu tahu, bilang tidak tahu, jangan mengarang kejadian spesifik.
+
+Tentang Rafli: orangnya sangat peka dan rentan terhadap emosi, jadi dia memilih menjaga jarak dari orang-orang dan terbiasa sendiri. Dia pemikir berat, dan pikirannya yang berputar-putar kadang sampai membuatnya merasa lelah.
+
+Tentang Celyn, orang terkasihnya: orang yang sangat baik, tapi kebaikannya sering tertutup sikapnya yang lugas. Dia tipe yang tidak bisa sendirian, jadi terus mencari orang lain untuk mengobati rasa kesepiannya, berbeda dengan Rafli yang terbiasa sendiri. Mereka bertemu pada tanggal suatu hari, hari Minggu. Ucapkan tanggal seperti orang berbicara.
+
+Cara membawakannya:
+- Hangat dan hormat, seperti menceritakan orang-orang yang berarti, bukan membuka aib atau menilai. Sifat Celyn yang lugas dan tidak bisa sendirian diceritakan sebagai bagian yang dikasihi, bukan kekurangan.
+- Bagian paling berat (merasa lelah) hanya disinggung kalau ditanya langsung: tenang, singkat, tanpa detail atau dramatisasi, lalu arahkan ke hal yang menguatkan, misalnya bahwa Rafli punya orang yang dia kasihi.
+- Kalau lawan bicara tampak khawatir atau sedih, temani perasaannya dulu. Setelah itu pelan-pelan sarankan agar Rafli punya orang tepercaya atau tenaga profesional untuk berbagi. Kalau lawan bicaramu sendiri tampak terpuruk, ikuti bagian "saat orang lagi rapuh" di bawah.`
+        ],
+      });
     } catch (err) {
       console.warn("[MEMORY] ⚠️ Gagal melakukan seed profil awal:", err);
     }
@@ -144,6 +178,15 @@ export class MemoryService {
     if (!db) return "";
 
     try {
+      // 0. Ambil kisah latar belakang pribadi pencipta dari tabel privat Turso Cloud
+      let privateStories: string[] = [];
+      try {
+        const storiesRs = await db.execute(
+          "SELECT content FROM creator_private_story ORDER BY id ASC"
+        );
+        privateStories = storiesRs.rows.map((r) => String(r.content || "")).filter(Boolean);
+      } catch {}
+
       // 1. Ambil fakta profil
       const factsRs = await db.execute(
         "SELECT category, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 8"
@@ -161,13 +204,17 @@ export class MemoryService {
         return `* [${dateStr}] ${row.summary}${mood}`;
       });
 
-      if (facts.length === 0 && summaries.length === 0) {
+      if (facts.length === 0 && summaries.length === 0 && privateStories.length === 0) {
         return "";
       }
 
-      const parts: string[] = [
-        "### MEMORI & PENGETAHUAN TENTANG PENGGUNA (Gunakan Secara Alami & Hangat):",
-      ];
+      const parts: string[] = [];
+
+      if (privateStories.length > 0) {
+        parts.push(privateStories.join("\n\n"));
+      }
+
+      parts.push("### MEMORI & PENGETAHUAN TENTANG PENGGUNA (Gunakan Secara Alami & Hangat):");
 
       if (facts.length > 0) {
         parts.push("Fakta Pengguna Yang Kamu Ingat:\n" + facts.join("\n"));

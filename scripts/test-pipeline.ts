@@ -306,43 +306,29 @@ async function runTtsTests() {
     `Sapaan pembuka dinamis menyesuaikan waktu pengguna (${morningGreeting.slice(0, 35)}...)`
   );
 
-  // Uji Persona Identitas Khusus Mode Admin ('jocelyn' / Password 'admin')
-  const promptJocelyn = buildCelynSystemPrompt("jocelyn");
+  // Uji Isolasi Kode Sumber Shared: 0 Kebocoran Kisah Privat (Zero Leak)
+  const sharedAvatarSource = fs.readFileSync("packages/shared/src/avatar.ts", "utf-8");
   assert(
-    promptJocelyn.includes("Rafli") &&
-    promptJocelyn.includes("orang terkasih") &&
-    promptJocelyn.includes("referensi"),
-    "Mode admin memuat jawaban pembuat: 'Rafli yang menggunakan referensi orang terkasih'"
-  );
-  assert(
-    promptJocelyn.includes("rekan profesional") &&
-    promptJocelyn.includes("perasa") &&
-    (promptJocelyn.includes("menyemangatinya") || promptJocelyn.includes("nyemangatin dia")),
-    "Mode admin memuat kisah orang terkasih: rekan profesional, terkadang perasa, dan diciptakan untuk menyemangatinya"
-  );
-  assert(
-    promptJocelyn.toLowerCase().includes("bebas berbicara lebih panjang, mengalir, dan hangat"),
-    "Mode admin membebaskan panjang kalimat basa-basi (tidak dibatasi 1-2 kalimat pendek)"
-  );
-  assert(
-    promptJocelyn.includes("dikasihi") &&
-    promptJocelyn.includes("penuh kasih") &&
-    !promptJocelyn.includes("disayangi Rafli") &&
-    !promptJocelyn.includes("orang yang dia sayang"),
-    "Mode admin menggunakan terminologi 'dikasihi' / 'penuh kasih' alih-alih 'disayang'"
+    !sharedAvatarSource.includes("rekan profesional") &&
+    !sharedAvatarSource.includes("pemikir") &&
+    !sharedAvatarSource.includes("lelah") &&
+    !sharedAvatarSource.includes("suatu hari"),
+    "File packages/shared/src/avatar.ts bebas 100% dari kisah pribadi pembuat & orang terkasih (zero leak)"
   );
 
-  // Uji Persona Identitas Khusus Mode Login ('default' / Password 'login')
+  // Uji Persona Identitas Umum Mode Default
   const promptDefault = buildCelynSystemPrompt("default");
   assert(
     promptDefault.includes("Rafli") && promptDefault.includes("teman ngobrol visual AI"),
     "Mode login memuat persona umum AI teman ngobrol buatan Rafli"
   );
   assert(
-    !promptDefault.includes("orang terkasih dari pembuat saya") &&
-    !promptDefault.includes("rekan profesional tapi terkadang perasa") &&
-    promptDefault.includes("JANGAN PERNAH menyebut frasa \"orang terkasih\", profesi \"rekan profesional\", atau sifat \"perasa\""),
-    "Mode login merahasiakan kisah orang terkasih, rekan profesional, dan perasa"
+    !promptDefault.includes("orang terkasih") &&
+    !promptDefault.includes("rekan profesional") &&
+    !promptDefault.includes("perasa") &&
+    !promptDefault.includes("pemikir") &&
+    !promptDefault.includes("lelah"),
+    "System prompt default bersih total dari data privasi (rekan profesional, perasa, pemikir)"
   );
 
   // Uji Instruksi Wajah Sedih Singkat & Intonasi Menenangkan pada System Prompt
@@ -359,6 +345,7 @@ async function runTtsTests() {
     promptDefault.includes("sains, teknologi, koding/pemrograman"),
     "System prompt default memuat instruksi Omni-Knowledge untuk siap menjawab pertanyaan apa pun"
   );
+  const promptJocelyn = buildCelynSystemPrompt("jocelyn");
   assert(
     !promptDefault.includes("bukan mesin pencari") &&
     !promptJocelyn.includes("bukan mesin pencari"),
@@ -645,6 +632,13 @@ async function runTtsTests() {
     "Memory block berhasil mengambil data profil Rafli dari Turso Cloud"
   );
   assert(
+    memPrompt.includes("rekan profesional") &&
+    memPrompt.includes("perasa") &&
+    memPrompt.includes("pemikir") &&
+    memPrompt.includes("suatu hari"),
+    "Kisah privat pembuat & orang terkasih tersimpan aman di tabel creator_private_story Turso Cloud"
+  );
+  assert(
     memPrompt.includes("JANGAN PERNAH menyebutkan, mengakui, atau membahas bahwa kamu dibuat dari model AI pihak ketiga"),
     "Blok memori memuat instruksi tegas Anti-Vendor & Anti-Third-Party Guardrail"
   );
@@ -656,16 +650,20 @@ async function runTtsTests() {
   const defaultPromptWithMem = buildCelynSystemPrompt("default", memPrompt);
   assert(
     !defaultPromptWithMem.includes("MEMORI & PENGETAHUAN TENTANG PENGGUNA") &&
-    !defaultPromptWithMem.includes("Fakta profil yang kamu ingat"),
+    !defaultPromptWithMem.includes("Fakta profil yang kamu ingat") &&
+    !defaultPromptWithMem.includes("rekan profesional") &&
+    !defaultPromptWithMem.includes("perasa"),
     "Mode 'default' (login) menolak blok memori Turso secara mutlak, menjamin zero data leak"
   );
 
-  // Uji Mode Jocelyn (Admin): Memori Turso Disuntikkan Lengkap
+  // Uji Mode Jocelyn (Admin): Memori Turso Disuntikkan Lengkap Termasuk Kisah Privat
   const adminPrompt = buildCelynSystemPrompt("jocelyn", memPrompt);
   assert(
     adminPrompt.includes("MEMORI & PENGETAHUAN TENTANG PENGGUNA") &&
-    adminPrompt.includes("software engineer yang merancang dan memprogram seluruh sistem"),
-    "Mode 'jocelyn' (admin) berhasil memuat memori Turso dengan konteks personal Rafli"
+    adminPrompt.includes("software engineer yang merancang dan memprogram seluruh sistem") &&
+    adminPrompt.includes("rekan profesional") &&
+    adminPrompt.includes("perasa"),
+    "Mode 'jocelyn' (admin) berhasil memuat kisah privat orang terkasih dari Turso Cloud secara eksklusif"
   );
   assert(
     !adminPrompt.includes("Gemini") && !adminPrompt.includes("Google"),

@@ -60,6 +60,22 @@ async function inspectDatabase() {
       console.log("");
     }
 
+    // 4. Kisah Privat Terisolasi (creator_private_story)
+    try {
+      const stories = await db.execute("SELECT id, story_key, title, length(content) as content_len, updated_at FROM creator_private_story ORDER BY id ASC");
+      console.log(`🔒 4. TABEL 'creator_private_story' (${stories.rows.length} entri privat terenkripsi/terisolasi di Cloud):`);
+      if (stories.rows.length === 0) {
+        console.log("   (Belum ada entri kisah privat)\n");
+      } else {
+        for (const row of stories.rows) {
+          console.log(`   • [ID: ${row.id}] [Key: ${row.story_key}] "${row.title}" (${row.content_len} chars) - Update: ${row.updated_at}`);
+        }
+        console.log("");
+      }
+    } catch (e: any) {
+      console.log("   (Tabel creator_private_story belum diinisialisasi)");
+    }
+
     console.log("=================================================================");
     console.log("✅ Inspeksi selesai! Data Turso Cloud berhasil dibaca.");
     console.log("=================================================================");
