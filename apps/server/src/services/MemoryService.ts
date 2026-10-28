@@ -3,7 +3,13 @@ dotenv.config();
 
 import { createClient, Client } from "@libsql/client";
 import { GoogleGenAI } from "@google/genai";
-import { getWibTimestamp, extractFactsFromUtterance } from "@celyn/shared";
+import {
+  getWibTimestamp,
+  extractFactsFromUtterance,
+  summarizeFactEssence,
+  isTechnicalOrGenericQuestion,
+  MemoryCategory,
+} from "@celyn/shared";
 
 export interface UserFact {
   id?: number;
@@ -344,14 +350,25 @@ export class MemoryService {
     category: string = "fakta",
     importance: number = 2
   ): Promise<boolean> {
-    const cleanFact = this.sanitizeText(fact.trim());
-    if (!cleanFact || cleanFact.length < 3) return false;
+    const rawFact = this.sanitizeText(fact.trim());
+    if (!rawFact || rawFact.length < 3) return false;
+
+    // Filter Anti-Soal Teknis & Hitungan Biasa
+    if (isTechnicalOrGenericQuestion(rawFact)) {
+      console.log(`[MEMORY] ⏭️ Soal teknikal/matematika biasa diabaikan dari user_profile: "${rawFact}"`);
+      return false;
+    }
 
     const validCategory = [
       "preferensi", "jadwal", "identitas", "fakta", "catatan", "topik", "proyek", "rencana"
     ].includes(category)
       ? category
       : "catatan";
+
+    // Rangkum Intisari Fakta Sebelum Simpan
+    const cleanFact = summarizeFactEssence(rawFact, validCategory as MemoryCategory);
+    if (!cleanFact || cleanFact.length < 3) return false;
+
     const validImportance = Math.min(3, Math.max(1, Number(importance) || 2));
     const wibNow = getWibTimestamp();
 
@@ -572,10 +589,12 @@ export class MemoryService {
 ${transcript}
 
 ${existingFactsBlock ? existingFactsBlock + "\n\n" : ""}Tugas:
-1. Buat ringkasan padat obrolan ini dalam 1 sampai 2 kalimat bahasa Indonesia santai (fokus pada topik utama dan apa yang dibahas/diselesaikan).
+1. Buat ringkasan padat obrolan ini dalam 1 sampai 2 kalimat bahasa Indonesia santai (fokus pada topik personal yang dibahas).
 2. Deteksi mood/suasana hati dominan pengguna (misal: "santai", "semangat", "lelah", "fokus", "senang").
 3. Ekstrak kata kunci topik (pisahkan dengan koma).
-4. Jika pengguna menceritakan fakta baru tentang dirinya (seperti hobi, makanan kesukaan, kesibukan baru, atau preferensi):
+4. Jika pengguna menceritakan fakta baru tentang dirinya (seperti hobi, makanan kesukaan, kesibukan baru, preferensi, cerita pribadi, atau tugas/PR yang harus dikerjakan):
+   - JANGAN PERNAH mengekstrak soal teknikal, hitungan matematika (seperti 5x5, 25), pertanyaan koding umum, atau definisi materi sebagai fakta, KECUALI jika pengguna meminta eksplisit untuk diingat.
+   - Fakta WAJIB dirangkum menjadi intisari kalimat padat: [Subjek] [predikat] [objek].
    - Jika fakta tersebut memperbarui atau menggantikan fakta lama yang sudah ada di daftar fakta di atas (misal alamat baru, pekerjaan baru), gunakan format: {"fact": "fakta baru", "supersedesId": ID_FAKTA_LAMA}.
    - Jika fakta baru murni, gunakan format: {"fact": "fakta baru"}.
    - Jika fakta sudah ada atau intinya sama, JANGAN dimasukkan lagi (hindari duplikasi semantik).

@@ -19,6 +19,8 @@ import {
   buildContextualGreetingPrompt,
   analyzeHumanVoiceFrame,
   extractFactsFromUtterance,
+  summarizeFactEssence,
+  isTechnicalOrGenericQuestion,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -733,6 +735,56 @@ async function runTtsTests() {
     !memPrompt.includes("Gemini") && !memPrompt.includes("Google"),
     "Blok memori bebas 100% dari penyebutan nama vendor Gemini/Google"
   );
+
+  // Uji Filter Cerdas Anti-Soal Teknis & Hitungan Biasa
+  const mathEx1 = extractFactsFromUtterance("5x5 berapa ya Celyn?");
+  assert(mathEx1.length === 0, "Perhitungan matematika '5x5 berapa ya Celyn?' diabaikan 100% dari user_profile");
+  const mathEx2 = extractFactsFromUtterance("25");
+  assert(mathEx2.length === 0, "Jawaban angka tunggal '25' diabaikan 100% dari user_profile");
+  const techQuestion = extractFactsFromUtterance("apa itu REST API dan bagaimana cara kerjanya?");
+  assert(techQuestion.length === 0, "Pertanyaan teknikal/definisi umum diabaikan dari user_profile");
+
+  // Uji Pengenalan PR & Tugas Pengguna (Personal Homework/Tasks)
+  const homeworkEx = extractFactsFromUtterance("Celyn aku ada PR matematika tentang matriks buat besok");
+  assert(
+    homeworkEx.length > 0 &&
+    homeworkEx[0].category === "catatan" &&
+    homeworkEx[0].fact.includes("Tugas/PR penting Rafli:") &&
+    homeworkEx[0].fact.includes("PR matematika tentang matriks"),
+    "Kewajiban personal 'ada PR matematika' berhasil dicatat sebagai tugas/PR penting Rafli"
+  );
+
+  // Uji Pengecualian Direktif Eksplisit pada Hal Teknis
+  const explicitTech = extractFactsFromUtterance("tolong kamu ingat ya port server backend kita 8080");
+  assert(
+    explicitTech.length > 0 &&
+    explicitTech[0].fact.includes("Catatan penting Rafli:") &&
+    explicitTech[0].fact.includes("port server backend kita 8080"),
+    "Hal teknis yang secara eksplisit disuruh ingat ('tolong kamu ingat port...') wajib disimpan ke user_profile"
+  );
+
+  // Uji Mesin Rangkuman Intisari Fakta (Summarize-Before-Store)
+  const narrativeLongSpeech = "Eh Celyn kemarin waktu jalan-jalan bareng temen aku kepikiran makanan paling pas di lidahku itu sate maranggi bumbu kacang deh tolong ingat ya";
+  const distilledNarrative = extractFactsFromUtterance(narrativeLongSpeech);
+  assert(
+    distilledNarrative.length > 0 &&
+    distilledNarrative[0].fact === "Rafli suka makan sate maranggi bumbu kacang (makanan kesukaan)",
+    "Ujaran panjang bernarasi berhasil diringkas intisarinya menjadi 'Rafli suka makan sate maranggi bumbu kacang (makanan kesukaan)'"
+  );
+
+  const belovedDistilled = summarizeFactEssence("aku mau cerita kalau celyn orang yang paling aku sayangi itu sebenarnya sukanya matcha latte dingin");
+  assert(
+    belovedDistilled === "Celyn (orang terkasih Rafli) suka minum matcha latte dingin (minuman/kopi kesukaan)",
+    "summarizeFactEssence sukses merangkum preferensi sosok terkasih menjadi intisari kanonikal padat"
+  );
+
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("FILTER CERDAS & SUMMARIZE-BEFORE-STORE") &&
+    CELYN_SYSTEM_PROMPT.includes("ATURAN FILTER ANTI-SOAL TEKNIKAL & PERHITUNGAN BIASA") &&
+    CELYN_SYSTEM_PROMPT.includes("ATURAN MERANGKUM SEBELUM SIMPAN"),
+    "Prompt sistem Celyn memuat aturan tegas Filter Cerdas Anti-Soal Teknis & Summarize Before Store"
+  );
+
   // Uji Isolasi Mode Default (Login): Reset dari Awal & Bebas Kebocoran Memori (Zero Data Leak)
   const defaultPromptWithMem = buildCelynSystemPrompt("default", memPrompt);
   assert(

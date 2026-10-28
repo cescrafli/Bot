@@ -18,6 +18,150 @@ function getWibTimestamp() {
   }
 }
 
+const CLEANUP_FILLERS = /\s+(?:ya|nih|dong|lho|banget|sih|deh|kan|tuh|kok|hehe|haha|wkwk|tau|tahu|itu|ini)\s*$/i;
+
+const PREAMBLE_PATTERNS = [
+  /^(?:eh\s+celyn|celyn|halo\s+celyn|hai\s+celyn)\s*,?\s*/i,
+  /^(?:kemarin|tadi|dulu|waktu\s+itu)\s+(?:aku|saya|gue|gw)?\s*(?:sempat|lagi|pas)?\s*(?:jalan-jalan|nongkrong|makan\s+siang|santai|ngobrol|mikir-mikir|kepikiran)?(?:\s+bareng\s+teman|\s+bareng\s+temen)?\s*,?\s*/i,
+  /^(?:aku\s+(?:tadi|sempat|tuh|lagi)\s+(?:kepikiran|ngerasa|mikir|pengen\s+bilang))\s*,?\s*/i,
+  /^(?:kayaknya\s+sih|kayaknya|menurutku\s+sih|menurutku|sebenarnya|jujur\s+aja|terus\s+aku\s+ngerasa)\s*,?\s*/i,
+  /^(?:aku\s+cuma\s+mau\s+bilang\s+kalau|mau\s+ngasih\s+tau\s+kalau|cuma\s+mau\s+cerita\s+kalau|aku\s+mau\s+cerita\s+kalau)\s*,?\s*/i,
+  /^(?:tolong\s+)?(?:ingat(?:kan|in|en)?|catat|simpan|rekam|ingetin)(?:\s+(?:ya|nih|dong|deh))?(?:\s+(?:ke\s+(?:memori|database|ingatan)))?(?:\s+(?:aku|saya|gue|gw))?(?:\s+(?:kalau|bahwa|ada|soal|tentang))?\s*/i,
+];
+
+function cleanItemText(raw) {
+  let item = String(raw || "").trim();
+  item = item.replace(/[\.,!\?]+$/, "").trim();
+  item = item.replace(CLEANUP_FILLERS, "").trim();
+  item = item.replace(/[\.,!\?]+$/, "").trim();
+  return item;
+}
+
+function cleanSubjectAndAux(raw) {
+  let s = cleanItemText(raw);
+  const stripRegex = /^(?:bukan|nggak|bukanlah|saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|kita|anda|orang terkasih|itu|ini|adalah|yaitu|ialah|yakni|berupa|kalau|bahwa|lebih|paling|lagi)\s+/i;
+  while (stripRegex.test(s)) {
+    s = s.replace(stripRegex, "").trim();
+  }
+  return s;
+}
+
+function isTechnicalOrGenericQuestion(text) {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+
+  if (
+    /(?:tolong|bisa|coba|tolong\s+bisa)\s+(?:ingat|catat|simpan|rekam|ingetin)/i.test(clean) ||
+    /^(?:ingat(?:kan|in|en)?|catat|simpan|rekam|ingetin)(?:\s+(?:ya|nih|dong|deh))?\s+(?:aku|saya|kalau|bahwa|soal|tentang)/i.test(clean)
+  ) {
+    return false;
+  }
+
+  if (
+    /\b(?:ada\s+PR|punya\s+PR|ada\s+tugas|punya\s+tugas|ngerjain\s+PR|ngerjain\s+tugas|soal\s+ujianku|tugas\s+kuliah|tugas\s+sekolah|tugas\s+kantor)\b/i.test(clean)
+  ) {
+    return false;
+  }
+
+  if (
+    /\b\d+\s*[\+\-\*\/xX÷]\s*\d+\b/i.test(clean) ||
+    /\b(?:berapa\s+(?:hasil|jumlah|total|nilai)|hitunglah|coba\s+hitung)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  if (/^\s*\d+(?:[.,]\d+)?\s*$/.test(clean)) {
+    return true;
+  }
+
+  if (
+    /^(?:apa\s+(?:itu|arti|pengertian|definisi|singkatan|maksud)|apakah\s+yang\s+dimaksud|bagaimana\s+(?:cara\s+kerja|proses|konsep)|jelaskan|terangkan|kenapa|mengapa|siapa\s+(?:penemu|pencipta|pembuat)|sebutkan)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function summarizeFactEssence(rawText, defaultCategory = "catatan") {
+  if (!rawText || typeof rawText !== "string") return "";
+  let clean = rawText.trim();
+
+  if (
+    /^(?:Rafli\s+suka\s+|Celyn\s+\(orang\s+terkasih\s+Rafli\)\s+suka\s+|Tugas\/PR\s+penting\s+Rafli:\s+|Pengingat\s+kegiatan\/jadwal\s+penting:\s+|Rafli\s+sedang\s+mengerjakan|Rencana\s+Rafli:\s+|Catatan\s+penting\s+)/i.test(clean)
+  ) {
+    return cleanItemText(clean);
+  }
+
+  let prev = "";
+  while (prev !== clean) {
+    prev = clean;
+    for (const pat of PREAMBLE_PATTERNS) {
+      clean = clean.replace(pat, "").trim();
+    }
+  }
+
+  const lower = clean.toLowerCase();
+  const isCelyn =
+    lower.includes("celyn") ||
+    lower.includes("jocelyn") ||
+    lower.includes("orang terkasih") ||
+    lower.includes("kekasih") ||
+    lower.includes("ayang") ||
+    lower.includes("pacar");
+  const subjek = isCelyn ? "Celyn (orang terkasih Rafli)" : "Rafli";
+
+  const isDrink =
+    /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air|minum|ngopi/i.test(clean);
+  const isFood =
+    /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sate|steak|pizza|sayur|buah|daging|rendang|bakso|soto|bebek/i.test(clean) ||
+    /(?:suka|sukanya|doyan|favorit|kesukaan)/i.test(clean);
+
+  if (isDrink || isFood) {
+    const action = isDrink ? "minum" : "makan";
+    const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
+    let item = cleanSubjectAndAux(clean);
+    const verbStrip = /^(?:suka|sukanya|doyan|makan|minum)\s+/i;
+    while (verbStrip.test(item)) {
+      item = item.replace(verbStrip, "").trim();
+    }
+    item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
+    item = cleanSubjectAndAux(item);
+    if (item.length >= 2) {
+      return `${subjek} suka ${action} ${item} (${tag})`;
+    }
+  }
+
+  if (/\b(?:PR|tugas|soal\s+ujian)\b/i.test(clean)) {
+    let task = cleanSubjectAndAux(clean);
+    task = task.replace(/^(?:ada|punya|ngerjain|mengerjakan)\s+/i, "").trim();
+    if (task.length >= 2) {
+      return `Tugas/PR penting Rafli: ${task}`;
+    }
+  }
+
+  const timeMatch = clean.match(
+    /(?:jam\s+\d+(?::\d+)?(?:\s*(?:pagi|siang|sore|malam))?)|(?:pukul\s+\d+)|(?:besok\s+\w+)/i
+  );
+  if (timeMatch && (defaultCategory === "jadwal" || /jadwal|meeting|pertemuan|agenda/i.test(clean))) {
+    let activity = cleanSubjectAndAux(clean);
+    activity = activity.replace(/^(?:jadwal|agenda|ada|pengingat)\s+/i, "").trim();
+    return `Pengingat kegiatan/jadwal penting: ${activity}`;
+  }
+
+  if (
+    /ngerjain|mengerjakan|bikin|membuat|ngoding|proyek|project/i.test(clean) ||
+    defaultCategory === "proyek"
+  ) {
+    let proj = cleanSubjectAndAux(clean);
+    proj = proj.replace(/^(?:lagi|sedang)?\s*(?:ngerjain|mengerjakan|bikin|membuat|garap|ngoding)\s+/i, "").trim();
+    return `Rafli sedang mengerjakan/membuat ${proj}`;
+  }
+
+  const cleanedItem = cleanSubjectAndAux(clean);
+  return `Catatan penting ${subjek}: ${cleanedItem}`;
+}
+
 async function smartUpsertUserProfile(db, fact, category = "fakta", importance = 2, wibNow) {
   const cleanFact = String(fact || "").trim();
   if (!cleanFact || cleanFact.length < 3) return null;
@@ -213,10 +357,13 @@ export default async function handler(req, res) {
 ${transcript}
 
 Tugas:
-1. Buat ringkasan padat obrolan ini dalam 1-2 kalimat bahasa Indonesia santai.
-2. Deteksi mood dominan pengguna.
+1. Buat ringkasan padat obrolan ini dalam 1-2 kalimat bahasa Indonesia santai (fokus pada topik personal yang dibahas).
+2. Deteksi mood dominan pengguna (misal: "santai", "semangat", "lelah", "senang", "fokus").
 3. Ekstrak kata kunci topik (pisahkan dengan koma).
-4. Ekstrak fakta baru jika ada (preferensi makanan/minuman, janji/jadwal, dsb.). JANGAN PERNAH menyertakan kata "Gemini" atau "Google".
+4. Ekstrak fakta baru tentang DIRI PENGGUNA (personalities/preferensi makanan & minuman, cerita pribadi, tugas/PR yang harus dikerjakan, jadwal/janji).
+   PENTING: JANGAN PERNAH mengekstrak soal teknikal, hitungan matematika (seperti 5x5, 25), pertanyaan koding umum, atau definisi materi sebagai fakta, KECUALI jika pengguna meminta eksplisit untuk diingat.
+   Fakta WAJIB dirangkum menjadi intisari kalimat padat: [Subjek] [predikat] [objek].
+   JANGAN PERNAH menyertakan kata "Gemini" atau "Google".
 
 Format output WAJIB JSON:
 {
@@ -244,8 +391,12 @@ Format output WAJIB JSON:
 
     if (Array.isArray(parsed.newFacts)) {
       for (const fact of parsed.newFacts) {
-        if (typeof fact === "string" && fact.length > 5) {
-          await smartUpsertUserProfile(db, fact, "fakta", 1, wibNow);
+        if (typeof fact === "string" && fact.length > 3) {
+          if (isTechnicalOrGenericQuestion(fact)) continue;
+          const distilled = summarizeFactEssence(fact, "catatan");
+          if (distilled && distilled.length > 5) {
+            await smartUpsertUserProfile(db, distilled, "catatan", 2, wibNow);
+          }
         }
       }
     }

@@ -1,8 +1,10 @@
 /**
  * Modul Ekstraksi Memori Otonom (Autonomous Memory Ingestion)
  * Mendeteksi preferensi, kesukaan, makanan/minuman favorit, jadwal,
- * proyek yang sedang dikerjakan, topik obrolan, kejadian harian, dan rencana
+ * tugas/PR pengguna, proyek yang sedang dikerjakan, topik obrolan, kejadian harian, dan rencana
  * secara otomatis dari ucapan pengguna tanpa mengharuskan input manual.
+ * 
+ * Dilengkapi Filter Cerdas Anti-Soal Teknis & Mesin Rangkuman Intisari Fakta (Summarize-Before-Store).
  */
 
 export type MemoryCategory =
@@ -21,9 +23,18 @@ export interface ExtractedFact {
   importance: number;
 }
 
-const CLEANUP_FILLERS = /\s+(?:ya|nih|dong|lho|banget|sih|deh|kan|tuh|kok|hehe|haha|tau|tahu|itu|ini)\s*$/i;
+const CLEANUP_FILLERS = /\s+(?:ya|nih|dong|lho|banget|sih|deh|kan|tuh|kok|hehe|haha|wkwk|tau|tahu|itu|ini)\s*$/i;
 
-function cleanItemText(raw: string): string {
+const PREAMBLE_PATTERNS = [
+  /^(?:eh\s+celyn|celyn|halo\s+celyn|hai\s+celyn)\s*,?\s*/i,
+  /^(?:kemarin|tadi|dulu|waktu\s+itu)\s+(?:aku|saya|gue|gw)?\s*(?:sempat|lagi|pas)?\s*(?:jalan-jalan|nongkrong|makan\s+siang|santai|ngobrol|mikir-mikir|kepikiran)?(?:\s+bareng\s+teman|\s+bareng\s+temen)?\s*,?\s*/i,
+  /^(?:aku\s+(?:tadi|sempat|tuh|lagi)\s+(?:kepikiran|ngerasa|mikir|pengen\s+bilang))\s*,?\s*/i,
+  /^(?:kayaknya\s+sih|kayaknya|menurutku\s+sih|menurutku|sebenarnya|jujur\s+aja|terus\s+aku\s+ngerasa)\s*,?\s*/i,
+  /^(?:aku\s+cuma\s+mau\s+bilang\s+kalau|mau\s+ngasih\s+tau\s+kalau|cuma\s+mau\s+cerita\s+kalau|aku\s+mau\s+cerita\s+kalau)\s*,?\s*/i,
+  /^(?:tolong\s+)?(?:ingat(?:kan|in|en)?|catat|simpan|rekam|ingetin)(?:\s+(?:ya|nih|dong|deh))?(?:\s+(?:ke\s+(?:memori|database|ingatan)))?(?:\s+(?:aku|saya|gue|gw))?(?:\s+(?:kalau|bahwa|ada|soal|tentang))?\s*/i,
+];
+
+export function cleanItemText(raw: string): string {
   let item = raw.trim();
   item = item.replace(/[\.,!\?]+$/, "").trim();
   item = item.replace(CLEANUP_FILLERS, "").trim();
@@ -31,7 +42,7 @@ function cleanItemText(raw: string): string {
   return item;
 }
 
-function cleanSubjectAndAux(raw: string): string {
+export function cleanSubjectAndAux(raw: string): string {
   let s = cleanItemText(raw);
   const stripRegex = /^(?:bukan|nggak|bukanlah|saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|kita|anda|orang terkasih|itu|ini|adalah|yaitu|ialah|yakni|berupa|kalau|bahwa|lebih|paling|lagi)\s+/i;
   while (stripRegex.test(s)) {
@@ -40,10 +51,170 @@ function cleanSubjectAndAux(raw: string): string {
   return s;
 }
 
+/**
+ * Filter Pertanyaan Teknis / Soal Biasa / Hitungan Matematika.
+ * Memastikan pertanyaan akademis/teknis seperti "5x5 berapa?", "25", "apa itu REST API"
+ * TIDAK disimpan ke memori database, KECUALI jika pengguna secara eksplisit meminta diingat.
+ */
+export function isTechnicalOrGenericQuestion(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+
+  // 1. Jika ada direktif eksplisit (tolong ingat/catat), JANGAN abaikan!
+  if (
+    /(?:tolong|bisa|coba|tolong\s+bisa)\s+(?:kamu\s+)?(?:ingat|catat|simpan|rekam|ingetin)/i.test(clean) ||
+    /^(?:ingat(?:kan|in|en)?|catat|simpan|rekam|ingetin)(?:\s+(?:ya|nih|dong|deh))?\s+(?:aku|saya|kalau|bahwa|soal|tentang)/i.test(clean) ||
+    /(?:tolong\s+)?(?:ingat|catat|simpan|rekam|ingetin)(?:\s+ya)?\s*$/i.test(clean)
+  ) {
+    return false;
+  }
+
+  // 2. Jika merupakan pernyataan PR / tugas / kewajiban personal pengguna, JANGAN abaikan!
+  if (
+    /\b(?:ada\s+PR|punya\s+PR|ada\s+tugas|punya\s+tugas|ngerjain\s+PR|ngerjain\s+tugas|soal\s+ujianku|tugas\s+kuliah|tugas\s+sekolah|tugas\s+kantor)\b/i.test(clean)
+  ) {
+    return false;
+  }
+
+  // 3. Hitungan matematika murni (misal: "5x5 berapa?", "10 + 20", "hitung 100/5")
+  if (
+    /\b\d+\s*[\+\-\*\/xX÷]\s*\d+\b/i.test(clean) ||
+    /\b(?:berapa\s+(?:hasil|jumlah|total|nilai)|hitunglah|coba\s+hitung)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  // 4. Jawaban angka tunggal (misal: "25", "100")
+  if (/^\s*\d+(?:[.,]\d+)?\s*$/.test(clean)) {
+    return true;
+  }
+
+  // 5. Pertanyaan definisi/pengetahuan umum tanpa konteks personal
+  if (
+    /^(?:apa\s+(?:itu|arti|pengertian|definisi|singkatan|maksud)|apakah\s+yang\s+dimaksud|bagaimana\s+(?:cara\s+kerja|proses|konsep)|jelaskan|terangkan|kenapa|mengapa|siapa\s+(?:penemu|pencipta|pembuat)|sebutkan)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Mesin Rangkuman Intisari Fakta (Summarize-Before-Store).
+ * Mengubah kalimat yang bertele-tele atau panjang menjadi proposisi kanonikal padat.
+ */
+export function summarizeFactEssence(rawText: string, defaultCategory: MemoryCategory = "catatan"): string {
+  if (!rawText || typeof rawText !== "string") return "";
+  let clean = rawText.trim();
+
+  // 1. Jika sudah dalam format kanonikal baku, cukup rapikan spasi & tanda baca
+  if (
+    /^(?:Rafli\s+suka\s+|Celyn\s+\(orang\s+terkasih\s+Rafli\)\s+suka\s+|Tugas\/PR\s+penting\s+Rafli:\s+|Pengingat\s+kegiatan\/jadwal\s+penting:\s+|Rafli\s+sedang\s+mengerjakan|Rencana\s+Rafli:\s+|Catatan\s+penting\s+)/i.test(clean)
+  ) {
+    return cleanItemText(clean);
+  }
+
+  // 2. Bersihkan preambel percakapan
+  let prev = "";
+  while (prev !== clean) {
+    prev = clean;
+    for (const pat of PREAMBLE_PATTERNS) {
+      clean = clean.replace(pat, "").trim();
+    }
+  }
+
+  // 3. Deteksi Subjek
+  const lower = clean.toLowerCase();
+  const isCelyn =
+    lower.includes("celyn") ||
+    lower.includes("jocelyn") ||
+    lower.includes("orang terkasih") ||
+    lower.includes("kekasih") ||
+    lower.includes("ayang") ||
+    lower.includes("pacar");
+  const subjek = isCelyn ? "Celyn (orang terkasih Rafli)" : "Rafli";
+
+  // 4. Deteksi Makanan / Minuman
+  const isDrink =
+    /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air|minum|ngopi/i.test(clean);
+  const isFood =
+    /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sate|steak|pizza|sayur|buah|daging|rendang|bakso|soto|bebek/i.test(clean) ||
+    /(?:suka|sukanya|doyan|favorit|kesukaan)/i.test(clean);
+
+  if (isDrink || isFood) {
+    const action = isDrink ? "minum" : "makan";
+    const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
+    let item = "";
+
+    const verbMatch = clean.match(
+      /\b(?:lebih\s+)?(?:suka|sukanya|doyan|paling suka|favorit|gemar|hobi)\s+(?:banget\s+)?(?:(?:minum|makan|ngopi|nyemil)\s+)?([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi|\s+deh|\s+tolong|\s+ya)/i
+    );
+    const nounMatch = clean.match(
+      /\b(?:(?:makanan|minuman|kopi)\s+)?(?:kesukaan|favorit|paling pas di lidah|pas di lidah|cocok di lidah)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+bukan\s+|\s+karena|\s+deh|\s+tolong|\s+ya)/i
+    );
+
+    if (verbMatch && verbMatch[1]) {
+      item = cleanSubjectAndAux(verbMatch[1]);
+    } else if (nounMatch && nounMatch[1]) {
+      item = cleanSubjectAndAux(nounMatch[1]);
+    } else {
+      item = cleanSubjectAndAux(clean);
+      const verbStrip = /^(?:suka|sukanya|doyan|makan|minum)\s+/i;
+      while (verbStrip.test(item)) {
+        item = item.replace(verbStrip, "").trim();
+      }
+      item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
+      item = cleanSubjectAndAux(item);
+    }
+
+    if (item.length >= 2) {
+      return `${subjek} suka ${action} ${item} (${tag})`;
+    }
+  }
+
+  // 5. Deteksi PR / Tugas Pengguna
+  if (/\b(?:PR|tugas|soal\s+ujian)\b/i.test(clean)) {
+    let task = cleanSubjectAndAux(clean);
+    task = task.replace(/^(?:ada|punya|ngerjain|mengerjakan)\s+/i, "").trim();
+    if (task.length >= 2) {
+      return `Tugas/PR penting Rafli: ${task}`;
+    }
+  }
+
+  // 6. Deteksi Jadwal
+  const timeMatch = clean.match(
+    /(?:jam\s+\d+(?::\d+)?(?:\s*(?:pagi|siang|sore|malam))?)|(?:pukul\s+\d+)|(?:besok\s+\w+)/i
+  );
+  if (timeMatch && (defaultCategory === "jadwal" || /jadwal|meeting|pertemuan|agenda/i.test(clean))) {
+    let activity = cleanSubjectAndAux(clean);
+    activity = activity.replace(/^(?:jadwal|agenda|ada|pengingat)\s+/i, "").trim();
+    return `Pengingat kegiatan/jadwal penting: ${activity}`;
+  }
+
+  // 7. Deteksi Proyek
+  if (
+    /ngerjain|mengerjakan|bikin|membuat|ngoding|proyek|project/i.test(clean) ||
+    defaultCategory === "proyek"
+  ) {
+    let proj = cleanSubjectAndAux(clean);
+    proj = proj.replace(/^(?:lagi|sedang)?\s*(?:ngerjain|mengerjakan|bikin|membuat|garap|ngoding)\s+/i, "").trim();
+    return `Rafli sedang mengerjakan/membuat ${proj}`;
+  }
+
+  // 8. Default: Catatan penting intisari
+  const cleanedItem = cleanSubjectAndAux(clean);
+  return `Catatan penting ${subjek}: ${cleanedItem}`;
+}
+
 export function extractFactsFromUtterance(text: string): ExtractedFact[] {
   if (!text || typeof text !== "string") return [];
   const clean = text.trim();
   if (clean.length < 5) return [];
+
+  // Filter 0: Jika ujaran adalah soal teknis / kalkulasi matematika biasa, JANGAN simpan!
+  if (isTechnicalOrGenericQuestion(clean)) {
+    return [];
+  }
 
   const results: ExtractedFact[] = [];
   const lower = clean.toLowerCase();
@@ -68,7 +239,7 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
 
   // 0. Pola Universal Explicit Directive: "tolong ingatin / ingatkan / catat / simpan / rekam / ingetin [aku/saya] [kalau/bahwa/ada] [konten]"
   const explicitDirectiveMatch = clean.match(
-    /^(?:(?:tolong|bisa|coba|tolong\s+bisa)\s+)?(?:ingat(?:kan|in|en)?|catat|simpan|rekam|ingetin)(?:\s+(?:ya|nih|dong|deh))?(?:\s+(?:ke\s+(?:memori|database|ingatan)))?(?:\s+(?:aku|saya|gue|gw))?(?:\s+(?:kalau|bahwa|ada|soal|tentang))?\s+(.+)/i
+    /^(?:(?:tolong|bisa|coba|tolong\s+bisa)\s+(?:kamu\s+)?)?(?:ingat(?:kan|in|en)?|catat|simpan|rekam|ingetin)(?:\s+(?:ya|nih|dong|deh))?(?:\s+(?:ke\s+(?:memori|database|ingatan)))?(?:\s+(?:aku|saya|gue|gw))?(?:\s+(?:kalau|bahwa|ada|soal|tentang))?\s+(.+)/i
   );
   if (explicitDirectiveMatch && explicitDirectiveMatch[1]) {
     const rawContent = cleanItemText(explicitDirectiveMatch[1]);
@@ -77,7 +248,7 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
       const timeMatch = rawContent.match(/(?:(?:jam|pukul)\s+\d+(?::\d+)?)|(?:besok|lusa|nanti malam|nanti sore|nanti siang)/i);
       if (timeMatch && !/(?:suka|doyan|kesukaan|favorit)\s+(?:makan|minum)/i.test(rawContent)) {
         results.push({
-          fact: `Pengingat kegiatan/jadwal penting: ${rawContent}`,
+          fact: summarizeFactEssence(rawContent, "jadwal"),
           category: "jadwal",
           importance: 3,
         });
@@ -86,7 +257,7 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
 
       // Prioritas 0.2: Periksa apakah preferensi makanan/minuman
       const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(rawContent) || /minum|ngopi/i.test(rawContent);
-      const isFood = /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sate|steak|pizza|sayur|buah|daging/i.test(rawContent) || /(?:suka|sukanya|doyan|favorit|kesukaan)/i.test(rawContent);
+      const isFood = /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sate|steak|pizza|sayur|buah|daging|rendang|bakso|soto|bebek/i.test(rawContent) || /(?:suka|sukanya|doyan|favorit|kesukaan)/i.test(rawContent);
 
       if (isDrink || isFood) {
         const subjek = isAboutBeloved ? "Celyn (orang terkasih Rafli)" : "Rafli";
@@ -114,17 +285,35 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
       // Prioritas 0.3: Proyek / pekerjaan
       if (/ngerjain|mengerjakan|bikin|membuat|ngoding|proyek|project/i.test(rawContent)) {
         results.push({
-          fact: `Proyek/pekerjaan penting Rafli: ${rawContent}`,
+          fact: summarizeFactEssence(rawContent, "proyek"),
           category: "proyek",
           importance: 3,
         });
         return results;
       }
 
-      // Prioritas 0.4: Konten direktif umum
+      // Prioritas 0.4: Konten direktif umum (termasuk hal teknis yang diminta ingat)
       const subjek = isAboutBeloved ? "Celyn (orang terkasih Rafli)" : "Rafli";
       results.push({
-        fact: `Catatan penting ${subjek}: ${rawContent}`,
+        fact: `Catatan penting ${subjek}: ${cleanSubjectAndAux(rawContent)}`,
+        category: "catatan",
+        importance: 3,
+      });
+      return results;
+    }
+  }
+
+  // 1. Pola PR / Tugas Pengguna (Homework & Tasks)
+  const homeworkMatch = clean.match(
+    /\b(?:(?:aku|saya|gue|gw)\s+)?(?:ada|lagi\s+ada|punya|ngerjain|mengerjakan)\s+(?:PR|tugas|soal\s+(?:ujian|latihan|tugas))\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi)/i
+  ) || clean.match(
+    /\b(?:ada\s+)?PR\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi)/i
+  );
+  if (homeworkMatch) {
+    const rawHomework = cleanItemText(homeworkMatch[0]);
+    if (rawHomework.length >= 4) {
+      results.push({
+        fact: summarizeFactEssence(rawHomework, "catatan"),
         category: "catatan",
         importance: 3,
       });
@@ -135,7 +324,7 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
   // 2. Pola Preferensi Makanan & Minuman
   // Pola A: "(makanan/minuman/kopi)? (kesukaan/favorit) ... adalah/itu/yaitu [item]"
   const prefNounMatch = clean.match(
-    /\b(?:(?:makanan|minuman|kopi)\s+)?(?:kesukaan|favorit)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+bukan\s+|\s+karena)/i
+    /\b(?:(?:makanan|minuman|kopi)\s+)?(?:kesukaan|favorit|paling pas di lidah|pas di lidah|cocok di lidah)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+bukan\s+|\s+karena|\s+deh|\s+tolong|\s+ya)/i
   );
   if (prefNounMatch && prefNounMatch[1]) {
     let rawItem = cleanSubjectAndAux(prefNounMatch[1]);
@@ -163,7 +352,7 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
 
   // Pola B: "(lebih )?suka / sukanya / doyan / paling suka / favorit [item]"
   const prefVerbMatch = clean.match(
-    /\b(?:lebih\s+)?(?:suka|sukanya|doyan|paling suka|favorit|gemar|hobi)\s+(?:banget\s+)?(?:(?:minum|makan|ngopi|nyemil)\s+)?([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+nanti|\s+bukan\s+|\s+karena|\s+tapi)/i
+    /\b(?:lebih\s+)?(?:suka|sukanya|doyan|paling suka|favorit|gemar|hobi)\s+(?:banget\s+)?(?:(?:minum|makan|ngopi|nyemil)\s+)?([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+nanti|\s+bukan\s+|\s+karena|\s+tapi|\s+deh|\s+tolong|\s+ya)/i
   );
   if (prefVerbMatch && prefVerbMatch[1]) {
     const rawItem = cleanSubjectAndAux(prefVerbMatch[1]);
@@ -271,7 +460,7 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
   }
 
   const projectNounMatch = clean.match(
-    /(?:proyek|project|tugas|pekerjaan)(?:ku)?(?:\s+(?:saat ini|sekarang|baru))?\s*(?:adalah|itu)?\s*([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
+    /(?:proyek|project|pekerjaan)(?:ku)?(?:\s+(?:saat ini|sekarang|baru))?\s*(?:adalah|itu)?\s*([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
   );
   if (projectNounMatch && projectNounMatch[1]) {
     const rawProject = cleanSubjectAndAux(projectNounMatch[1]);
