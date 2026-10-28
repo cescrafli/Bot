@@ -102,6 +102,7 @@ export function useGeminiLive({
         sessionId: sessionIdRef.current,
         role,
         content: clean,
+        password: getStoredAuthPassword() || "admin",
       }),
     }).catch((e) => {
       console.warn("[RECORD] Gagal mencatat turn ke server:", e);
@@ -702,7 +703,12 @@ export function useGeminiLive({
                           "Content-Type": "application/json",
                           "x-admin-password": getStoredAuthPassword() || "admin",
                         },
-                        body: JSON.stringify({ fact, category, importance }),
+                        body: JSON.stringify({
+                          fact,
+                          category,
+                          importance,
+                          password: getStoredAuthPassword() || "admin",
+                        }),
                       });
                       if (res.ok) {
                         const data = await res.json().catch(() => null);

@@ -73,7 +73,7 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
   }
 
   // Domain B: Preferensi Makanan
-  const isFood = /makan|makanan|doyan|ikan|mie|ayam|nasi|sushi|sayur|buah|daging/i.test(cleanFact);
+  const isFood = /makan|makanan|doyan|sate|ikan|mie|ayam|nasi|sushi|sayur|buah|daging|steak|pizza|rendang|roti|bakso|soto|bebek/i.test(cleanFact);
   if (!existingTargetId && validCategory === "preferensi" && isFood) {
     const candidate = isCelyn
       ? await db.execute(
