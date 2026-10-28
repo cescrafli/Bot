@@ -20,6 +20,15 @@ function cleanItemText(raw: string): string {
   return item;
 }
 
+function cleanSubjectAndAux(raw: string): string {
+  let s = cleanItemText(raw);
+  const stripRegex = /^(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|kita|anda|orang terkasih|itu|ini|adalah|yaitu|ialah|yakni|berupa|kalau|bahwa)\s+/i;
+  while (stripRegex.test(s)) {
+    s = s.replace(stripRegex, "").trim();
+  }
+  return s;
+}
+
 export function extractFactsFromUtterance(text: string): ExtractedFact[] {
   if (!text || typeof text !== "string") return [];
   const clean = text.trim();
@@ -37,24 +46,54 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
     lower.includes("ayang") ||
     lower.includes("pacar");
 
-  // Cek apakah preferensi secara spesifik tentang orang terkasih (Celyn / Jocelyn)
+  // Cek apakah preferensi secara spesifik tentang sosok terkasih (Celyn / Jocelyn)
   const isExplicitlyBelovedPreference =
     /\b(?:celyn|jocelyn|orang terkasih|kekasih|pacar|ayang)\s+(?:yang\s+\w+\s+)?(?:itu\s+)?(?:juga\s+)?(?:suka|doyan|paling suka|gemar|hobi|alergi)\b/i.test(clean) ||
     /\b(?:kesukaan|favorit)\s+(?:celyn|jocelyn|orang terkasih|kekasih)\b/i.test(clean) ||
+    /\b(?:celyn|jocelyn|orang terkasih|kekasih)\s+(?:kesukaan|favorit)\b/i.test(clean) ||
     (hasBelovedKeyword && /(?:suka|doyan|favorit|kesukaan)/i.test(clean) && !/\b(?:aku|saya|gue|gw)\s+(?:suka|doyan)\b/i.test(clean));
 
   const isAboutBeloved = isExplicitlyBelovedPreference;
 
   // 2. Pola Preferensi Makanan & Minuman
-  // Pola A: "kopi / minuman / makanan kesukaan / favorit [subjek] [adalah / itu] [item]"
+  // Pola Inversi: "[item] adalah / itu makanan / minuman / kopi kesukaan / favorit [subjek]"
+  const prefInversMatch = clean.match(
+    /(?:(?:tolong\s+)?(?:ingat|catat)(?:\s+ya)?(?:\s+(?:kalau|bahwa))?\s+)?([a-zA-Z0-9\s]+?)\s+(?:adalah|itu|merupakan)\s+(?:kopi|minuman|makanan)\s+(?:kesukaan|favorit)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih))?/i
+  );
+  if (prefInversMatch && prefInversMatch[1]) {
+    let rawItem = cleanSubjectAndAux(prefInversMatch[1]);
+    // Hilangkan awalan perintah seperti 'ingat kalau' jika terbawa
+    rawItem = rawItem.replace(/^(?:ingat|tolong ingat|catat)\s+(?:ya\s+)?(?:kalau\s+|bahwa\s+)?/i, "").trim();
+    if (rawItem.length >= 2 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(rawItem)) {
+      const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(clean) || /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(rawItem);
+      const action = isDrink ? "minum" : "makan";
+      const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
+
+      if (isAboutBeloved) {
+        results.push({
+          fact: `Celyn (orang terkasih Rafli) suka ${action} ${rawItem} (${tag})`,
+          category: "preferensi",
+          importance: 3,
+        });
+      } else {
+        results.push({
+          fact: `Rafli suka ${action} ${rawItem} (${tag})`,
+          category: "preferensi",
+          importance: 3,
+        });
+      }
+      return results;
+    }
+  }
+
+  // Pola A: "kopi / minuman / makanan kesukaan / favorit [subjek?] [adalah / itu?] [item]"
   const prefNounMatch = clean.match(
-    /(?:kopi|minuman|makanan)\s+(?:kesukaan|favorit)(?:ku|nya)?(?:\s+(?:celyn|jocelyn|rafli|dia|kamu|orang terkasih))?\s*(?:adalah\s+|itu\s+)?([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
+    /(?:kopi|minuman|makanan)\s+(?:kesukaan|favorit)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s*([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena)/i
   );
   if (prefNounMatch && prefNounMatch[1]) {
-    let rawItem = cleanItemText(prefNounMatch[1]);
-    rawItem = rawItem.replace(/^(?:celyn|jocelyn|rafli|dia|itu|adalah)\s+/i, "").trim();
-    if (rawItem.length >= 3) {
-      const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso/i.test(clean) || /kopi|minuman/i.test(prefNounMatch[0]);
+    let rawItem = cleanSubjectAndAux(prefNounMatch[1]);
+    if (rawItem.length >= 2 && !/^(itu|ini|dia|kamu|aku|saya)$/i.test(rawItem)) {
+      const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(clean) || /kopi|minuman/i.test(prefNounMatch[0]) || /kopi|minuman|teh|jus|boba|latte|americano|espresso|susu|air/i.test(rawItem);
       const action = isDrink ? "minum" : "makan";
       const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
 
@@ -80,9 +119,9 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
     /(?:suka|doyan|paling suka|favorit|gemar|hobi)\s+(?:banget\s+)?(?:minum|makan|ngopi|nyemil)?\s*([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$|\s+dan\s+nanti|\s+karena|\s+tapi)/i
   );
   if (prefVerbMatch && prefVerbMatch[1]) {
-    const rawItem = cleanItemText(prefVerbMatch[1]);
-    if (rawItem.length >= 3 && !/^(itu|ini|dia|kamu|aku|saya|ngobrol|bicara)$/i.test(rawItem)) {
-      const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|air/i.test(rawItem) || /minum|ngopi/i.test(clean);
+    const rawItem = cleanSubjectAndAux(prefVerbMatch[1]);
+    if (rawItem.length >= 2 && !/^(itu|ini|dia|kamu|aku|saya|ngobrol|bicara)$/i.test(rawItem)) {
+      const isDrink = /kopi|minuman|teh|jus|boba|latte|americano|espresso|air|susu/i.test(rawItem) || /minum|ngopi/i.test(clean);
       const action = isDrink ? "minum" : "makan";
       const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
 
@@ -108,8 +147,8 @@ export function extractFactsFromUtterance(text: string): ExtractedFact[] {
     /(?:alergi|pantangan|tidak bisa makan|nggak bisa makan)\s+([a-zA-Z0-9\s]+?)(?:[\.,!\?]|$)/i
   );
   if (allergyMatch && allergyMatch[1]) {
-    const item = cleanItemText(allergyMatch[1]);
-    if (item.length >= 3) {
+    const item = cleanSubjectAndAux(allergyMatch[1]);
+    if (item.length >= 2) {
       const subjek = isAboutBeloved ? "Celyn (orang terkasih Rafli)" : "Rafli";
       results.push({
         fact: `${subjek} alergi ${item} (catatan kesehatan/alergi)`,

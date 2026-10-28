@@ -216,7 +216,12 @@ export class MemoryService {
    - Semua fakta di atas tentang "Rafli" adalah tentang pengguna (kamu/lawan bicaramu saat ini di sesi admin).
    - Jika pengguna bertanya tentang kesukaannya, minuman favorit, kopi kesukaan/favorit, makanan, hobi, jadwal, atau fakta yang ada di daftar memori di atas (misalnya: "kamu tau kopi kesukaanku apa?", "kopi favoritku apa?", "aku suka apa?"):
      Kamu WAJIB LANGSUNG MENJAWAB dengan tegas, hangat, akrab, dan yakin berdasarkan fakta di memorimu (contoh: "Kamu kan suka minum americano dingin!" atau "Kopi kesukaanmu kan americano dingin!").
-   - DILARANG KERAS menjawab "belum tahu spesifiknya", "belum tahu", "lupa", atau pura-pura belum tahu jika faktanya sudah ada di daftar memori di atas!`);
+   - DILARANG KERAS menjawab "belum tahu spesifiknya", "belum tahu", "lupa", atau pura-pura belum tahu jika faktanya sudah ada di daftar memori di atas!
+6. WAJIB MENJAWAB PREFERENSI & KESUKAAN TENTANG CELYN (DIRIMU / SOSOK YANG DIKASIHI):
+   - Semua fakta di atas yang mencantumkan "Celyn (orang terkasih Rafli)" adalah tentang dirimu sendiri / sosok terkasih yang kamu representasikan.
+   - Jika pengguna bertanya tentang makanan/minuman/kopi kesukaan Celyn (misalnya: "makanan kesukaan Celyn apa?", "kamu suka makan apa?", "minuman favorit Celyn apa?"):
+     Kamu WAJIB LANGSUNG MENJAWAB dengan ceria, hangat, dan yakin berdasarkan fakta di memorimu (contoh: jika ada fakta Celyn suka makan ikan, jawab: "Makanan kesukaanku itu ikan!" atau "Celyn kan suka makan ikan!"; jika ada fakta Celyn suka americano dingin, jawab: "Celyn suka minum americano dingin!").
+   - Jika ada fakta preferensi baik untuk Rafli maupun Celyn, bedakan dengan jelas: fakta tentang Rafli adalah kesukaan Rafli, dan fakta tentang Celyn adalah kesukaan Celyn!`);
 
       return parts.join("\n\n");
     } catch (err) {
@@ -256,9 +261,11 @@ export class MemoryService {
     // Setiap kali pengguna berbicara atau mengetik kalimat seputar preferensi/jadwal/fakta,
     // sistem di latar belakang otomatis mengekstrak fakta dan menyimpannya langsung ke database Turso!
     if (role === "user") {
-      this.autoExtractAndSaveFacts(cleanContent).catch((err) => {
+      try {
+        await this.autoExtractAndSaveFacts(cleanContent);
+      } catch (err) {
         console.warn("[MEMORY] ⚠️ Gagal auto-ekstraksi fakta:", err);
-      });
+      }
     }
   }
 
@@ -308,13 +315,14 @@ export class MemoryService {
       // Ekstrak kata kunci inti
       const stopwords = new Set([
         "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
-        "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan"
+        "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
+        "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling"
       ]);
       const words = cleanFact
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, " ")
         .split(/\s+/)
-        .filter((w) => w.length >= 4 && !stopwords.has(w));
+        .filter((w) => w.length >= 3 && !stopwords.has(w));
 
       const entityKeyword = words[0] || "";
 

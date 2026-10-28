@@ -691,6 +691,25 @@ async function runTtsTests() {
     autoExtractedUser[0].fact.includes("Rafli suka makan nasi padang"),
     "Autonomous Memory Ingestion berhasil mengekstrak preferensi makanan pengguna tanpa perintah manual"
   );
+  // Uji Kasus Pengguna: Ekstraksi Makanan Kesukaan Saya Ikan & Makanan Kesukaan Celyn Ikan
+  const fishUser = extractFactsFromUtterance("makanan kesukaan saya ikan");
+  assert(
+    fishUser.length > 0 &&
+    fishUser[0].fact === "Rafli suka makan ikan (makanan kesukaan)",
+    "Ekstraksi 'makanan kesukaan saya ikan' menghasilkan fakta bersih 'Rafli suka makan ikan (makanan kesukaan)'"
+  );
+  const fishCelyn = extractFactsFromUtterance("makanan kesukaan celyn itu ikan");
+  assert(
+    fishCelyn.length > 0 &&
+    fishCelyn[0].fact === "Celyn (orang terkasih Rafli) suka makan ikan (makanan kesukaan)",
+    "Ekstraksi 'makanan kesukaan celyn itu ikan' menghasilkan fakta 'Celyn (orang terkasih Rafli) suka makan ikan (makanan kesukaan)'"
+  );
+  assert(
+    memPrompt.includes("Rafli suka makan ikan") &&
+    memPrompt.includes("Celyn (orang terkasih Rafli) suka makan ikan") &&
+    memPrompt.includes("WAJIB MENJAWAB PREFERENSI & KESUKAAN TENTANG CELYN"),
+    "Memory prompt memuat fakta ikan untuk Rafli & Celyn serta panduan Rule 6 preferensi Celyn"
+  );
   assert(
     !memPrompt.includes("Gemini") && !memPrompt.includes("Google"),
     "Blok memori bebas 100% dari penyebutan nama vendor Gemini/Google"
