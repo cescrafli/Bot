@@ -70,3 +70,9 @@ Desktop.ini
 # 8. Testing & Coverage
 coverage/
 .nyc_output/
+
+# 9. Skrip Lokal Privat & Migrasi Rahasia (Zero Leak)
+*.local.ts
+*.local.js
+scripts/sync-private-story.ts
+scripts/*.local.*

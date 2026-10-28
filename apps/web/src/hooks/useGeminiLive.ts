@@ -676,7 +676,7 @@ export function useGeminiLive({
                   const importance = Number(fc.args?.importance) || 2;
                   console.log("🧠 [Direct Live Tool] Menyimpan memori:", { fact, category });
                   if (getStoredAuthMode() === "jocelyn" && fact) {
-                    fetch("/api/memory/remember", {
+                    fetch("/api/remember", {
                       method: "POST",
                       headers: {
                         "Content-Type": "application/json",
@@ -684,7 +684,7 @@ export function useGeminiLive({
                       },
                       body: JSON.stringify({ fact, category, importance }),
                     }).catch((e) =>
-                      console.warn("Gagal simpan remember_fact via /api/memory/remember:", e)
+                      console.warn("Gagal simpan remember_fact via /api/remember:", e)
                     );
                   }
                   toolOutput = {

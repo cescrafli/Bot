@@ -7,6 +7,10 @@
   "framework": null,
   "rewrites": [
     {
+      "source": "/api/memory/remember",
+      "destination": "/api/remember"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
