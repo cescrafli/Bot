@@ -1147,8 +1147,9 @@ async function runTtsTests() {
   // Verifikasi Prompt Directive Celyn memuat instruksi in-place edit & tanpa batas file
   assert(
     CELYN_SYSTEM_PROMPT.includes("EDIT PDF IN-PLACE") &&
-    CELYN_SYSTEM_PROMPT.includes("TIDAK ADA BATASAN JUMLAH FILE DOKUMEN"),
-    "System Prompt Celyn memuat instruksi penuh Edit PDF In-Place dan bebas batasan jumlah file"
+    CELYN_SYSTEM_PROMPT.includes("TIDAK ADA BATASAN JUMLAH FILE DOKUMEN") &&
+    CELYN_SYSTEM_PROMPT.includes("RESPON PROAKTIF SAAT DOKUMEN DIUNGGAH"),
+    "System Prompt Celyn memuat instruksi penuh Edit PDF In-Place, bebas batasan file, dan respon proaktif saat upload"
   );
 
   // 22. Ringkasan

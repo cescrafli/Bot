@@ -973,7 +973,7 @@ export class GeminiSession {
               parts: [{ text: safeText }],
             },
           ],
-          turnComplete: false,
+          turnComplete: true,
         });
       } else if (msg.type === "text") {
         const preview = msg.text.length > 50 ? `${msg.text.slice(0, 50)}...` : msg.text;
