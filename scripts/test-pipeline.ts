@@ -1936,7 +1936,70 @@ async function runTtsTests() {
     "System prompt Celyn menginstruksikan mode upload-then-wait tanpa menyerobot berbicara"
   );
 
-  // 27. Ringkasan
+  // 27. Uji Audit Menyeluruh UI Responsif & Hardening AI (Semua Resolusi HP & Desktop)
+  console.log("\n--- 27. Uji Audit Menyeluruh UI Responsif & Hardening AI ---");
+
+  // A. Verifikasi UI Clamping DocumentActionPill
+  const pillFileContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/controls/DocumentActionPill.tsx"),
+    "utf8"
+  );
+  assert(
+    pillFileContent.includes("max-w-[min(420px,calc(100vw-2rem))]"),
+    "DocumentActionPill responsif fluid dan terkunci aman di layar kecil (320px)"
+  );
+
+  // B. Verifikasi ControlBar valid CSS & badge
+  const controlBarContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/controls/ControlBar.tsx"),
+    "utf8"
+  );
+  assert(
+    !controlBarContent.includes("py-0.2") && controlBarContent.includes("py-[1px]"),
+    "ControlBar bebas dari Tailwind class tidak valid (py-0.2 diganti py-[1px])"
+  );
+
+  // C. Verifikasi SubtitleOverlay fluid width
+  const subtitleOverlayContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/transcript/SubtitleOverlay.tsx"),
+    "utf8"
+  );
+  assert(
+    subtitleOverlayContent.includes("max-w-[min(36rem,calc(100vw-1.5rem))]"),
+    "SubtitleOverlay responsif di semua rasio layar HP & desktop"
+  );
+
+  // D. Verifikasi TranscriptDrawer backdrop & 100dvh
+  const drawerContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/chat/TranscriptDrawer.tsx"),
+    "utf8"
+  );
+  assert(
+    drawerContent.includes("h-[100dvh]") && drawerContent.includes("overscroll-contain"),
+    "TranscriptDrawer memiliki overscroll-contain dan viewport dinamis h-[100dvh]"
+  );
+
+  // E. Verifikasi SettingsModal modern dvh
+  const settingsContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/modals/SettingsModal.tsx"),
+    "utf8"
+  );
+  assert(
+    settingsContent.includes("max-h-[75dvh]"),
+    "SettingsModal menggunakan max-h-[75dvh] dinamis untuk mobile browser chrome"
+  );
+
+  // F. Verifikasi Multi-Model Resilience AI
+  const researchServiceCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/ResearchService.ts"),
+    "utf8"
+  );
+  assert(
+    researchServiceCode.includes("gemini-3.8-flash") && !researchServiceCode.includes("gemini-2.0-flash"),
+    "ResearchService menggunakan model Gemini 3.8 Flash terkini tanpa model legacy non-aktif"
+  );
+
+  // 28. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

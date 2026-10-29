@@ -329,11 +329,11 @@ export function App() {
       {/* Subtle Luxury Ambient Background */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[850px] h-[850px] ambient-halo blur-[110px] animate-soft-aura z-0"
+        className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(850px,180vw)] h-[min(850px,180vh)] ambient-halo blur-[110px] animate-soft-aura z-0"
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[350px] ambient-halo-back blur-[90px] z-0"
+        className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[min(600px,150vw)] h-[350px] ambient-halo-back blur-[90px] z-0"
       />
       <div
         aria-hidden="true"
@@ -357,7 +357,7 @@ export function App() {
           </div>
 
           {/* Center: Clean Status & Audio Presence */}
-          <div className="luxury-blur-panel px-3 sm:px-4 py-1.5 rounded-full flex items-center gap-2 sm:gap-2.5 transition-all">
+          <div className="luxury-blur-panel px-2.5 sm:px-4 py-1.5 rounded-full flex items-center gap-2 sm:gap-2.5 transition-all">
             <span className="relative flex h-2 w-2 shrink-0">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${
@@ -376,7 +376,7 @@ export function App() {
                 }`}
               />
             </span>
-            <span className="text-[11px] sm:text-xs font-normal text-slate-300 tracking-wide truncate max-w-[130px] sm:max-w-none">
+            <span className="text-[11px] sm:text-xs font-normal text-slate-300 tracking-wide truncate max-w-[95px] xs:max-w-[140px] sm:max-w-none">
               {effectiveStatusMessage}
             </span>
             {/* Delicate Waveform Bars */}
@@ -415,8 +415,8 @@ export function App() {
               className="h-8 px-2.5 rounded-full luxury-blur-panel flex items-center gap-1.5 text-slate-300 hover:text-white hover:border-white/20 transition-all cursor-pointer group"
               title={`Karakter Suara: ${getVoiceOption(live.modelInfo.voice || selectedVoice).name} (Klik untuk ganti)`}
             >
-              <AudioLines className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" />
-              <span className="text-[11px] font-medium tracking-wide">
+              <AudioLines className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform shrink-0" />
+              <span className="text-[11px] font-medium tracking-wide max-w-[65px] sm:max-w-none truncate">
                 {getVoiceOption(live.modelInfo.voice || selectedVoice).name}
               </span>
             </button>
@@ -424,7 +424,7 @@ export function App() {
             {/* Settings Icon Button */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="w-8 h-8 rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
+              className="w-8 h-8 rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer shrink-0"
               title="Pengaturan"
             >
               <Settings className="w-4 h-4" />
@@ -510,7 +510,7 @@ export function App() {
                 e.preventDefault();
                 handleSendText(inputText);
               }}
-              className="w-full max-w-md flex items-center gap-2 px-3 py-1.5 rounded-2xl luxury-blur-panel border border-white/10 shadow-2xl animate-in fade-in slide-in-from-bottom-2"
+              className="w-full max-w-[min(28rem,calc(100vw-2rem))] flex items-center gap-2 px-3 py-1.5 rounded-2xl luxury-blur-panel border border-white/10 shadow-2xl animate-in fade-in slide-in-from-bottom-2"
             >
               <input
                 type="text"

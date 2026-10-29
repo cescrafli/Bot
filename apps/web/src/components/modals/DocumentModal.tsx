@@ -353,12 +353,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                             <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400">
                               <span>{doc.characterCount.toLocaleString()} karakter</span>
                               {doc.usedOcr && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                <span className="px-1.5 py-[1px] rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                   OCR Vision
                                 </span>
                               )}
                               {doc.truncated && (
-                                <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                <span className="px-1.5 py-[1px] rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
                                   Diringkas
                                 </span>
                               )}

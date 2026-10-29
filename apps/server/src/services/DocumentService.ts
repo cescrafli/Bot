@@ -48,31 +48,44 @@ export class DocumentService {
         ? config.geminiApiKeys
         : [config.geminiApiKey];
 
+    const modelsToTry = [
+      model,
+      "gemini-3.8-flash",
+      "gemini-3-flash-preview",
+    ].filter(Boolean);
+    const uniqueModels = [...new Set(modelsToTry)];
+
     let lastErr: any;
     // Ronde 0: coba semua kunci. Jika semua kena batas kuota, tunggu sesuai retryDelay lalu ulangi (maks 3 ronde).
     for (let round = 0; round < 3; round++) {
       let allRateLimited = true;
-      for (const key of keys) {
-        if (!key) continue;
-        const ai = new GoogleGenAI({ apiKey: key });
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const res = await ai.models.generateContent({
-              model,
-              contents: prompt,
-              config: { responseMimeType: "application/json" },
-            });
-            if (res?.text) return res;
-            allRateLimited = false;
-          } catch (err: any) {
-            lastErr = err;
-            if (isRateLimitError(err) || err?.status === 503) {
-              console.warn("[DocumentService] Kunci mencapai kuota, mencoba kunci berikutnya di pool...");
-              break; // Lanjut ke kunci berikutnya di pool
-            }
-            allRateLimited = false;
-            if (attempt === 0) {
-              await new Promise((r) => setTimeout(r, 1000));
+      for (const modelToTry of uniqueModels) {
+        for (const key of keys) {
+          if (!key) continue;
+          const ai = new GoogleGenAI({ apiKey: key });
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const res = await ai.models.generateContent({
+                model: modelToTry,
+                contents: prompt,
+                config: { responseMimeType: "application/json" },
+              });
+              if (res?.text) return res;
+              allRateLimited = false;
+            } catch (err: any) {
+              lastErr = err;
+              if (err?.status === 404) {
+                // Model tidak tersedia lagi, coba model berikutnya
+                break;
+              }
+              if (isRateLimitError(err) || err?.status === 503) {
+                console.warn("[DocumentService] Kunci mencapai kuota, mencoba kunci berikutnya di pool...");
+                break; // Lanjut ke kunci berikutnya di pool
+              }
+              allRateLimited = false;
+              if (attempt === 0) {
+                await new Promise((r) => setTimeout(r, 1000));
+              }
             }
           }
         }

@@ -43,7 +43,12 @@ export class ResearchService {
       };
     }
 
-    const modelName = config.textModel || "gemini-3-flash-preview";
+    const candidateModels = [
+      config.textModel,
+      "gemini-3.8-flash",
+      "gemini-3-flash-preview",
+    ].filter((m): m is string => Boolean(m));
+    const modelName = candidateModels[0] || "gemini-3.8-flash";
 
     try {
       // Execute generative search with search grounding & expert persona
@@ -128,20 +133,31 @@ ${expert.promptGuide}
       console.warn(`[ResearchService] Grounding search fallback for '${query}':`, err?.message || err);
 
       // Fallback: standard generation without tools if search tool rejected on preview model
-      try {
-        const fallbackResp = await this.ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              text: `Anda adalah ${expert.persona} (${expert.fieldLabel}).
+      let fallbackText = "";
+      let lastFallbackErr: any = null;
+
+      for (const modelToTry of candidateModels) {
+        try {
+          const fallbackResp = await this.ai.models.generateContent({
+            model: modelToTry,
+            contents: [
+              {
+                text: `Anda adalah ${expert.persona} (${expert.fieldLabel}).
 Jelaskan secara komprehensif, mendalam, dan akurat mengenai topik: "${query}".
 Fokus keahlian: ${expert.promptGuide}
 
 Sampaikan fakta penting, analisis kritis, peluang, risiko, dan rekomendasi tingkat ahli. Jika ada sumber rujukan umum (portal resmi, bursa, jurnal, regulasi), sebutkan tautan umumnya.`,
-            },
-          ],
-        });
-        const fallbackText = fallbackResp.text || "";
+              },
+            ],
+          });
+          fallbackText = fallbackResp.text || "";
+          if (fallbackText) break;
+        } catch (fbErr: any) {
+          lastFallbackErr = fbErr;
+        }
+      }
+
+      if (fallbackText) {
         return {
           query,
           summary: fallbackText,
@@ -150,16 +166,16 @@ Sampaikan fakta penting, analisis kritis, peluang, risiko, dan rekomendasi tingk
           expertPersona: expert.persona,
           fieldLabel: expert.fieldLabel,
         };
-      } catch (fallbackErr: any) {
-        return {
-          query,
-          summary: `Riset untuk '${query}' belum berhasil diselesaikan.`,
-          sources: [],
-          formattedMarkdown: `Maaf, terjadi kendala saat meriset '${query}': ${fallbackErr?.message || "Koneksi terputus"}`,
-          expertPersona: expert.persona,
-          fieldLabel: expert.fieldLabel,
-        };
       }
+
+      return {
+        query,
+        summary: `Riset untuk '${query}' belum berhasil diselesaikan.`,
+        sources: [],
+        formattedMarkdown: `Maaf, terjadi kendala saat meriset '${query}': ${lastFallbackErr?.message || "Koneksi terputus"}`,
+        expertPersona: expert.persona,
+        fieldLabel: expert.fieldLabel,
+      };
     }
   }
 }

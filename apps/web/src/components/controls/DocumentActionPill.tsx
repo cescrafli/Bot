@@ -67,12 +67,10 @@ export const DocumentActionPill: React.FC<DocumentActionPillProps> = ({
 
   return (
     <div
-      className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-3 duration-300"
+      className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-3 duration-300 max-w-[min(420px,calc(100vw-2rem))] w-full mx-auto"
       style={{
         background: "rgba(10, 12, 20, 0.85)",
         backdropFilter: "blur(20px)",
-        maxWidth: "420px",
-        width: "100%",
       }}
       role="status"
       aria-live="polite"

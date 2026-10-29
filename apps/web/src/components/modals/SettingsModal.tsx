@@ -77,9 +77,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
       <div
-        className="w-full max-w-md luxury-blur-panel rounded-3xl p-6 border border-white/10 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200"
+        className="w-full max-w-md luxury-blur-panel rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-white/10 shadow-2xl space-y-4 sm:space-y-5 animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Modal */}
@@ -101,7 +101,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors"
+            className="w-8 h-8 rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
             title="Tutup"
           >
             <X className="w-4 h-4" />
@@ -109,7 +109,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Daftar Opsi Pengaturan */}
-        <div className="space-y-3 max-h-[65vh] overflow-y-auto no-scrollbar pr-1">
+        <div className="space-y-3 max-h-[75dvh] overflow-y-auto no-scrollbar pr-1">
           {/* Mode Avatar 2D / 3D */}
           <div className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/5">
             <div className="flex items-center gap-3">

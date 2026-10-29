@@ -18,8 +18,8 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     : "";
 
   return (
-    <div className="pointer-events-auto max-w-xl w-[90%] md:w-auto text-center z-20">
-      <div className="luxury-blur-panel px-6 py-3 rounded-2xl border border-white/10 shadow-2xl transition-all inline-block text-left sm:text-center max-h-28 overflow-y-auto no-scrollbar">
+    <div className="pointer-events-auto max-w-[min(36rem,calc(100vw-1.5rem))] w-full text-center z-20 mx-auto">
+      <div className="luxury-blur-panel px-4 sm:px-6 py-2.5 sm:py-3 rounded-2xl border border-white/10 shadow-2xl transition-all inline-block text-left sm:text-center max-h-28 overflow-y-auto no-scrollbar">
         {latestTranscript && displaySubtitle ? (
           <p className="text-xs sm:text-sm font-light text-slate-100 leading-relaxed drop-shadow-sm animate-in fade-in duration-200">
             {latestTranscript.speaker === "user" ? (

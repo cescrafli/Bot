@@ -146,7 +146,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           )}
         </div>
         {!isConnected && quotaCooldownSeconds > 0 && (
-          <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-amber-500 text-[9px] font-bold text-black shadow animate-pulse">
+          <span className="absolute -top-1 -right-1 px-1.5 py-[1px] rounded-full bg-amber-500 text-[9px] font-bold text-black shadow animate-pulse">
             {quotaCooldownSeconds}s
           </span>
         )}

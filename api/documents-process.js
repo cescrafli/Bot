@@ -312,18 +312,29 @@ export const config = {
 
 async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
   let lastErr = null;
-  for (const key of candidateKeys) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: key });
-      const aiRes = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
-      return JSON.parse(aiRes.text || "{}");
-    } catch (err) {
-      lastErr = err;
-      console.warn(`[documents-process] Gagal dengan API key (kunci #${candidateKeys.indexOf(key) + 1}):`, err?.message || err);
+  const modelsToTry = [
+    model,
+    "gemini-3.8-flash",
+    "gemini-3-flash-preview",
+  ].filter(Boolean);
+  const uniqueModels = [...new Set(modelsToTry)];
+
+  for (const modelToTry of uniqueModels) {
+    for (const key of candidateKeys) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: key });
+        const aiRes = await ai.models.generateContent({
+          model: modelToTry,
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+        if (aiRes?.text) {
+          return JSON.parse(aiRes.text);
+        }
+      } catch (err) {
+        lastErr = err;
+        console.warn(`[documents-process] Gagal dengan model ${modelToTry} API key (kunci #${candidateKeys.indexOf(key) + 1}):`, err?.message || err);
+      }
     }
   }
   throw lastErr || new Error("Semua API key Gemini gagal memproses dokumen.");
