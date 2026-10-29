@@ -2145,7 +2145,52 @@ async function runTtsTests() {
     "package.json mengonfigurasi allowScripts untuk mengeliminasi warning install-scripts Vercel"
   );
 
-  // 30. Ringkasan
+  // 30. PENGUJIAN KEAMANAN SUPPLY CHAIN, OVERRIDES & ELIMINASI SHEETJS
+  console.log("\n🧪 --- SECTION 30: Supply Chain Security & Zero Vulnerabilities ---");
+
+  // A. Verifikasi Override uuid >= 11.1.1
+  assert(
+    rootPkg.overrides && rootPkg.overrides["uuid"] === "^11.1.1",
+    "package.json memiliki overrides uuid: ^11.1.1 untuk memitigasi celah keamanan buffer bounds"
+  );
+
+  // B. Verifikasi Upgrade zod >= 4.6.7 (Eliminasi GHSA-mrhx-c7xc-m3w5)
+  const sharedPkg = JSON.parse(
+    fs.readFileSync(path.resolve(process.cwd(), "packages/shared/package.json"), "utf8")
+  );
+  assert(
+    sharedPkg.dependencies && sharedPkg.dependencies["zod"] === "^4.6.7",
+    "packages/shared/package.json menggunakan zod versi mutakhir (^4.6.7) bebas dari celah memori"
+  );
+
+  // C. Verifikasi Eliminasi Total SheetJS (xlsx) dari Dependencies
+  assert(
+    !rootPkg.dependencies?.["xlsx"],
+    "Paket xlsx (SheetJS) dihapus total dari dependensi root demi keamanan"
+  );
+
+  // D. Verifikasi api/documents-read.js dan DocumentReaderService Bebas dari SheetJS
+  const docReadJsCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-read.js"), "utf8");
+  assert(
+    !docReadJsCode.includes('from "xlsx"') && !docReadJsCode.includes("from 'xlsx'"),
+    "api/documents-read.js bebas 100% dari import library xlsx"
+  );
+  const docReaderTsCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/DocumentReaderService.ts"),
+    "utf8"
+  );
+  assert(
+    !docReaderTsCode.includes('from "xlsx"') && !docReaderTsCode.includes("from 'xlsx'"),
+    "DocumentReaderService.ts bebas 100% dari import library xlsx"
+  );
+
+  // E. Verifikasi Keberadaan dan Konfigurasi .npmrc
+  const npmrcPath = path.resolve(process.cwd(), ".npmrc");
+  assert(fs.existsSync(npmrcPath), "File .npmrc tersedia di root direktori");
+  const npmrcContent = fs.readFileSync(npmrcPath, "utf8");
+  assert(npmrcContent.includes("cache="), ".npmrc memuat konfigurasi cache yang valid");
+
+  // 31. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

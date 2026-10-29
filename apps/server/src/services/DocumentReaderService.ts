@@ -4,7 +4,6 @@ import mammoth from "mammoth";
 import TurndownService from "turndown";
 // @ts-expect-error turndown-plugin-gfm does not have bundled TS types in some versions
 import { gfm } from "turndown-plugin-gfm";
-import * as XLSX from "xlsx";
 // @ts-expect-error word-extractor has no bundled types
 import WordExtractor from "word-extractor";
 import { GoogleGenAI } from "@google/genai";
@@ -390,41 +389,14 @@ export class DocumentReaderService {
   }
 
   /**
-   * 4. BACA XLS legacy (.xls) via SheetJS
+   * 4. BACA XLS legacy (.xls)
    */
   private async readSpreadsheetLegacy(buffer: Buffer, fileName: string): Promise<ParsedDocument> {
-    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
-    const lines: string[] = [];
-
-    for (const sheetName of wb.SheetNames) {
-      lines.push(`### Sheet: ${sheetName}\n`);
-      const ws = wb.Sheets[sheetName];
-      const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-      if (data.length > 0) {
-        const maxCols = Math.max(...data.map((r) => r.length));
-        const pad = (row: any[]) => {
-          const r = [...row];
-          while (r.length < maxCols) r.push("");
-          return r.map((v) => {
-            if (v instanceof Date) return v.toISOString().slice(0, 10);
-            return String(v ?? "").replace(/\|/g, "\\|").trim();
-          });
-        };
-        const header = pad(data[0]);
-        lines.push(`| ${header.join(" | ")} |`);
-        lines.push(`| ${header.map(() => "---").join(" | ")} |`);
-        const displayRows = data.slice(1, 251);
-        for (const row of displayRows) lines.push(`| ${pad(row).join(" | ")} |`);
-        if (data.length > 251) lines.push(`\n*(Menampilkan 250 dari ${data.length - 1} baris data)*`);
-      }
-      lines.push("");
-    }
-
-    const fullContent = lines.join("\n").trim();
+    const fullContent = `# Dokumen Excel Legacy (.xls)\n\nFile "${fileName}" berformat biner Excel 97-2003 (.xls). Untuk kecepatan analisis dan presisi formula terbaik, silakan simpan atau ekspor sebagai berkas modern **.xlsx** atau konversi ke format **CSV**.`;
     return {
       fileName,
       mimeType: "application/vnd.ms-excel",
-      markdownContent: fullContent || "(Excel kosong)",
+      markdownContent: fullContent,
       usedOcr: false,
       truncated: false,
       characterCount: fullContent.length,

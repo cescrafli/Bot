@@ -2,7 +2,6 @@ import Busboy from "busboy";
 import { getDocumentProxy, extractText } from "unpdf";
 import ExcelJS from "exceljs";
 import mammoth from "mammoth";
-import * as XLSX from "xlsx";
 import WordExtractor from "word-extractor";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
@@ -467,36 +466,6 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
     return lines.join("\n").trim();
   }
 
-  // ── Helper: SheetJS → Markdown (for legacy XLS / XLSM / XLSB) ─────────────
-  function sheetJsToMarkdown(xlsxBuf) {
-    const wb = XLSX.read(xlsxBuf, { type: "buffer", cellDates: true });
-    const lines = [];
-    for (const sheetName of wb.SheetNames) {
-      lines.push(`### Sheet: ${sheetName}\n`);
-      const ws = wb.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-      if (data.length > 0) {
-        const maxCols = Math.max(...data.map((r) => r.length));
-        const pad = (row) => {
-          const r = [...row];
-          while (r.length < maxCols) r.push("");
-          return r.map((v) => {
-            if (v instanceof Date) return v.toISOString().slice(0, 10);
-            return String(v ?? "").replace(/\|/g, "\\|").trim();
-          });
-        };
-        const header = pad(data[0]);
-        lines.push(`| ${header.join(" | ")} |`);
-        lines.push(`| ${header.map(() => "---").join(" | ")} |`);
-        const displayRows = data.slice(1, 251);
-        for (const row of displayRows) lines.push(`| ${pad(row).join(" | ")} |`);
-        if (data.length > 251) lines.push(`\n*(Menampilkan 250 dari ${data.length - 1} baris data)*`);
-      }
-      lines.push("");
-    }
-    return lines.join("\n").trim();
-  }
-
   // ── Helper: Parse delimited text (CSV / TSV) → Markdown ───────────────────
   function delimitedToMarkdown(buffer, ext) {
     const text = decodeTextBuffer(buffer);
@@ -551,7 +520,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
     return mdLines.join("\n");
   }
 
-  // ── XLSX / XLSM / XLSB (modern Excel via ExcelJS, fallback to SheetJS) ─────
+  // ── XLSX / XLSM / XLSB (modern Excel via ExcelJS) ──────────────────────────
   if (isExcel) {
     try {
       const workbook = new ExcelJS.Workbook();
@@ -566,30 +535,28 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
         characterCount: fullContent.length,
       };
     } catch (excelJsErr) {
-      // fallback to SheetJS for xlsm/xlsb
-      console.warn("[documents-read] ExcelJS failed, falling back to SheetJS:", excelJsErr?.message);
-      const fullContent = sheetJsToMarkdown(buffer);
+      console.warn("[documents-read] ExcelJS gagal memproses berkas Excel:", excelJsErr?.message);
       return {
         fileName,
         mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        markdownContent: fullContent || "(Excel kosong)",
+        markdownContent: `### Dokumen Excel: ${fileName}\n\n*Berkas lembar kerja tidak dapat diekstrak secara otomatis. Pastikan dokumen valid dan tidak dilindungi kata sandi.*`,
         usedOcr: false,
         truncated: false,
-        characterCount: fullContent.length,
+        characterCount: 0,
       };
     }
   }
 
-  // ── XLS legacy (SheetJS) ────────────────────────────────────────────────────
+  // ── XLS legacy (Excel 97-2003) ─────────────────────────────────────────────
   if (isXls) {
-    const fullContent = sheetJsToMarkdown(buffer);
+    const text = `# Dokumen Excel Legacy (.xls)\n\nFile "${fileName}" berformat biner Excel 97-2003 (.xls). Untuk kecepatan analisis dan kompatibilitas penuh, silakan simpan atau ekspor sebagai berkas modern **.xlsx** atau konversi ke format **CSV**.`;
     return {
       fileName,
       mimeType: "application/vnd.ms-excel",
-      markdownContent: fullContent || "(Excel kosong)",
+      markdownContent: text,
       usedOcr: false,
       truncated: false,
-      characterCount: fullContent.length,
+      characterCount: text.length,
     };
   }
 

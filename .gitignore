@@ -18,6 +18,7 @@ node_modules/
 .pnpm-store/
 .yarn/
 .npm/
+.npm-cache/
 
 # 3. Hasil Build & Bundle
 dist/
