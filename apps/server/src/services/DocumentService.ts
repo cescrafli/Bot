@@ -56,42 +56,33 @@ export class DocumentService {
     const uniqueModels = [...new Set(modelsToTry)];
 
     let lastErr: any;
-    // Ronde 0: coba semua kunci. Jika semua kena batas kuota, tunggu sesuai retryDelay lalu ulangi (maks 3 ronde).
-    for (let round = 0; round < 3; round++) {
-      let allRateLimited = true;
-      for (const modelToTry of uniqueModels) {
-        for (const key of keys) {
-          if (!key) continue;
-          const ai = new GoogleGenAI({ apiKey: key });
-          for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-              const res = await ai.models.generateContent({
-                model: modelToTry,
-                contents: prompt,
-                config: { responseMimeType: "application/json" },
-              });
-              if (res?.text) return res;
-              allRateLimited = false;
-            } catch (err: any) {
-              lastErr = err;
-              if (err?.status === 404) {
-                // Model tidak tersedia lagi, coba model berikutnya
-                break;
-              }
-              if (isRateLimitError(err) || err?.status === 503) {
-                console.warn("[DocumentService] Kunci mencapai kuota, mencoba kunci berikutnya di pool...");
-                break; // Lanjut ke kunci berikutnya di pool
-              }
-              allRateLimited = false;
-              if (attempt === 0) {
-                await new Promise((r) => setTimeout(r, 1000));
-              }
-            }
+    for (const modelToTry of uniqueModels) {
+      for (const key of keys) {
+        if (!key) continue;
+        const ai = new GoogleGenAI({ apiKey: key });
+        try {
+          const res = (await Promise.race([
+            ai.models.generateContent({
+              model: modelToTry,
+              contents: prompt,
+              config: { responseMimeType: "application/json" },
+            }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("Timeout memanggil model")), 8000)
+            ),
+          ])) as any;
+          if (res?.text) return res;
+        } catch (err: any) {
+          lastErr = err;
+          if (err?.status === 404) {
+            break;
+          }
+          if (isRateLimitError(err) || err?.status === 503 || String(err?.message || "").includes("Timeout")) {
+            console.warn("[DocumentService] Kunci mencapai kuota/timeout, mencoba kunci berikutnya di pool...");
+            continue;
           }
         }
       }
-      if (!allRateLimited || round === 2) break;
-      await new Promise((r) => setTimeout(r, parseRetryDelayMs(lastErr)));
     }
     throw lastErr || new Error("Seluruh kunci layanan mencapai batas kuota");
   }

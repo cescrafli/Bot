@@ -26,7 +26,7 @@ export const JobTray: React.FC<JobTrayProps> = ({ jobs, onDismissJob }) => {
   };
 
   return (
-    <div className="fixed bottom-24 right-6 z-40 flex flex-col gap-2.5 max-w-sm w-full pointer-events-auto">
+    <div className="fixed bottom-24 right-3 left-3 sm:right-6 sm:left-auto z-40 flex flex-col gap-2.5 max-w-[min(24rem,calc(100vw-1.5rem))] w-full mx-auto sm:mx-0 pointer-events-auto">
       {jobs.map((job) => (
         <div
           key={job.id}

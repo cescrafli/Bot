@@ -1050,12 +1050,59 @@ export function useGeminiLive({
                 } else if (fc.name === "research") {
                   const query = String((fc.args as any)?.query || "").trim();
                   const expert = inferExpertPersona(query);
+                  console.log(`🔍 [Direct Live Tool] Menjalankan riset mendalam untuk: "${query}"`);
+
+                  let researchSummary = "";
+                  let researchSources: Array<{ title: string; url: string }> = [];
+
+                  if (query) {
+                    try {
+                      const password = getStoredAuthPassword() || "admin";
+                      const token = getStoredAuthToken();
+                      const headers: Record<string, string> = {
+                        "Content-Type": "application/json",
+                        "x-admin-password": password,
+                      };
+                      if (token) headers["Authorization"] = `Bearer ${token}`;
+                      const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
+                      if (customKey) headers["x-gemini-key"] = customKey;
+
+                      const res = await fetch("/api/research", {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify({ query }),
+                      });
+
+                      if (res.ok) {
+                        const data = await res.json().catch(() => null);
+                        if (data && data.ok) {
+                          researchSummary = data.summary || "";
+                          researchSources = Array.isArray(data.sources) ? data.sources : [];
+                        }
+                      } else {
+                        console.warn(`[Direct Live] /api/research returned status ${res.status}`);
+                      }
+                    } catch (e) {
+                      console.warn("Gagal fetch /api/research:", e);
+                    }
+                  }
+
+                  const sourcesMarkdown =
+                    researchSources.length > 0
+                      ? "\n\nSumber Terverifikasi:\n" +
+                        researchSources.map((s) => `- [${s.title}](${s.url})`).join("\n")
+                      : "";
+
                   toolOutput = {
                     status: "applied",
                     query,
                     expertPersona: expert.persona,
                     fieldLabel: expert.fieldLabel,
-                    instruction: `Riset mendalam untuk '${query}' telah diselesaikan. Kamu sekarang WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Sampaikan analisis tingkat profesional yang berbobot, terstruktur, berbasis data riil (bukan riset asal-asalan), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, potensi risiko, dan rekomendasi strategismu. Lalu tawarkan secara proaktif apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
+                    summary: researchSummary || `Riset untuk '${query}' telah dianalisis.`,
+                    sources: researchSources,
+                    instruction: `Hasil riset mendalam untuk '${query}' berhasil didapatkan.${
+                      researchSummary ? ` Temuan data riil: ${researchSummary.slice(0, 500)}...` : ""
+                    }${sourcesMarkdown} Sekarang kamu WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, berbasis data riil (bukan riset asal-asalan), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, risiko, dan rekomendasimu. Jangan lupa cantumkan sumber rujukan markdown [Judul](URL). Terakhir, TAWARKAN SECARA PROAKTIF apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
                   };
                 }
 

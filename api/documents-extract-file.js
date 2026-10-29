@@ -59,8 +59,12 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Akses ditolak: Autentikasi valid diperlukan." });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const customKey = (req.headers["x-gemini-key"] || req.query?.apiKey || "").trim();
+  const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+  const envKeys = rawEnvKeys.split(",").map((k) => k.trim()).filter(Boolean);
+  const candidateKeys = customKey ? [customKey, ...envKeys] : envKeys;
+
+  if (candidateKeys.length === 0) {
     return res.status(500).json({ error: "GEMINI_API_KEY belum dikonfigurasi di server." });
   }
 
@@ -74,17 +78,16 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Parameter 'fileUri' wajib disertakan." });
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-
-    // Tunggu jika status file masih PROCESSING
+    // Tunggu jika status file masih PROCESSING (gunakan kunci pertama)
     const fileNameKey = fileUri.split("/").pop();
     if (fileNameKey) {
       try {
-        let fileStatus = await ai.files.get({ name: `files/${fileNameKey}` });
+        const primaryAi = new GoogleGenAI({ apiKey: candidateKeys[0] });
+        let fileStatus = await primaryAi.files.get({ name: `files/${fileNameKey}` });
         let attempts = 0;
         while (fileStatus.state === "PROCESSING" && attempts < 15) {
           await new Promise((r) => setTimeout(r, 2000));
-          fileStatus = await ai.files.get({ name: `files/${fileNameKey}` });
+          fileStatus = await primaryAi.files.get({ name: `files/${fileNameKey}` });
           attempts++;
         }
       } catch (checkErr) {
@@ -92,31 +95,59 @@ export default async function handler(req, res) {
       }
     }
 
-    const modelName = process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
+    const modelsToTry = [
+      process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL,
+      "gemini-3.8-flash",
+      "gemini-3-flash-preview",
+    ].filter(Boolean);
+    const uniqueModels = [...new Set(modelsToTry)];
+
     const prompt =
       "Tolong ekstrak seluruh isi dokumen ini menjadi Markdown terstruktur yang rapi dan lengkap. Sertakan judul utama (#), sub-heading (##, ###), poin-poin penting, dan tabel markdown jika ada. Pertahankan urutan bab dan nilai data asli secara presisi. Jangan lewatkan informasi penting.";
 
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              fileData: {
-                fileUri,
-                mimeType,
-              },
-            },
-            {
-              text: prompt,
-            },
-          ],
-        },
-      ],
-    });
+    let lastError = null;
+    let markdownContent = "";
 
-    const markdownContent = (response.text || "").trim();
+    for (const modelToTry of uniqueModels) {
+      for (const key of candidateKeys) {
+        try {
+          const ai = new GoogleGenAI({ apiKey: key });
+          const response = await ai.models.generateContent({
+            model: modelToTry,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    fileData: {
+                      fileUri,
+                      mimeType,
+                    },
+                  },
+                  {
+                    text: prompt,
+                  },
+                ],
+              },
+            ],
+          });
+
+          const text = (response?.text || "").trim();
+          if (text) {
+            markdownContent = text;
+            break;
+          }
+        } catch (err) {
+          lastError = err;
+          console.warn(`[ExtractFile] Model ${modelToTry} key ${key.slice(0, 8)}... error:`, err?.message || err);
+        }
+      }
+      if (markdownContent) break;
+    }
+
+    if (!markdownContent) {
+      throw lastError || new Error("Semua kunci dan model gagal mengekstrak file.");
+    }
 
     return res.status(200).json({
       ok: true,

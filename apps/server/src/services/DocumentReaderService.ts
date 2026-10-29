@@ -119,33 +119,52 @@ export class DocumentReaderService {
       };
     }
 
-    try {
-      const model = (config as any).visionModel || config.textModel || "gemini-3-flash-preview";
-      const base64Data = buffer.toString("base64");
-      const res = await this.ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                inlineData: {
-                  mimeType: mimeType || "image/jpeg",
-                  data: base64Data,
+    const candidateModels = [
+      (config as any).visionModel,
+      config.textModel,
+      "gemini-3.8-flash",
+      "gemini-3-flash-preview",
+    ].filter((m): m is string => Boolean(m));
+    const uniqueModels = [...new Set(candidateModels)];
+
+    const base64Data = buffer.toString("base64");
+    let text = "";
+    let lastErr: any = null;
+
+    for (const model of uniqueModels) {
+      try {
+        const res = await this.ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: mimeType || "image/jpeg",
+                    data: base64Data,
+                  },
                 },
-              },
-              {
-                text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
+                {
+                  text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
 1. EKSTRAKSI TEKS (OCR MENYELURUH): Transkripsikan SELURUH teks yang terlihat pada gambar dengan akurat (teks cetak, tulisan tangan, tabel, formulir, kuitansi, label, kode, atau dokumen scan). Pertahankan struktur aslinya (gunakan Markdown Table jika berupa tabel data).
 2. DESKRIPSI VISUAL & ELEMEN PENTING: Jelaskan konten visual gambar secara rinci (objek utama, diagram, grafik/chart, pola, konteks warna/layout, dan elemen visual penting).
 3. INTISARI KUNCI: Berikan ringkasan poin-poin utama dari isi foto/gambar ini.`,
-              },
-            ],
-          },
-        ],
-      });
+                },
+              ],
+            },
+          ],
+        });
 
-      const text = res.text || "";
+        text = (res?.text || "").trim();
+        if (text) break;
+      } catch (e: any) {
+        lastErr = e;
+        console.warn(`[DocumentReader] OCR gambar model ${model} gagal:`, e?.message || e);
+      }
+    }
+
+    if (text) {
       return {
         fileName,
         mimeType: mimeType || "image/jpeg",
@@ -155,18 +174,18 @@ export class DocumentReaderService {
         truncated: false,
         characterCount: text.length,
       };
-    } catch (e: any) {
-      console.warn(`[DocumentReader] Gagal OCR gambar (${fileName}):`, e?.message);
-      return {
-        fileName,
-        mimeType: mimeType || "image/jpeg",
-        markdownContent: `(File foto/gambar '${fileName}' berhasil diunggah)`,
-        usedOcr: false,
-        totalPages: 1,
-        truncated: false,
-        characterCount: 0,
-      };
     }
+
+    console.warn(`[DocumentReader] Semua model OCR gagal untuk gambar (${fileName}):`, lastErr?.message);
+    return {
+      fileName,
+      mimeType: mimeType || "image/jpeg",
+      markdownContent: `(File foto/gambar '${fileName}' berhasil diunggah)`,
+      usedOcr: false,
+      totalPages: 1,
+      truncated: false,
+      characterCount: 0,
+    };
   }
 
   /**

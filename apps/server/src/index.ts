@@ -10,6 +10,7 @@ import { parseMultipartUpload } from "./middlewares/upload.js";
 import { documentReaderService } from "./services/DocumentReaderService.js";
 import { documentService } from "./services/DocumentService.js";
 import { jobService } from "./services/JobService.js";
+import { researchService } from "./services/ResearchService.js";
 
 // Metrik Global Server
 const serverStats = {
@@ -310,6 +311,62 @@ const server = http.createServer((req, res) => {
       } catch (err: any) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err?.message }));
+      }
+    });
+    return;
+  }
+
+  // Endpoint Riset Mendalam Google Search Grounding (/api/research)
+  if (
+    (req.url === "/api/research" || req.url?.startsWith("/api/research?")) &&
+    (req.method === "POST" || req.method === "GET")
+  ) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        let query = "";
+        const parsedUrl = new URL(req.url || "/", `http://localhost:${config.port}`);
+        query = parsedUrl.searchParams.get("query") || parsedUrl.searchParams.get("q") || "";
+
+        if (!query && body) {
+          try {
+            const parsedBody = JSON.parse(body);
+            query = parsedBody.query || parsedBody.q || "";
+          } catch {}
+        }
+
+        query = query.trim();
+        if (!query) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Parameter 'query' wajib disertakan." }));
+          return;
+        }
+
+        const result = await researchService.conductResearch(query);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            query,
+            summary: result.summary,
+            sources: result.sources,
+            expertPersona: result.expertPersona,
+            fieldLabel: result.fieldLabel,
+          })
+        );
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message || "Gagal melakukan riset." }));
       }
     });
     return;

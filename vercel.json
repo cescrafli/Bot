@@ -20,6 +20,9 @@
     },
     "api/documents-extract-file.js": {
       "maxDuration": 60
+    },
+    "api/research.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

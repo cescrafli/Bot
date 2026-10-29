@@ -252,7 +252,11 @@ async function parseMultipart(req) {
   });
 }
 
-async function extractDoc(buffer, fileName, mimeType, apiKey) {
+async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
+  const keys = Array.isArray(apiKeysInput)
+    ? apiKeysInput.filter(Boolean)
+    : [apiKeysInput].filter(Boolean);
+
   const lowerName = fileName.toLowerCase();
   const ext = (lowerName.split(".").pop() || "");
   const isPdf = ext === "pdf" || mimeType === "application/pdf";
@@ -269,36 +273,59 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
   const isImage = IMAGE_EXTS.has(ext) || (mimeType && mimeType.startsWith("image/"));
 
   if (isImage) {
-    if (apiKey) {
-      const ai = new GoogleGenAI({ apiKey });
-      const visionModel = process.env.DOC_VISION_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
-      const resp = await ai.models.generateContent({
-        model: visionModel,
-        contents: [
-          {
-            inlineData: {
-              data: buffer.toString("base64"),
-              mimeType: mimeType || "image/jpeg",
-            },
-          },
-          {
-            text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
+    if (keys.length > 0) {
+      const modelsToTry = [
+        process.env.DOC_VISION_MODEL || process.env.TEXT_MODEL,
+        "gemini-3.8-flash",
+        "gemini-3-flash-preview",
+      ].filter(Boolean);
+      const uniqueModels = [...new Set(modelsToTry)];
+
+      let visualText = "";
+      for (const modelToTry of uniqueModels) {
+        for (const key of keys) {
+          try {
+            const ai = new GoogleGenAI({ apiKey: key });
+            const resp = await ai.models.generateContent({
+              model: modelToTry,
+              contents: [
+                {
+                  inlineData: {
+                    data: buffer.toString("base64"),
+                    mimeType: mimeType || "image/jpeg",
+                  },
+                },
+                {
+                  text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
 1. EKSTRAKSI TEKS (OCR MENYELURUH): Transkripsikan SELURUH teks yang terlihat pada gambar dengan akurat (teks cetak, tulisan tangan, tabel, formulir, kuitansi, label, kode, atau dokumen scan). Pertahankan struktur aslinya (gunakan Markdown Table jika berupa tabel data).
 2. DESKRIPSI VISUAL & ELEMEN PENTING: Jelaskan konten visual gambar secara rinci (objek utama, diagram, grafik/chart, pola, konteks warna/layout, dan elemen visual penting).
 3. INTISARI KUNCI: Berikan ringkasan poin-poin utama dari isi foto/gambar ini.`,
-          },
-        ],
-      });
-      const visualText = resp.text || "";
-      return {
-        fileName,
-        mimeType: mimeType || "image/jpeg",
-        markdownContent: visualText,
-        usedOcr: true,
-        pages: 1,
-        truncated: false,
-        characterCount: visualText.length,
-      };
+                },
+              ],
+            });
+            const text = (resp?.text || "").trim();
+            if (text) {
+              visualText = text;
+              break;
+            }
+          } catch (e) {
+            console.warn(`[documents-read] OCR foto model ${modelToTry} key ${key.slice(0, 8)}... error:`, e?.message || e);
+          }
+        }
+        if (visualText) break;
+      }
+
+      if (visualText) {
+        return {
+          fileName,
+          mimeType: mimeType || "image/jpeg",
+          markdownContent: visualText,
+          usedOcr: true,
+          pages: 1,
+          truncated: false,
+          characterCount: visualText.length,
+        };
+      }
     }
     return {
       fileName,
@@ -338,33 +365,56 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
       };
     }
 
-    if (apiKey) {
-      const ai = new GoogleGenAI({ apiKey });
-      const ocrModel = process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
-      const resp = await ai.models.generateContent({
-        model: ocrModel,
-        contents: [
-          {
-            inlineData: {
-              data: buffer.toString("base64"),
-              mimeType: "application/pdf",
-            },
-          },
-          {
-            text: "Ekstrak seluruh teks dari file PDF ini secara lengkap dan akurat. Pertahankan struktur judul, paragraf, dan tabel dalam format Markdown.",
-          },
-        ],
-      });
-      const ocrText = resp.text || "";
-      return {
-        fileName,
-        mimeType: "application/pdf",
-        markdownContent: ocrText,
-        usedOcr: true,
-        pages: totalPages,
-        truncated: false,
-        characterCount: ocrText.length,
-      };
+    if (keys.length > 0) {
+      const modelsToTry = [
+        process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL,
+        "gemini-3.8-flash",
+        "gemini-3-flash-preview",
+      ].filter(Boolean);
+      const uniqueModels = [...new Set(modelsToTry)];
+
+      let ocrText = "";
+      for (const modelToTry of uniqueModels) {
+        for (const key of keys) {
+          try {
+            const ai = new GoogleGenAI({ apiKey: key });
+            const resp = await ai.models.generateContent({
+              model: modelToTry,
+              contents: [
+                {
+                  inlineData: {
+                    data: buffer.toString("base64"),
+                    mimeType: "application/pdf",
+                  },
+                },
+                {
+                  text: "Ekstrak seluruh teks dari file PDF ini secara lengkap dan akurat. Pertahankan struktur judul, paragraf, dan tabel dalam format Markdown.",
+                },
+              ],
+            });
+            const text = (resp?.text || "").trim();
+            if (text) {
+              ocrText = text;
+              break;
+            }
+          } catch (e) {
+            console.warn(`[documents-read] OCR PDF model ${modelToTry} key ${key.slice(0, 8)}... error:`, e?.message || e);
+          }
+        }
+        if (ocrText) break;
+      }
+
+      if (ocrText) {
+        return {
+          fileName,
+          mimeType: "application/pdf",
+          markdownContent: ocrText,
+          usedOcr: true,
+          pages: totalPages,
+          truncated: false,
+          characterCount: ocrText.length,
+        };
+      }
     }
 
     return {
@@ -637,8 +687,11 @@ export default async function handler(req, res) {
 
   try {
     const uploaded = await parseMultipart(req);
-    const apiKey = process.env.GEMINI_API_KEY;
-    const document = await extractDoc(uploaded.buffer, uploaded.fileName, uploaded.mimeType, apiKey);
+    const customKey = (req.headers["x-gemini-key"] || req.query?.apiKey || "").trim();
+    const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+    const envKeys = rawEnvKeys.split(",").map((k) => k.trim()).filter(Boolean);
+    const candidateKeys = customKey ? [customKey, ...envKeys] : envKeys;
+    const document = await extractDoc(uploaded.buffer, uploaded.fileName, uploaded.mimeType, candidateKeys);
 
     return res.status(200).json({ ok: true, document });
   } catch (err) {
