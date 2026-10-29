@@ -63,10 +63,13 @@ export class DocumentReaderService {
     const isTsv = ext === "tsv";
     const isTxt = ext === "txt" || ext === "md";
     const isRtf = ext === "rtf";
+    const isImage = ["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext) || mimeType.startsWith("image/");
 
     let result: ParsedDocument;
 
-    if (isPdf) {
+    if (isImage) {
+      result = await this.readImageMultimodal(buffer, fileName, mimeType);
+    } else if (isPdf) {
       result = await this.readPdfHybrid(buffer, fileName);
     } else if (isExcel) {
       result = await this.readExcel(buffer, fileName);
@@ -94,6 +97,76 @@ export class DocumentReaderService {
     result.characterCount = result.markdownContent.length;
 
     return result;
+  }
+
+  /**
+   * 0. BACA FOTO / GAMBAR (Multimodal Vision OCR & Analisis Visual Mendalam)
+   */
+  private async readImageMultimodal(
+    buffer: Buffer,
+    fileName: string,
+    mimeType: string
+  ): Promise<ParsedDocument> {
+    if (!this.ai) {
+      return {
+        fileName,
+        mimeType: mimeType || "image/jpeg",
+        markdownContent: `(File foto/gambar '${fileName}' berhasil dimuat)`,
+        usedOcr: false,
+        totalPages: 1,
+        truncated: false,
+        characterCount: 0,
+      };
+    }
+
+    try {
+      const model = (config as any).visionModel || config.textModel || "gemini-3-flash-preview";
+      const base64Data = buffer.toString("base64");
+      const res = await this.ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType || "image/jpeg",
+                  data: base64Data,
+                },
+              },
+              {
+                text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
+1. EKSTRAKSI TEKS (OCR MENYELURUH): Transkripsikan SELURUH teks yang terlihat pada gambar dengan akurat (teks cetak, tulisan tangan, tabel, formulir, kuitansi, label, kode, atau dokumen scan). Pertahankan struktur aslinya (gunakan Markdown Table jika berupa tabel data).
+2. DESKRIPSI VISUAL & ELEMEN PENTING: Jelaskan konten visual gambar secara rinci (objek utama, diagram, grafik/chart, pola, konteks warna/layout, dan elemen visual penting).
+3. INTISARI KUNCI: Berikan ringkasan poin-poin utama dari isi foto/gambar ini.`,
+              },
+            ],
+          },
+        ],
+      });
+
+      const text = res.text || "";
+      return {
+        fileName,
+        mimeType: mimeType || "image/jpeg",
+        markdownContent: text,
+        usedOcr: true,
+        totalPages: 1,
+        truncated: false,
+        characterCount: text.length,
+      };
+    } catch (e: any) {
+      console.warn(`[DocumentReader] Gagal OCR gambar (${fileName}):`, e?.message);
+      return {
+        fileName,
+        mimeType: mimeType || "image/jpeg",
+        markdownContent: `(File foto/gambar '${fileName}' berhasil diunggah)`,
+        usedOcr: false,
+        totalPages: 1,
+        truncated: false,
+        characterCount: 0,
+      };
+    }
   }
 
   /**

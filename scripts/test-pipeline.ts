@@ -50,6 +50,7 @@ import {
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 import { memoryService } from "../apps/server/src/services/MemoryService.js";
 import { documentWriterService } from "../apps/server/src/services/DocumentWriterService.js";
@@ -1209,7 +1210,7 @@ async function runTtsTests() {
     "System prompt memuat direktif mutlak Roleplay Pakar Profesional saat melakukan riset"
   );
   assert(
-    CELYN_SYSTEM_PROMPT.includes("KEMAMPUAN & INISIATIF EKSPOR LAPORAN KE PDF ATAU WORD"),
+    CELYN_SYSTEM_PROMPT.includes("KEMAMPUAN & INISIATIF EKSPOR LAPORAN"),
     "System prompt memuat instruksi inisiatif pembuatan laporan dokumen PDF/Word"
   );
   assert(
@@ -1277,8 +1278,8 @@ async function runTtsTests() {
   assert(
     CELYN_SYSTEM_PROMPT.includes("EDIT PDF IN-PLACE") &&
     CELYN_SYSTEM_PROMPT.includes("TIDAK ADA BATASAN JUMLAH FILE DOKUMEN") &&
-    CELYN_SYSTEM_PROMPT.includes("RESPON PROAKTIF SAAT DOKUMEN DIUNGGAH"),
-    "System Prompt Celyn memuat instruksi penuh Edit PDF In-Place, bebas batasan file, dan respon proaktif saat upload"
+    CELYN_SYSTEM_PROMPT.includes("MODE UPLOAD-THEN-WAIT"),
+    "System Prompt Celyn memuat instruksi penuh Edit PDF In-Place, bebas batasan file, dan mode upload-then-wait"
   );
   assert(
     typeof fetch === "function",
@@ -1857,7 +1858,85 @@ async function runTtsTests() {
     "Struktur ActiveDocJob pada DocumentActionPill valid dan siap untuk diunduh oleh pengguna"
   );
 
-  // 26. Ringkasan
+  // ==========================================
+  // 26. UJI RISET PROFESIONAL, UPLOAD FOTO & TAB RESEARCH
+  // ==========================================
+  console.log("\n--- 26. Uji Validasi Riset Profesional, Upload Foto & Tab Research ---");
+
+  // A. Verifikasi Perubahan Nama Tab Menjadi 'Research' di DocumentModal
+  const docModalContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/modals/DocumentModal.tsx"),
+    "utf8"
+  );
+  assert(
+    docModalContent.includes("<span>Research</span>"),
+    "Tab 'Buat Dokumen AI' berhasil diubah namanya menjadi 'Research'"
+  );
+  assert(
+    docModalContent.includes("FOTO • PDF • WORD • EXCEL"),
+    "Header badge DocumentModal mencakup dukungan 'FOTO • PDF • WORD • EXCEL'"
+  );
+  assert(
+    docModalContent.includes(".png") &&
+      docModalContent.includes(".jpg") &&
+      docModalContent.includes(".webp"),
+    "Input file upload DocumentModal menerima format foto (.png, .jpg, .webp, .gif)"
+  );
+  assert(
+    docModalContent.includes("Mau dibentuk ke format apa dokumennya?") &&
+      docModalContent.includes("apa judul atau topik yang ingin kamu teliti?"),
+    "Tab Research menyediakan alur tanya-jawab interaktif terstruktur bersama Celyn"
+  );
+
+  // B. Verifikasi Mode Upload-then-Wait
+  const useGeminiLiveContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"),
+    "utf8"
+  );
+  assert(
+    useGeminiLiveContent.includes("turnComplete: false"),
+    "Mode Upload-then-Wait aktif: turnComplete=false saat upload agar AI tidak menyerobot otomatis"
+  );
+
+  // C. Verifikasi Dukungan Ingestion Foto/Gambar di Dokumen Reader
+  const docReadContent = fs.readFileSync(
+    path.resolve(process.cwd(), "api/documents-read.js"),
+    "utf8"
+  );
+  assert(
+    docReadContent.includes("IMAGE_EXTS") &&
+      docReadContent.includes("PNG_MAGIC") &&
+      docReadContent.includes("isImage"),
+    "API documents-read.js memvalidasi dan memproses file foto/gambar dengan Gemini Vision OCR"
+  );
+
+  const docReaderServiceContent = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/DocumentReaderService.ts"),
+    "utf8"
+  );
+  assert(
+    docReaderServiceContent.includes("readImageMultimodal"),
+    "DocumentReaderService server mengimplementasikan readImageMultimodal"
+  );
+
+  // D. Verifikasi Riset Profesional Tingkat Ahli saat Pembuatan Dokumen
+  const docGenContent = fs.readFileSync(
+    path.resolve(process.cwd(), "api/documents-generate.js"),
+    "utf8"
+  );
+  assert(
+    docGenContent.includes("inferExpertPersona") &&
+      docGenContent.includes("High-Caliber Professional Research Report"),
+    "API documents-generate.js mengadopsi persona pakar senior profesional saat meriset & membuat dokumen"
+  );
+
+  // E. Verifikasi Prompt Sistem Celyn untuk Mode Upload-then-Wait
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("MODE UPLOAD-THEN-WAIT (TIDAK MENYEROBOT)"),
+    "System prompt Celyn menginstruksikan mode upload-then-wait tanpa menyerobot berbicara"
+  );
+
+  // 27. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

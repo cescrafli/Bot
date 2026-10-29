@@ -1045,7 +1045,7 @@ export class GeminiSession {
               parts: [{ text: livePayload }],
             },
           ],
-          turnComplete: true,
+          turnComplete: !msg.silent,
         });
       } else if (msg.type === "text") {
         const isSystemNotification = msg.text.startsWith("[INFO SISTEM]") || msg.text.startsWith("[SYSTEM]");

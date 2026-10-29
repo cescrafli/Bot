@@ -299,3 +299,13 @@ export function inferExpertPersona(query: string): ExpertPersonaInfo {
       "Analisis komprehensif, terstruktur, kritis, objektif, berbasis data dan fakta terverifikasi, bukan sekadar rangkuman umum.",
   };
 }
+
+/**
+ * Roadmap Fitur Masa Depan: Edit Foto & Manipulasi Gambar AI
+ */
+export interface EditImageParams {
+  fileName: string;
+  instruction: string;
+  maskPrompt?: string;
+  outputFormat?: "png" | "jpeg" | "webp";
+}

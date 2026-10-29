@@ -52,23 +52,27 @@ export class ResearchService {
         contents: [
           {
             text: `Anda adalah ${expert.persona}.
-Lakukan riset mendalam, teliti, berbasis data riil, dan terstruktur untuk topik berikut:
+Lakukan riset mendalam, teliti, berbasis data riil, komprehensif, dan sempurna tanpa terkecuali untuk topik berikut:
 Topik/Pertanyaan: "${query}"
 Bidang Keahlian: ${expert.fieldLabel}
 
-PANDUAN RISET PROFESIONAL BERKUALITAS TINGGI:
-1. BUKAN RISET ASAL-ASALAN: Sajikan analisis tingkat ahli yang mendalam, berbobot, berbasis fakta riil, dan terverifikasi.
-2. FOKUS BIDANG (${expert.fieldLabel}):
+STANDAR RISET PROFESIONAL TINGKAT TINGGI (ULTRA-DEEP & THOROUGH):
+1. BUKAN RISET ASAL-ASALAN: Sajikan analisis tingkat pakar paling berwibawa, berbobot, berbasis fakta riil, dan terverifikasi. Dilarang keras memberikan jawaban dangkal, sekadar definisi umum, atau kesimpulan klise.
+2. FOKUS KEAHLIAN SPESIFIK (${expert.fieldLabel}):
 ${expert.promptGuide}
-3. STRUKTUR LAPORAN:
+3. KEDALAMAN ANALISIS & DATA RIIL:
+   - Sertakan metrik kuantitatif, angka perbandingan, persentase, valuasi, atau regulasi spesifik yang relevan.
+   - Bahas dinamika historis singkat, kondisi riil saat ini, dan proyeksi/implikasi ke depan.
+   - Kupas dari berbagai sudut pandang (multi-angle analysis) termasuk peluang, tantangan, dan skenario alternatif.
+4. STRUKTUR LAPORAN RISET:
    - ## Ringkasan Eksekutif (Executive Summary)
    - ### Analisis Mendalam & Fakta Kunci
    - ### Evaluasi Peluang & Mitigasi Risiko
-   - ### Rekomendasi Strategis / Kesimpulan Ahli
-   - ### Sumber Referensi
-4. JANGAN mengarang data atau angka. Jika data masih bersifat estimasi atau terdapat dinamika pasar/regulasi, sebutkan secara terbuka dan objektif.
-5. Cantumkan tautan / URL sumber rujukan asli secara eksplisit dalam format markdown: [Nama Sumber](https://url-sumber).
-6. Buat daftar sumber di bagian akhir di bawah heading '### Sumber Referensi'.`,
+   - ### Rekomendasi Strategis & Tindakan Ahli
+   - ### Sumber Referensi & Catatan Verifikasi
+5. JANGAN mengarang data atau angka. Jika data masih bersifat estimasi atau terdapat dinamika pasar/regulasi, sebutkan secara terbuka dan objektif.
+6. Cantumkan tautan / URL sumber rujukan asli secara eksplisit dalam format markdown: [Nama Sumber](https://url-sumber).
+7. Buat daftar sumber di bagian akhir di bawah heading '### Sumber Referensi'.`,
           },
         ],
         config: {

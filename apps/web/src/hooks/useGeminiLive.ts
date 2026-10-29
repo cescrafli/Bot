@@ -2083,11 +2083,11 @@ export function useGeminiLive({
           doc,
         ]);
 
-        // Injeksi konteks dokumen ke sesi percakapan aktif secara terstruktur dengan batas aman kuota TPM Live
-        // Teks lengkap 100% (592.613 karakter) tetap tersimpan utuh di activeDocuments untuk kebutuhan create_document / edit / proses
+        // Injeksi konteks dokumen/foto ke sesi percakapan secara terstruktur
+        // Mode Upload-then-Wait: turnComplete disetel false agar AI tidak langsung menyerobot berbicara
+        // Pengguna memiliki kendali penuh: bisa mengetik instruksi terlebih dahulu atau berbicara saat siap
         const systemContent = buildSafeLiveDocumentContext(doc, 20000);
 
-        let isLiveActive = false;
         if (directSessionRef.current) {
           try {
             directSessionRef.current.sendClientContent({
@@ -2097,9 +2097,8 @@ export function useGeminiLive({
                   parts: [{ text: systemContent }],
                 },
               ],
-              turnComplete: true,
+              turnComplete: false,
             });
-            isLiveActive = true;
           } catch (e) {
             console.warn("Gagal inject context dokumen ke direct session:", e);
           }
@@ -2108,24 +2107,12 @@ export function useGeminiLive({
             type: "doc_context",
             text: systemContent,
             fileName: doc.fileName,
+            silent: true,
           });
-          isLiveActive = true;
         }
 
-        // Jika belum tersambung ke audio Live, tampilkan pesan sapaan proaktif Celyn ke transcripts chat
-        if (!isLiveActive) {
-          setTranscripts((prev) => [
-            ...prev,
-            {
-              speaker: "celyn",
-              text: `Aku sudah selesai baca isi file '${doc.fileName}' ini lho! Kira-kira mau kamu apain nih dokumennya? Mau aku bantu rangkum intisarinya, edit isinya, terjemahin, atau ada bagian tertentu yang mau kamu tanyakan?`,
-              time: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
-            },
-          ]);
-        }
-
-        setDocStatusMessage(`Dokumen '${doc.fileName}' siap dibahas bersama Celyn!`);
-        setTimeout(() => setDocStatusMessage(null), 4000);
+        setDocStatusMessage(`File '${doc.fileName}' siap! Silakan ketik instruksi atau mulai berbicara dengan Celyn.`);
+        setTimeout(() => setDocStatusMessage(null), 5000);
         return doc;
       } catch (err: any) {
         setDocStatusMessage(`Gagal membaca dokumen: ${err?.message || "Error"}`);

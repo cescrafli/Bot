@@ -12,6 +12,9 @@ import {
   AlertCircle,
   Edit3,
   Globe,
+  Image as ImageIcon,
+  HelpCircle,
+  Check,
 } from "lucide-react";
 import { ParsedDocument, DocumentKind } from "@celyn/shared";
 
@@ -180,6 +183,9 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
 
   const getDocIcon = (name: string, mime: string) => {
     const lower = name.toLowerCase();
+    if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(lower) || mime.startsWith("image/")) {
+      return <ImageIcon className="w-5 h-5 text-purple-400" />;
+    }
     if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || mime.includes("spreadsheet")) {
       return <FileSpreadsheet className="w-5 h-5 text-emerald-400" />;
     }
@@ -206,11 +212,11 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
               <span>Manajemen Dokumen Celyn</span>
               <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                PDF • Word • Excel
+                FOTO • PDF • WORD • EXCEL
               </span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Unggah referensi untuk sesi atau minta Celyn membuat dokumen baru
+              Unggah referensi & foto untuk sesi atau minta Celyn melakukan riset profesional
             </p>
           </div>
         </div>
@@ -243,7 +249,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             }`}
           >
             <Sparkles className="w-4 h-4" />
-            <span>Buat Dokumen AI</span>
+            <span>Research</span>
           </button>
         </div>
 
@@ -290,7 +296,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.xlsx,.xls,.xlsm,.xlsb,.csv,.tsv,.docx,.doc,.docm,.dotx,.txt,.md,.rtf"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.pdf,.xlsx,.xls,.xlsm,.xlsb,.csv,.tsv,.docx,.doc,.docm,.dotx,.txt,.md,.rtf,image/*"
                 onChange={handleFileChange}
                 className="hidden"
                 disabled={isUploading}
@@ -303,11 +309,19 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 )}
               </div>
               <p className="text-xs sm:text-sm font-semibold text-white mb-1">
-                {isUploading ? "Memproses Dokumen (Hybrid OCR)..." : "Klik untuk pilih file dokumen (Bisa banyak file)"}
+                {isUploading ? "Memproses Dokumen/Foto (Vision OCR)..." : "Klik untuk pilih file foto atau dokumen (Bisa banyak file)"}
               </p>
               <p className="text-[11px] text-slate-400">
-                Mendukung semua format: PDF, Excel (.xlsx, .xls, .xlsm, .csv), Word (.docx, .doc), dan Teks (.txt, .md, .rtf) — hingga 500 MB/file
+                Mendukung Foto (PNG, JPG, WEBP, GIF), PDF, Excel (.xlsx, .xls, .csv), Word (.docx, .doc), dan Teks (.txt) — hingga 500 MB/file
               </p>
+            </div>
+
+            {/* Banner Mode Upload-then-Wait */}
+            <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5 text-[11px] text-slate-400 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+              <span>
+                <strong>Mode Tenang Aktif:</strong> File yang diunggah langsung siap dianalisis tanpa memotong suara Celyn. Anda bisa mengetik pertanyaan terlebih dahulu atau langsung berbicara saat siap.
+              </span>
             </div>
 
             {/* Daftar Dokumen Sesi Aktif */}
@@ -486,19 +500,38 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           </div>
         )}
 
-        {/* TAB 2: BUAT DOKUMEN AI */}
+        {/* TAB 2: RESEARCH (INTERAKTIF BERSAMA CELYN) */}
         {activeTab === "create" && (
           <form onSubmit={handleGenerateSubmit} className="space-y-4">
-            {/* Pilihan Format Dokumen */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-2">
-                Pilih Format File
-              </label>
-              <div className="grid grid-cols-3 gap-2">
+            {/* Sapaan & Panduan Celyn Avatar */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-500/10 via-pink-500/10 to-purple-500/10 border border-rose-500/20 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-rose-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-md shadow-rose-500/30 ring-2 ring-rose-400/30">
+                ✨
+              </div>
+              <div className="text-xs">
+                <p className="font-bold text-white mb-0.5">Celyn Research Assistant</p>
+                <p className="text-slate-300 leading-relaxed">
+                  Aku siap membantumu melakukan riset mendalam tingkat ahli dan langsung menyusunnya ke dalam file siap pakai. Jawab pertanyaan di bawah ini ya:
+                </p>
+              </div>
+            </div>
+
+            {/* Pertanyaan 1: Format File */}
+            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/5 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-300 text-[11px] font-bold flex items-center justify-center border border-rose-500/30">
+                  1
+                </span>
+                <label className="text-xs font-bold text-white">
+                  Mau dibentuk ke format apa dokumennya?
+                </label>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setSelectedKind("pdf")}
-                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
                     selectedKind === "pdf"
                       ? "bg-rose-500/20 border-rose-500/50 text-white shadow ring-1 ring-rose-500/30"
                       : "bg-slate-900/40 border-white/5 text-slate-400 hover:text-white"
@@ -512,7 +545,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedKind("docx")}
-                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
                     selectedKind === "docx"
                       ? "bg-blue-500/20 border-blue-500/50 text-white shadow ring-1 ring-blue-500/30"
                       : "bg-slate-900/40 border-white/5 text-slate-400 hover:text-white"
@@ -526,7 +559,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedKind("xlsx")}
-                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
                     selectedKind === "xlsx"
                       ? "bg-emerald-500/20 border-emerald-500/50 text-white shadow ring-1 ring-emerald-500/30"
                       : "bg-slate-900/40 border-white/5 text-slate-400 hover:text-white"
@@ -539,37 +572,86 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               </div>
             </div>
 
-            {/* Input Judul */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Judul Dokumen
-              </label>
+            {/* Pertanyaan 2: Judul Riset / Dokumen */}
+            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/5 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-300 text-[11px] font-bold flex items-center justify-center border border-rose-500/30">
+                  2
+                </span>
+                <label className="text-xs font-bold text-white">
+                  Lalu, apa judul atau topik yang ingin kamu teliti?
+                </label>
+              </div>
+
+              {/* Rekomendasi Topik Cepat */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  "Analisis Saham & Valuasi Emiten",
+                  "Kajian Hukum & Kepatuhan Regulasi",
+                  "Riset Pasar & Analisis Kompetitor",
+                  "Evaluasi Arsitektur Sistem AI",
+                ].map((sugg) => (
+                  <button
+                    key={sugg}
+                    type="button"
+                    onClick={() => setDocTitle(sugg)}
+                    className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-200 border border-white/5 transition-all cursor-pointer"
+                  >
+                    + {sugg}
+                  </button>
+                ))}
+              </div>
+
               <input
                 type="text"
                 value={docTitle}
                 onChange={(e) => setDocTitle(e.target.value)}
-                placeholder="Contoh: Rekap Anggaran Proyek AI 2026"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-rose-500/50 transition-colors"
+                placeholder="Contoh: Analisis Fundamental Saham Sektor Perbankan 2026"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950/60 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-rose-500/50 transition-colors"
                 disabled={isGenerating}
               />
             </div>
 
-            {/* Input Instruksi Rincian */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Instruksi atau Rincian Isi (Opsional)
-              </label>
+            {/* Pertanyaan 3: Instruksi & Fokus Analisis */}
+            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/5 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-300 text-[11px] font-bold flex items-center justify-center border border-rose-500/30">
+                  3
+                </span>
+                <label className="text-xs font-bold text-white">
+                  Instruksi atau fokus analisis apa yang wajib diteliti secara mendalam?
+                </label>
+              </div>
+
+              {/* Rekomendasi Fokus Cepat */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  "Rangkum seluruh obrolan sesi aktif kita",
+                  "Fokus metrik fundamental, valuasi PER/PBV, dan risiko",
+                  "Sertakan perbandingan tabel data komparatif riil",
+                ].map((sugg) => (
+                  <button
+                    key={sugg}
+                    type="button"
+                    onClick={() => setDocInstruction(sugg)}
+                    className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-200 border border-white/5 transition-all cursor-pointer"
+                  >
+                    + {sugg}
+                  </button>
+                ))}
+              </div>
+
               <textarea
                 value={docInstruction}
                 onChange={(e) => setDocInstruction(e.target.value)}
-                placeholder="Tuliskan poin-poin yang harus dimuat, misalnya: buat tabel anggaran perangkat keras, biaya cloud, dan rekomendasi efisiensi."
-                rows={3}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-rose-500/50 transition-colors resize-none"
+                placeholder="Tuliskan poin-poin yang wajib dimuat, misalnya: analisis valuasi, katalis pertumbuhan, risiko utama, dan rekomendasi strategis."
+                rows={2}
+                className="w-full px-3 py-2 rounded-xl bg-slate-950/60 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-rose-500/50 transition-colors resize-none"
                 disabled={isGenerating}
               />
             </div>
 
-            {/* Tombol Submit Generate */}
+            {/* Tombol Eksekusi Riset */}
             <button
               type="submit"
               disabled={isGenerating}
@@ -578,12 +660,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Celyn Sedang Merangkai Dokumen...</span>
+                  <span>Celyn Sedang Melakukan Riset Mendalam...</span>
                 </>
               ) : (
                 <>
-                  <Download className="w-4 h-4" />
-                  <span>Buat & Unduh {selectedKind.toUpperCase()}</span>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Mulai Riset Profesional & Buat Dokumen ({selectedKind.toUpperCase()})</span>
                 </>
               )}
             </button>

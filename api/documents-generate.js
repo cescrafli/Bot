@@ -366,6 +366,148 @@ export const config = {
   maxDuration: 60,
 };
 
+function inferExpertPersona(query) {
+  const q = (query || "").toLowerCase();
+
+  // 1. Saham, Pasar Modal, Investasi, Keuangan & Portofolio
+  if (
+    /(saham|ihsg|emiten|investasi|bursa|\bipo\b|reksa\s*dana|obligasi|dividen|portofolio|pasar\s*modal|valuasi|fundamental|teknikal|crypto|kripto|bitcoin|\bbtc\b|\beth\b|forex|perbankan|finansial|keuangan|\bidx\b|trading|laporan\s*keuangan|\bper\b|\bpbv\b|\broe\b|\bder\b|market\s*cap)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "finance",
+      fieldLabel: "Pasar Modal, Saham & Investasi",
+      persona:
+        "Analis Senior Pasar Modal & Ekuitas / CFA Charterholder berpengalaman 20+ tahun",
+      promptGuide:
+        "Analisis secara profesional: fundamental bisnis, valuasi wajar (PER, PBV, EV/EBITDA), pertumbuhan laba/pendapatan, kesehatan neraca (DER, Cash flow), kebijakan dividen, katalis industri, tren teknikal pergerakan harga, dan manajemen risiko investasi.",
+    };
+  }
+
+  // 2. Hukum, Regulasi, Perundang-undangan, Kontrak & Litigasi
+  if (
+    /(hukum|undang-undang|\buu\b|pasal|kontrak|perjanjian|gugatan|pidana|perdata|pengadilan|advokat|konsultan\s*hukum|kebijakan\s*hukum|regulasi|legislasi|legalitas|hak\s*cipta|paten|\bhaki\b|arbitrase)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "legal",
+      fieldLabel: "Hukum & Regulasi Korporasi",
+      persona:
+        "Konsultan Hukum Senior & Advokat Spesialis Hukum Korporasi/Litigasi (20+ tahun pengalaman)",
+      promptGuide:
+        "Analisis berdasarkan peraturan perundang-undangan positif yang berlaku, asas-asas hukum, analisis pasal terkait, kepatuhan hukum (compliance), potensi risiko sengketa hukum, dan langkah mitigasi preventif.",
+    };
+  }
+
+  // 3. Kedokteran, Medis, Farmasi, Penyakit & Kesehatan Klinis
+  if (
+    /(medis|kesehatan|penyakit|obat|farmasi|klinis|dokter|gejala|diagnosis|terapi|nutrisi|gizi|pasien|rumah\s*sakit|resep|kanker|diabetes|hipertensi|kardiovaskular|infeksi|vaksin|anatomi|patologi)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "medical",
+      fieldLabel: "Kedokteran & Kesehatan Klinis",
+      persona:
+        "Dokter Spesialis Klinis Senior & Konsultan Medis Berbasis Bukti (Evidence-Based Medicine)",
+      promptGuide:
+        "Analisis berbasis bukti ilmiah medis terkini, patofisiologi penyakit, pertimbangan diagnosis banding, pedoman klinis terapi, farmakologi obat/interaksi, serta edukasi preventif dengan disclaimer medis profesional.",
+    };
+  }
+
+  // 4. Teknologi, Software Engineering, Arsitektur Sistem, Cloud, AI & Keamanan Siber
+  if (
+    /(teknologi|software|perangkat\s*lunak|koding|coding|programming|arsitektur\s*sistem|database|cloud|\baws\b|azure|\bgcp\b|devops|docker|kubernetes|\bai\b|artificial\s*intelligence|machine\s*learning|deep\s*learning|\bllm\b|cyber\s*security|keamanan\s*siber|\bapi\b|backend|frontend|algoritma)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "tech",
+      fieldLabel: "Teknologi, Rekayasa Perangkat Lunak & AI",
+      persona:
+        "Principal Systems Architect & Chief Technology Consultant (15+ tahun pengalaman industri teknologi global)",
+      promptGuide:
+        "Analisis arsitektur sistem, trade-off skalabilitas, reliabilitas, performa tinggi, efisiensi algoritma, keamanan siber, best practices implementasi, dan efisiensi biaya infrastruktur.",
+    };
+  }
+
+  // 5. Ekonomi Makro, Fiskal, Moneter & Kebijakan Publik
+  if (
+    /(ekonomi|makro|\bgdp\b|\bpdb\b|inflasi|deflasi|kebijakan\s*moneter|kebijakan\s*fiskal|bank\s*sentral|bank\s*indonesia|the\s*fed|suku\s*bunga|neraca\s*pembayaran|perdagangan\s*internasional|kurs|rupiah|dolar)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "economics",
+      fieldLabel: "Ekonomi Makro & Kebijakan Publik",
+      persona:
+        "Kepala Peneliti Ekonomi Makro / Chief Economist (setara PhD Ekonomi)",
+      promptGuide:
+        "Analisis dinamika makroekonomi, tren pertumbuhan PDB, transmisi suku bunga dan inflasi, dampak kebijakan moneter/fiskal, stabilitas nilai tukar, dan proyeksi jangka menengah-panjang.",
+    };
+  }
+
+  // 6. Strategi Bisnis, Manajemen Korporat, Marketing & Startup
+  if (
+    /(bisnis|marketing|pemasaran|brand|branding|iklan|kampanye|startup|venture\s*capital|\bcac\b|\bltv\b|\bswot\b|porter|manajemen\s*strategis|kompetitor|pangsa\s*pasar|monetisasi|penjualan|growth\s*hacking)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "business",
+      fieldLabel: "Strategi Bisnis, Manajemen & Pemasaran",
+      persona:
+        "Partner Konsultan Manajemen Strategis Senior & Praktisi Bisnis Eksekutif",
+      promptGuide:
+        "Analisis lanskap kompetitif (Porter's Five Forces, SWOT), model bisnis dan unit economics (CAC, LTV, Margin), positioning produk, diferensiasi pasar, dan rencana eksekusi strategis.",
+    };
+  }
+
+  // 7. Sains, Fisika, Kimia, Biologi & Lingkungan
+  if (
+    /(sains|ilmiah|fisika|kimia|biologi|lingkungan|\biklim\b|keberlanjutan|\besg\b|astronomi|geologi|penelitian|laboratorium|eksperimen)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "science",
+      fieldLabel: "Sains Murni & Terapan",
+      persona:
+        "Peneliti Senior Lembaga Riset Ilmiah / Senior Scientist",
+      promptGuide:
+        "Analisis metode ilmiah, prinsip dasar fisika/kimia/biologi, data empiris terverifikasi, tinjauan pustaka akademik, dan implikasi bagi lingkungan serta keberlanjutan.",
+    };
+  }
+
+  // 8. Pendidikan, Kurikulum & Pembelajaran
+  if (
+    /(pendidikan|kurikulum|pedagogi|pembelajaran|sekolah|kuliah|universitas|mahasiswa|siswa|guru|dosen|akademik|tesis|skripsi)/i.test(
+      q
+    )
+  ) {
+    return {
+      domain: "education",
+      fieldLabel: "Pendidikan & Pengembangan Akademik",
+      persona:
+        "Pakar Pendidikan Senior & Konsultan Kurikulum Akademik",
+      promptGuide:
+        "Analisis pedagogis terstruktur, kerangka capaian pembelajaran, diferensiasi instruksional, asesmen komprehensif, dan metodologi pembelajaran efektif.",
+    };
+  }
+
+  // Default Fallback
+  return {
+    domain: "general",
+    fieldLabel: "Analisis Profesional & Riset Strategis",
+    persona:
+      "Pakar Riset Senior & Konsultan Analisis Independen",
+    promptGuide:
+      "Sajikan analisis terstruktur, berbasis data riil, obyektif, kritis, dan berorientasi pada rekomendasi yang dapat dieksekusi secara nyata.",
+  };
+}
+
 async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
   let lastErr = null;
   for (const key of candidateKeys) {
@@ -469,22 +611,33 @@ export default async function handler(req, res) {
     }
 
     if (kind === "xlsx") {
-      const prompt = `Anda adalah asisten data profesional. Buatlah lembar kerja Excel (XLSX) yang rapi dan terstruktur:
-Judul Dokumen: "${title}"
+      const expert = inferExpertPersona(`${title} ${instruction}`);
+      const prompt = `Anda adalah ${expert.persona}.
+Tugas Anda: Membuat lembar kerja Excel (XLSX) profesional tingkat tinggi yang rapi, komprehensif, dan siap analisis di bidang ${expert.fieldLabel}.
+Judul Dokumen/Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
+Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
 ${safeContext ? `Konteks/Data Acuan:\n${safeContext}` : ""}
+
+PANDUAN RISET & DESAIN EXCEL TINGKAT AHLI:
+1. BUKAN CONTOH ASAL-ASALAN: Sajikan metrik riil, realistis, dan komprehensif sesuai standar industri ${expert.fieldLabel}.
+2. Tentukan sheetName yang relevan (maks 31 karakter).
+3. Rancang kolom (columns) dengan 'header', 'key' (id unik huruf kecil tanpa spasi), dan 'type' ('string' | 'number' | 'currency' | 'percentage' | 'date').
+4. Isi baris-baris data (rows) yang kaya fakta, perbandingan terperinci, dan angka realistis.
 
 KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
 {
   "fileName": "${safeTitle}",
   "sheets": [
     {
-      "sheetName": "Ringkasan",
+      "sheetName": "Ringkasan Analisis",
       "columns": [
-        { "header": "Nama Kolom", "key": "col1", "type": "string" }
+        { "header": "Indikator / Metrik", "key": "indikator", "type": "string" },
+        { "header": "Nilai / Data", "key": "nilai", "type": "string" },
+        { "header": "Catatan Analisis", "key": "catatan", "type": "string" }
       ],
       "rows": [
-        { "col1": "Data" }
+        { "indikator": "Fundamental", "nilai": "Stabil", "catatan": "Kinerja kuartalan positif" }
       ]
     }
   ]
@@ -499,23 +652,37 @@ KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
       return res.status(200).send(buffer);
     } else {
       const isPdf = kind === "pdf";
-      const prompt = `Anda adalah asisten pembuat laporan formal profesional. Buatlah draf laporan ${isPdf ? "PDF" : "Word (.docx)"}:
-Judul Dokumen: "${title}"
+      const docTypeLabel = isPdf ? "Laporan Riset Eksekutif PDF (.pdf)" : "Dokumen Riset Formal Word (.docx)";
+      const prompt = `Anda adalah ${expert.persona}.
+Tugas Anda: Menyusun ${docTypeLabel} profesional tingkat tinggi (High-Caliber Professional Research Report) yang mendalam, tajam, dan berwibawa di bidang ${expert.fieldLabel}.
+Judul Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
-${safeContext ? `Konteks/Data Acuan:\n${safeContext}` : ""}
+Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
+${safeContext ? `Konteks/Materi Acuan:\n${safeContext}` : ""}
+
+PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:
+1. BUKAN RISET ASAL-ASALAN: Sajikan analisis mendalam, berbasis fakta riil, tajam, dan terstruktur. Hindari generalisasi dangkal atau sekadar definisi umum!
+2. STRUKTUR LAPORAN WAJIB MEMUAT SECTION BERBOBOT:
+   - Ringkasan Eksekutif (Executive Summary)
+   - Latar Belakang & Analisis Sektor / Fakta Kunci
+   - Evaluasi Peluang & Analisis Risiko Komprehensif
+   - Rekomendasi Strategis & Rencana Tindak Lanjut
+   - Kesimpulan Ahli
+   - Sumber Referensi & Catatan Metodologi
+3. Setiap section harus memuat 'paragraphs' mendalam (2-4 paragraf berbobot) dan/atau 'bulletPoints' tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
 
 KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
 {
   "title": "${safeTitle}",
-  "subtitle": "Disusun secara otomatis oleh Celyn AI",
+  "subtitle": "Laporan Riset Profesional Celyn AI • ${expert.fieldLabel}",
   "sections": [
     {
-      "heading": "Pendahuluan",
+      "heading": "Ringkasan Eksekutif",
       "paragraphs": [
-        "Paragraf penjelasan dokumen secara terperinci tanpa tag markdown mentah."
+        "Paragraf analisis eksekutif komprehensif tanpa tag markdown mentah."
       ],
       "bulletPoints": [
-        "Poin penting 1"
+        "Temuan kunci 1"
       ]
     }
   ]

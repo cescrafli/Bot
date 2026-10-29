@@ -30,6 +30,7 @@ export type ClientMessage =
       text: string;
       docId?: string;
       fileName?: string;
+      silent?: boolean;
     };
 
 // Pesan Server -> Client

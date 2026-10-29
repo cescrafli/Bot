@@ -9,6 +9,7 @@ import {
   ExcelPayloadSchema,
   ReportPayload,
   ReportPayloadSchema,
+  inferExpertPersona,
 } from "@celyn/shared";
 import { config } from "../config.js";
 import { documentWriterService } from "./DocumentWriterService.js";
@@ -147,30 +148,37 @@ export class DocumentService {
       .trim()
       .slice(0, 50) || "Dokumen";
 
+    const expert = inferExpertPersona(`${title} ${instruction}`);
+
     if (kind === "xlsx") {
-      // 1. GENERATE EXCEL VIA GEMINI JSON
-      const prompt = `Anda adalah asisten data profesional. Buatlah data lembar kerja Excel (XLSX) yang terstruktur dan rapi berdasarkan instruksi berikut:
-Judul/Nama Dokumen: "${title}"
+      // 1. GENERATE EXCEL VIA GEMINI JSON DENGAN PERSONA PAKAR SENIOR
+      const prompt = `Anda adalah ${expert.persona}.
+Tugas Anda: Membuat data lembar kerja Excel (XLSX) profesional tingkat tinggi yang komprehensif, rapi, dan siap analisis di bidang ${expert.fieldLabel}.
+Judul/Nama Dokumen Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
+Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
 ${context ? `Konteks/Data Acuan:\n${context}` : ""}
 
-PANDUAN PEMBUATAN EXCEL:
-1. Tentukan sheetName yang relevan (maks 31 karakter).
-2. Buat kolom (columns) dengan 'header', 'key' (id unik huruf kecil tanpa spasi), dan 'type' ('string' | 'number' | 'currency' | 'percentage' | 'date').
-3. Isi baris-baris data (rows) sesuai format tipe kolom. Untuk kolom currency atau number, berikan angka murni (number). Untuk percentage berikan desimal (misal 0.15 untuk 15%).
-4. Berikan data yang komprehensif, realistis, dan informatif.
+PANDUAN RISET & DESAIN EXCEL TINGKAT AHLI:
+1. BUKAN CONTOH ASAL-ASALAN: Sajikan metrik riil, realistis, dan komprehensif sesuai standar industri ${expert.fieldLabel}.
+2. Tentukan sheetName yang relevan (maks 31 karakter).
+3. Buat kolom (columns) dengan 'header', 'key' (id unik huruf kecil tanpa spasi), dan 'type' ('string' | 'number' | 'currency' | 'percentage' | 'date').
+4. Isi baris-baris data (rows) sesuai format tipe kolom. Untuk kolom currency atau number, berikan angka murni (number). Untuk percentage berikan desimal (misal 0.15 untuk 15%).
+5. Berikan data yang komprehensif, realistis, dan informatif.
 
 KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
 {
   "fileName": "${safeTitle}",
   "sheets": [
     {
-      "sheetName": "Ringkasan",
+      "sheetName": "Ringkasan Analisis",
       "columns": [
-        { "header": "Nama Kolom", "key": "nama_kolom", "type": "string" }
+        { "header": "Indikator / Metrik", "key": "indikator", "type": "string" },
+        { "header": "Nilai / Data", "key": "nilai", "type": "string" },
+        { "header": "Catatan Analisis", "key": "catatan", "type": "string" }
       ],
       "rows": [
-        { "nama_kolom": "Contoh data" }
+        { "indikator": "Fundamental", "nilai": "Stabil", "catatan": "Kinerja kuartalan positif" }
       ]
     }
   ]
@@ -187,36 +195,41 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
         mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       };
     } else {
-      // 2. GENERATE WORD (.docx) ATAU PDF (.pdf) VIA GEMINI JSON
+      // 2. GENERATE WORD (.docx) ATAU PDF (.pdf) VIA GEMINI JSON DENGAN PERSONA PAKAR SENIOR
       const isPdf = kind === "pdf";
-      const docTypeLabel = isPdf ? "PDF" : "Word (.docx)";
+      const docTypeLabel = isPdf ? "Laporan Riset Eksekutif PDF (.pdf)" : "Dokumen Riset Formal Word (.docx)";
 
-      const prompt = `Anda adalah asisten penulisan laporan profesional. Buatlah draf dokumen laporan ${docTypeLabel} yang rapi, terstruktur, berbobot, dan formal berdasarkan instruksi berikut:
-Judul Dokumen: "${title}"
+      const prompt = `Anda adalah ${expert.persona}.
+Tugas Anda: Menyusun ${docTypeLabel} profesional tingkat tinggi (High-Caliber Professional Research Report) yang mendalam, berbobot, tajam, dan formal di bidang ${expert.fieldLabel}.
+Judul Dokumen/Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
+Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
 ${context ? `Konteks/Materi Acuan:\n${context}` : ""}
 
-PANDUAN PEMBUATAN DOKUMEN:
-1. 'title': Judul utama dokumen yang elegan dan jelas.
-2. 'subtitle': Subjudul, tanggal pembuatan, atau instansi/keterangan pembuat.
-3. 'sections': Daftar bagian/bab isi dokumen. Tiap section memiliki:
-   - 'heading': Subjudul bagian.
-   - 'paragraphs': Daftar paragraf penjelasan yang mendalam, mengalir, dan komprehensif. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
-   - 'bulletPoints': (Opsional) Poin-poin kesimpulan atau sorotan penting jika ada.
-   - 'table': (Opsional) Tabel data pendukung dengan 'headers' dan 'rows' (array of string) jika relevan.
+PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:
+1. BUKAN RISET ASAL-ASALAN: Sajikan analisis mendalam, berbasis fakta riil, tajam, dan terstruktur. Hindari generalisasi dangkal atau sekadar definisi umum!
+2. STRUKTUR LAPORAN WAJIB MEMUAT SECTION BERBOBOT:
+   - Ringkasan Eksekutif (Executive Summary)
+   - Latar Belakang & Analisis Sektor / Fakta Kunci
+   - Evaluasi Peluang & Analisis Risiko Komprehensif
+   - Rekomendasi Strategis & Rencana Tindak Lanjut
+   - Kesimpulan Ahli
+   - Sumber Referensi & Catatan Metodologi
+3. Setiap section harus memuat 'paragraphs' mendalam (2-4 paragraf berbobot) dan/atau 'bulletPoints' tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
+4. 'table': (Opsional) Tabel data pendukung dengan 'headers' dan 'rows' jika relevan.
 
 KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
 {
   "title": "${safeTitle}",
-  "subtitle": "Disusun secara otomatis oleh Celyn AI",
+  "subtitle": "Laporan Riset Profesional Celyn AI • ${expert.fieldLabel}",
   "sections": [
     {
-      "heading": "Pendahuluan",
+      "heading": "Ringkasan Eksekutif",
       "paragraphs": [
-        "Paragraf pertama penjelasan dokumen secara terperinci."
+        "Paragraf analisis eksekutif komprehensif tanpa tag markdown mentah."
       ],
       "bulletPoints": [
-        "Poin penting 1"
+        "Temuan kunci 1"
       ]
     }
   ]

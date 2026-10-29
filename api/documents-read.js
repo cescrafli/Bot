@@ -59,6 +59,11 @@ const TEXT_EXTS = new Set(["csv", "tsv", "txt", "md", "rtf"]);
 const OOXML_EXTS = new Set(["docx", "xlsx", "xlsm", "xlsb", "docm", "dotx"]);
 // Legacy CFB binary extensions
 const CFB_EXTS = new Set(["doc", "xls"]);
+// Image extensions (Foto & Gambar)
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff]);
 
 const PE_MAGIC = Buffer.from([0x4d, 0x5a]); // MZ executable
 const ELF_MAGIC = Buffer.from([0x7f, 0x45, 0x4c, 0x46]); // ELF executable
@@ -163,6 +168,30 @@ function validateMagicBytes(buffer, fileName) {
     return { valid: true, kind: ext, mime: "text/plain" };
   }
 
+  // Foto & Gambar (PNG, JPG, JPEG, WEBP, GIF, BMP)
+  if (IMAGE_EXTS.has(ext)) {
+    let imgMime = "image/jpeg";
+    if (ext === "png") imgMime = "image/png";
+    else if (ext === "webp") imgMime = "image/webp";
+    else if (ext === "gif") imgMime = "image/gif";
+    else if (ext === "bmp") imgMime = "image/bmp";
+
+    const isPng = head.length >= 8 && head.subarray(0, 8).equals(PNG_MAGIC);
+    const isJpg = head.length >= 3 && head.subarray(0, 3).equals(JPEG_MAGIC);
+    const isGif = head.length >= 4 && head.subarray(0, 4).toString("ascii").startsWith("GIF8");
+    const isWebp = head.length >= 12 && head.subarray(0, 4).toString("ascii") === "RIFF" && head.subarray(8, 12).toString("ascii") === "WEBP";
+    const isBmp = head.length >= 2 && head[0] === 0x42 && head[1] === 0x4d;
+
+    if (isPng || isJpg || isGif || isWebp || isBmp) {
+      return { valid: true, kind: "image", mime: imgMime };
+    }
+    // Fallback: jika ekstensi cocok dan bukan biner executable (PE/ELF)
+    if (!head.subarray(0, 2).equals(PE_MAGIC) && !head.subarray(0, 4).equals(ELF_MAGIC)) {
+      return { valid: true, kind: "image", mime: imgMime };
+    }
+    return { valid: false, error: `Bukan file gambar .${ext} yang valid` };
+  }
+
   return { valid: false, error: "Ekstensi tidak didukung" };
 }
 
@@ -237,6 +266,50 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
   const isTsv = ext === "tsv";
   const isTxt = ext === "txt" || ext === "md";
   const isRtf = ext === "rtf";
+  const isImage = IMAGE_EXTS.has(ext) || (mimeType && mimeType.startsWith("image/"));
+
+  if (isImage) {
+    if (apiKey) {
+      const ai = new GoogleGenAI({ apiKey });
+      const visionModel = process.env.DOC_VISION_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
+      const resp = await ai.models.generateContent({
+        model: visionModel,
+        contents: [
+          {
+            inlineData: {
+              data: buffer.toString("base64"),
+              mimeType: mimeType || "image/jpeg",
+            },
+          },
+          {
+            text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
+1. EKSTRAKSI TEKS (OCR MENYELURUH): Transkripsikan SELURUH teks yang terlihat pada gambar dengan akurat (teks cetak, tulisan tangan, tabel, formulir, kuitansi, label, kode, atau dokumen scan). Pertahankan struktur aslinya (gunakan Markdown Table jika berupa tabel data).
+2. DESKRIPSI VISUAL & ELEMEN PENTING: Jelaskan konten visual gambar secara rinci (objek utama, diagram, grafik/chart, pola, konteks warna/layout, dan elemen visual penting).
+3. INTISARI KUNCI: Berikan ringkasan poin-poin utama dari isi foto/gambar ini.`,
+          },
+        ],
+      });
+      const visualText = resp.text || "";
+      return {
+        fileName,
+        mimeType: mimeType || "image/jpeg",
+        markdownContent: visualText,
+        usedOcr: true,
+        pages: 1,
+        truncated: false,
+        characterCount: visualText.length,
+      };
+    }
+    return {
+      fileName,
+      mimeType: mimeType || "image/jpeg",
+      markdownContent: `(File foto/gambar '${fileName}' berhasil diunggah)`,
+      usedOcr: false,
+      pages: 1,
+      truncated: false,
+      characterCount: 0,
+    };
+  }
 
   if (isPdf) {
     let pdf;
