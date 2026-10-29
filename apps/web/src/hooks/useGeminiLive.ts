@@ -109,6 +109,10 @@ export function useGeminiLive({
   const backupPcmChunksRef = useRef<string[]>([]);
   const bargeInMutedRef = useRef<boolean>(false);
   const directHasPendingToolCallRef = useRef<boolean>(false);
+  const directTurnHasOutputTranscriptionRef = useRef<boolean>(false);
+  const directFallbackPartTextBufferRef = useRef<string>("");
+  const autoGreetingTimerRef = useRef<number | null>(null);
+  const hasSentAutoGreetingRef = useRef<boolean>(false);
   const hasUserInitiatedTurnRef = useRef<boolean>(false);
   const sessionWarningTimerRef = useRef<number | null>(null);
   const sessionMaxDurationTimerRef = useRef<number | null>(null);
@@ -239,6 +243,12 @@ export function useGeminiLive({
       } else if (msg.type === "interrupted") {
         console.log("⚡ Interrupted diterima");
         bargeInMutedRef.current = false;
+        directTurnHasOutputTranscriptionRef.current = false;
+        directFallbackPartTextBufferRef.current = "";
+        if (autoGreetingTimerRef.current) {
+          clearTimeout(autoGreetingTimerRef.current);
+          autoGreetingTimerRef.current = null;
+        }
         directTtsTurnIdRef.current++;
         directTtsBufferRef.current = "";
         backupPcmChunksRef.current = [];
@@ -305,13 +315,8 @@ export function useGeminiLive({
             setLookAt(null);
           }, 6000);
         } else if (msg.name === "create_document") {
-          const kind = ((msg.args.kind as string) || "pdf").toLowerCase() as DocumentKind;
-          const title = String(msg.args.title || "Dokumen Celyn");
-          const instruction = String(msg.args.instruction || "");
-          console.log("📄 [Proxy WS Tool] create_document dipanggil:", { kind, title });
-          generateDocumentRef.current(kind, title, instruction).catch((err) => {
-            console.warn("[Proxy WS] create_document error:", err);
-          });
+          // Handled directly by background jobs (Proxy WS) or directSession toolCall execution (Direct Live)
+          console.log("📄 [Tool Call Event] create_document diterima:", msg.args);
         }
       } else if (msg.type === "status") {
         setStatus(msg.status);
@@ -721,7 +726,12 @@ export function useGeminiLive({
               }
             }
 
+            // 2.1 Transkripsi Suara Celyn (Output Transcription Bahasa Indonesia - Primary Source of Truth)
             if (msg.serverContent?.outputTranscription?.text) {
+              // Kunci bahwa turn ini menggunakan outputTranscription (ASR suara native Gemini Live)
+              directTurnHasOutputTranscriptionRef.current = true;
+              directFallbackPartTextBufferRef.current = ""; // Buang buffer teks mentah agar tidak dobel
+
               if (directUserTurnBufferRef.current.trim()) {
                 recordTurnToServer("user", directUserTurnBufferRef.current.trim());
                 directUserTurnBufferRef.current = "";
@@ -792,8 +802,8 @@ export function useGeminiLive({
                     });
                   }
                 }
-                if (part.text && !msg.serverContent?.outputTranscription?.text) {
-                  if (bargeInMutedRef.current) continue;
+                if (part.text) {
+                  // Deteksi emosi tetap diekstrak dari teks mentah untuk sinkronisasi ekspresi avatar
                   const emotionMatch = part.text.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
                   if (emotionMatch) {
                     const detectedEmotion = normalizeEmotion(emotionMatch[1]);
@@ -804,17 +814,19 @@ export function useGeminiLive({
                       setEmotion(detectedEmotion);
                     }
                   }
-                  const cleanPart = stripVoiceMetadataTags(part.text);
-                  if (!cleanPart) continue;
-                  directTurnCelynTextRef.current += cleanPart;
-                  handleServerMessage({
-                    type: "transcript",
-                    speaker: "celyn",
-                    text: cleanPart,
-                  });
-                  if (useEdgeTts) {
-                    directTtsBufferRef.current += cleanPart;
-                    flushDirectSentences(false);
+
+                  // Single-Source-of-Truth Deduplication:
+                  // Jika outputTranscription aktif untuk turn ini, ABAIKAN teks mentah modelTurn agar tidak dobel/terjalin!
+                  if (directTurnHasOutputTranscriptionRef.current) {
+                    continue;
+                  }
+
+                  // Jika outputTranscription belum/tidak tiba, simpan part.text sebagai cadangan (fallback)
+                  if (!bargeInMutedRef.current) {
+                    const cleanPart = stripVoiceMetadataTags(part.text);
+                    if (cleanPart) {
+                      directFallbackPartTextBufferRef.current += cleanPart;
+                    }
                   }
                 }
               }
@@ -822,6 +834,26 @@ export function useGeminiLive({
 
             if (msg.serverContent?.turnComplete) {
               bargeInMutedRef.current = false;
+
+              // Jika dalam satu turn penuh tidak ada outputTranscription sama sekali (misal model fallback text-only),
+              // flush buffer cadangan teks part agar respon Celyn tetap tersampaikan
+              if (!directTurnHasOutputTranscriptionRef.current && directFallbackPartTextBufferRef.current.trim()) {
+                const fallbackText = directFallbackPartTextBufferRef.current.trim();
+                directTurnCelynTextRef.current += fallbackText;
+                handleServerMessage({
+                  type: "transcript",
+                  speaker: "celyn",
+                  text: fallbackText,
+                });
+                if (useEdgeTts) {
+                  directTtsBufferRef.current += fallbackText;
+                  flushDirectSentences(true);
+                }
+              }
+
+              // Reset tracker deduplikasi turn
+              directTurnHasOutputTranscriptionRef.current = false;
+              directFallbackPartTextBufferRef.current = "";
 
               if (directUserTurnBufferRef.current.trim()) {
                 recordTurnToServer("user", directUserTurnBufferRef.current.trim());
@@ -1133,9 +1165,13 @@ export function useGeminiLive({
         disconnectRef.current();
       }, 30 * 60 * 1000);
 
-      // Kirim sapaan otomatis Celyn saat pertama kali terhubung HANYA jika pengguna belum mengirim pesan
-      setTimeout(async () => {
-        if (!hasUserInitiatedTurnRef.current && directSessionRef.current) {
+      // Kirim sapaan otomatis Celyn saat pertama kali terhubung HANYA jika pengguna belum mengirim pesan (Deduplikasi ketat)
+      if (autoGreetingTimerRef.current) {
+        clearTimeout(autoGreetingTimerRef.current);
+      }
+      autoGreetingTimerRef.current = window.setTimeout(async () => {
+        if (!hasUserInitiatedTurnRef.current && !hasSentAutoGreetingRef.current && directSessionRef.current) {
+          hasSentAutoGreetingRef.current = true;
           try {
             await directSessionRef.current.sendClientContent({
               turns: [
@@ -1259,6 +1295,13 @@ export function useGeminiLive({
 
   const disconnect = useCallback(() => {
     clearSessionTimers();
+    if (autoGreetingTimerRef.current) {
+      clearTimeout(autoGreetingTimerRef.current);
+      autoGreetingTimerRef.current = null;
+    }
+    hasSentAutoGreetingRef.current = false;
+    directTurnHasOutputTranscriptionRef.current = false;
+    directFallbackPartTextBufferRef.current = "";
     hasUserInitiatedTurnRef.current = false;
     bargeInMutedRef.current = false;
     pendingQueueRef.current = [];
@@ -1322,6 +1365,10 @@ export function useGeminiLive({
 
       try {
         if (msg.type === "audio") {
+          if (autoGreetingTimerRef.current) {
+            clearTimeout(autoGreetingTimerRef.current);
+            autoGreetingTimerRef.current = null;
+          }
           try {
             await session.sendRealtimeInput({
               audio: {
@@ -1363,14 +1410,25 @@ export function useGeminiLive({
             turnComplete: false,
           });
         } else if (msg.type === "text") {
+          if (autoGreetingTimerRef.current) {
+            clearTimeout(autoGreetingTimerRef.current);
+            autoGreetingTimerRef.current = null;
+          }
           hasUserInitiatedTurnRef.current = true;
           bargeInMutedRef.current = false;
           directHasPendingToolCallRef.current = false;
+          directTurnHasOutputTranscriptionRef.current = false;
+          directFallbackPartTextBufferRef.current = "";
           directTtsTurnIdRef.current++;
           directTtsBufferRef.current = "";
           backupPcmChunksRef.current = [];
           directUserTurnBufferRef.current = "";
-          recordTurnToServer("user", msg.text);
+
+          const isSystemNotification = msg.text.startsWith("[INFO SISTEM]") || msg.text.startsWith("[SYSTEM]");
+          if (!isSystemNotification) {
+            recordTurnToServer("user", msg.text);
+          }
+
           const userEmotion = inferUserEmotion(msg.text);
           if (userEmotion.emotion !== "neutral") {
             directCurrentEmotionRef.current = userEmotion.suggestedCelynEmotion;
@@ -1387,7 +1445,11 @@ export function useGeminiLive({
             status: "thinking",
             message: userEmotion.statusMessage,
           });
-          const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;
+
+          const textPrompt = isSystemNotification
+            ? `[Pemberitahuan Sistem untuk Celyn]: "${msg.text}"\nSampaikan tanggapan singkat dan ramah dengan SUARA lisan (audio) dalam Bahasa Indonesia!`
+            : `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia!`;
+
           await session.sendClientContent({
             turns: [{ role: "user", parts: [{ text: textPrompt }] }],
             turnComplete: true,

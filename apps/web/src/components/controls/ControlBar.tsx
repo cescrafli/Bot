@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Volume2,
   Keyboard,
   Mic,
   MicOff,
@@ -22,7 +21,7 @@ interface ControlBarProps {
   onToggleConnection: () => void;
   onToggleMic: () => void;
   onToggleScreenShare: () => void;
-  onToggleVoiceSelector: () => void;
+  onToggleVoiceSelector?: () => void;
   onToggleTextInput: () => void;
   onToggleHistory: () => void;
   onToggleDocumentModal?: () => void;
@@ -41,7 +40,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onToggleConnection,
   onToggleMic,
   onToggleScreenShare,
-  onToggleVoiceSelector,
   onToggleTextInput,
   onToggleHistory,
   onToggleDocumentModal,
@@ -62,16 +60,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
       aria-label="Kontrol Percakapan"
       className="luxury-dock px-3 py-2 rounded-full flex items-center gap-2 sm:gap-3 transition-all"
     >
-      {/* 1. Mode Suara (Voice Selector Modal) */}
-      <button
-        onClick={onToggleVoiceSelector}
-        className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
-        title="Mode Suara (Aoede / Kore)"
-      >
-        <Volume2 className="w-4 h-4 text-slate-300" />
-      </button>
-
-      {/* 2. Input Teks / Keyboard Toggle */}
+      {/* 1. Input Teks / Keyboard Toggle */}
       <button
         onClick={onToggleTextInput}
         className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer ${
@@ -82,6 +71,26 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         title="Ketik Pesan Teks"
       >
         <Keyboard className="w-4 h-4" />
+      </button>
+
+      {/* 2. Bagi Layar / Visual Context */}
+      <button
+        onClick={onToggleScreenShare}
+        disabled={!isConnected}
+        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+          !isConnected
+            ? "opacity-30 cursor-not-allowed text-slate-500"
+            : isScreenSharing
+            ? "text-cyan-400 bg-cyan-500/15 border border-cyan-500/30 animate-pulse cursor-pointer"
+            : "text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 cursor-pointer"
+        }`}
+        title={isScreenSharing ? "Hentikan Bagikan Layar (S)" : "Bagikan Layar ke Celyn (S)"}
+      >
+        {isScreenSharing ? (
+          <Monitor className="w-4 h-4 text-cyan-400" />
+        ) : (
+          <MonitorOff className="w-4 h-4" />
+        )}
       </button>
 
       {/* 3. Center Glowing Rose Microphone Button */}
@@ -143,27 +152,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         )}
       </button>
 
-      {/* 4. Bagi Layar / Visual Context */}
-      <button
-        onClick={onToggleScreenShare}
-        disabled={!isConnected}
-        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-          !isConnected
-            ? "opacity-30 cursor-not-allowed text-slate-500"
-            : isScreenSharing
-            ? "text-cyan-400 bg-cyan-500/15 border border-cyan-500/30 animate-pulse cursor-pointer"
-            : "text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 cursor-pointer"
-        }`}
-        title={isScreenSharing ? "Hentikan Bagikan Layar (S)" : "Bagikan Layar ke Celyn (S)"}
-      >
-        {isScreenSharing ? (
-          <Monitor className="w-4 h-4 text-cyan-400" />
-        ) : (
-          <MonitorOff className="w-4 h-4" />
-        )}
-      </button>
-
-      {/* 5. Dokumen PDF / Word / Excel */}
+      {/* 4. Dokumen PDF / Word / Excel */}
       <button
         onClick={onToggleDocumentModal}
         className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 transition-all cursor-pointer relative"
@@ -177,7 +166,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         )}
       </button>
 
-      {/* 6. Riwayat Percakapan / Transkrip Drawer */}
+      {/* 5. Riwayat Percakapan / Transkrip Drawer */}
       <button
         onClick={onToggleHistory}
         className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 transition-all cursor-pointer"

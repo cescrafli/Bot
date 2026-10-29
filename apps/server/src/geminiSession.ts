@@ -50,6 +50,8 @@ export class GeminiSession {
   private backupPcmChunks: string[] = [];
   private hasPendingToolCall = false;
   private hasUserInitiatedTurn = false;
+  private turnHasOutputTranscription = false;
+  private fallbackPartTextBuffer = "";
   public sessionId: string;
   private memoryContext?: string;
   private currentTurnCelynText = "";
@@ -476,6 +478,8 @@ export class GeminiSession {
     if (data.serverContent?.interrupted) {
       console.log("⚡ [Gemini Live] Interrupted: pengguna memotong bicara Celyn");
       this.isBargeInMuted = false;
+      this.turnHasOutputTranscription = false;
+      this.fallbackPartTextBuffer = "";
       this.cancelPendingTts();
       if (this.currentTurnUserSpeech.trim()) {
         const fullUserText = this.currentTurnUserSpeech.trim();
@@ -524,8 +528,12 @@ export class GeminiSession {
       }
     }
 
-    // 2.1 Transkripsi Suara Celyn (Output Transcription Bahasa Indonesia)
+    // 2.1 Transkripsi Suara Celyn (Output Transcription Bahasa Indonesia - Primary Source of Truth)
     if (data.serverContent?.outputTranscription?.text) {
+      // Kunci bahwa turn ini menggunakan outputTranscription (ASR suara native Gemini Live)
+      this.turnHasOutputTranscription = true;
+      this.fallbackPartTextBuffer = ""; // Buang buffer teks mentah agar tidak dobel
+
       if (!this.isBargeInMuted) {
         // Jika sebelumnya ada akumulasi ucapan pengguna, catat turn utuh pengguna ke memori
         if (this.currentTurnUserSpeech.trim()) {
@@ -603,8 +611,9 @@ export class GeminiSession {
             });
           }
         }
-        if (part.text && !data.serverContent?.outputTranscription?.text) {
-          if (this.isBargeInMuted) continue;
+
+        if (part.text) {
+          // Deteksi emosi tetap diekstrak dari teks mentah untuk sinkronisasi ekspresi avatar
           const emotionMatch = part.text.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
           if (emotionMatch) {
             const detected = normalizeEmotion(emotionMatch[1]);
@@ -619,18 +628,19 @@ export class GeminiSession {
               });
             }
           }
-          const cleanPart = stripVoiceMetadataTags(part.text);
-          if (!cleanPart) continue;
-          this.currentTurnCelynText += cleanPart;
-          console.log(`💬 [Celyn AI]: ${cleanPart}`);
-          this.sendToClient({
-            type: "transcript",
-            speaker: "celyn",
-            text: cleanPart,
-          });
-          if (this.useEdgeTts) {
-            this.ttsBuffer += cleanPart;
-            this.flushCompleteSentences(false);
+
+          // Single-Source-of-Truth Deduplication:
+          // Jika outputTranscription aktif untuk turn ini, ABAIKAN teks mentah modelTurn agar tidak dobel/terjalin!
+          if (this.turnHasOutputTranscription) {
+            continue;
+          }
+
+          // Jika outputTranscription belum/tidak tiba, simpan part.text sebagai cadangan (fallback)
+          if (!this.isBargeInMuted) {
+            const cleanPart = stripVoiceMetadataTags(part.text);
+            if (cleanPart) {
+              this.fallbackPartTextBuffer += cleanPart;
+            }
           }
         }
       }
@@ -639,6 +649,27 @@ export class GeminiSession {
     // 2.5 Giliran Model Selesai
     if (data.serverContent?.turnComplete) {
       this.isBargeInMuted = false;
+
+      // Jika dalam satu turn penuh tidak ada outputTranscription sama sekali (misal model fallback text-only),
+      // flush buffer cadangan teks part agar respon Celyn tetap tersampaikan
+      if (!this.turnHasOutputTranscription && this.fallbackPartTextBuffer.trim()) {
+        const fallbackText = this.fallbackPartTextBuffer.trim();
+        this.currentTurnCelynText += fallbackText;
+        console.log(`💬 [Celyn AI Fallback Text]: ${fallbackText}`);
+        this.sendToClient({
+          type: "transcript",
+          speaker: "celyn",
+          text: fallbackText,
+        });
+        if (this.useEdgeTts) {
+          this.ttsBuffer += fallbackText;
+          this.flushCompleteSentences(true);
+        }
+      }
+
+      // Reset tracker deduplikasi turn
+      this.turnHasOutputTranscription = false;
+      this.fallbackPartTextBuffer = "";
 
       // Pastikan sisa ucapan pengguna tercatat jika belum ter-flush
       if (this.currentTurnUserSpeech.trim()) {
@@ -1015,14 +1046,17 @@ export class GeminiSession {
           turnComplete: true,
         });
       } else if (msg.type === "text") {
+        const isSystemNotification = msg.text.startsWith("[INFO SISTEM]") || msg.text.startsWith("[SYSTEM]");
         const preview = msg.text.length > 50 ? `${msg.text.slice(0, 50)}...` : msg.text;
         console.log(`👤 [User Text]: "${preview}"`);
-        if (this.authMode === "jocelyn") {
+        if (!isSystemNotification && this.authMode === "jocelyn") {
           memoryService.recordTurn(this.sessionId, "user", msg.text);
         }
         this.hasUserInitiatedTurn = true;
         this.isBargeInMuted = false;
         this.hasPendingToolCall = false;
+        this.turnHasOutputTranscription = false;
+        this.fallbackPartTextBuffer = "";
         this.cancelPendingTts();
 
         // ⚡ Deteksi nada & emosi teks pengguna secara instan (zero-latency empathy)
@@ -1043,7 +1077,9 @@ export class GeminiSession {
           message: userEmotion.statusMessage,
         });
         // Sertakan direktif verbal eksplisit agar model native audio selalu menghasilkan jawaban suara lisan
-        const textPrompt = `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia secara jelas dan tuntas!`;
+        const textPrompt = isSystemNotification
+          ? `[Pemberitahuan Sistem untuk Celyn]: "${msg.text}"\nSampaikan tanggapan singkat dan ramah dengan SUARA lisan (audio) dalam Bahasa Indonesia!`
+          : `[Pesan teks dari pengguna]: "${msg.text}"\nJawablah sekarang juga dengan SUARA lisan (audio) dalam Bahasa Indonesia secara jelas dan tuntas!`;
         await this.session.sendClientContent({
           turns: [{ role: "user", parts: [{ text: textPrompt }] }],
           turnComplete: true,
@@ -1051,6 +1087,8 @@ export class GeminiSession {
       } else if (msg.type === "barge_in") {
         console.log("⚡ [Client Barge-In] Membatalkan antrean TTS Celyn & mengaktifkan guard turn bleed...");
         this.isBargeInMuted = true;
+        this.turnHasOutputTranscription = false;
+        this.fallbackPartTextBuffer = "";
         this.cancelPendingTts();
       } else if (msg.type === "audio_stream_end") {
         try {

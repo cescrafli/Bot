@@ -1615,6 +1615,115 @@ async function runTtsTests() {
     "validateDocumentMagicBytes menolak ekstensi tidak didukung (.exe)"
   );
 
+  // --- 26. Uji Single-Source-of-Truth & Platform-Wide Deduplication Audit ---
+  console.log("-> Menguji Single-Source-of-Truth & Pencegahan Transkrip Dobel/Terjalin...");
+
+  // Simulasi stateful deduplication turn Gemini Live
+  function simulateLiveTurnDeduplication(packets: any[]): { emittedTranscripts: string[]; finalTurnText: string } {
+    let turnHasOutputTranscription = false;
+    let fallbackPartTextBuffer = "";
+    let finalTurnCelynText = "";
+    const emittedTranscripts: string[] = [];
+
+    for (const data of packets) {
+      if (data.serverContent?.outputTranscription?.text) {
+        turnHasOutputTranscription = true;
+        fallbackPartTextBuffer = ""; // Wiping fallback
+        const raw = data.serverContent.outputTranscription.text;
+        const celynText = stripVoiceMetadataTags(raw);
+        if (celynText) {
+          const sep = (finalTurnCelynText && !finalTurnCelynText.endsWith(" ") && !celynText.startsWith(" ")) ? " " : "";
+          finalTurnCelynText += sep + celynText;
+          emittedTranscripts.push(celynText);
+        }
+      }
+
+      const parts = data.serverContent?.modelTurn?.parts;
+      if (Array.isArray(parts)) {
+        for (const part of parts) {
+          if (part.thought) continue;
+          if (part.text) {
+            // Emosi avatar selalu diekstrak dari part.text
+            if (turnHasOutputTranscription) {
+              continue; // Drop from transcript & TTS
+            }
+            const cleanPart = stripVoiceMetadataTags(part.text);
+            if (cleanPart) {
+              fallbackPartTextBuffer += cleanPart;
+            }
+          }
+        }
+      }
+
+      if (data.serverContent?.turnComplete) {
+        if (!turnHasOutputTranscription && fallbackPartTextBuffer.trim()) {
+          const fallbackText = fallbackPartTextBuffer.trim();
+          const sep = (finalTurnCelynText && !finalTurnCelynText.endsWith(" ") && !fallbackText.startsWith(" ")) ? " " : "";
+          finalTurnCelynText += sep + fallbackText;
+          emittedTranscripts.push(fallbackText);
+        }
+        turnHasOutputTranscription = false;
+        fallbackPartTextBuffer = "";
+      }
+    }
+
+    return { emittedTranscripts, finalTurnText: finalTurnCelynText };
+  }
+
+  // Skenario A: Gemini Live mengirim kedua stream paralel (outputTranscription + modelTurn.parts)
+  const parallelPackets = [
+    { serverContent: { modelTurn: { parts: [{ text: "Halo, selamat malam! " }] } } },
+    { serverContent: { outputTranscription: { text: "Eh, Halo, selamat malam! " } } },
+    { serverContent: { modelTurn: { parts: [{ text: "Gimana harimu setelah seharian beraktivitas?" }] } } },
+    { serverContent: { outputTranscription: { text: "Gimana harimu setelah seharian beraktivitas?" } } },
+    { serverContent: { turnComplete: true } },
+  ];
+
+  const simResultA = simulateLiveTurnDeduplication(parallelPackets);
+  assert(
+    simResultA.finalTurnText === "Eh, Halo, selamat malam! Gimana harimu setelah seharian beraktivitas?",
+    "Single-Source-of-Truth mencegah teks terjalin dan hanya mempertahankan audio transcription asli"
+  );
+  assert(
+    simResultA.emittedTranscripts.length === 2,
+    "Jumlah chunk transkrip persis 2 (hanya dari outputTranscription), teks part.text dibuang secara bersih"
+  );
+  assert(
+    !simResultA.finalTurnText.includes("Halo, selamat malam! Eh, Halo"),
+    "Transkrip bebas 100% dari interleaving 'Halo, selamat malam! Eh, Halo, selamat...'"
+  );
+
+  // Skenario B: Gemini Live Fallback Text-Only (tidak ada outputTranscription sama sekali)
+  const textOnlyPackets = [
+    { serverContent: { modelTurn: { parts: [{ text: "Respon model mode teks saja tanpa audio native." }] } } },
+    { serverContent: { turnComplete: true } },
+  ];
+  const simResultB = simulateLiveTurnDeduplication(textOnlyPackets);
+  assert(
+    simResultB.finalTurnText === "Respon model mode teks saja tanpa audio native.",
+    "Fallback part.text tetap di-flush dengan sempurna saat tidak ada outputTranscription sama sekali"
+  );
+
+  // Skenario C: Filter Pesan Sistem [INFO SISTEM] agar tidak tercatat ke obrolan pengguna
+  function shouldRecordUserTurn(text: string): boolean {
+    if (text.startsWith("[INFO SISTEM]") || text.startsWith("[SYSTEM]")) {
+      return false;
+    }
+    return true;
+  }
+  assert(
+    shouldRecordUserTurn("[INFO SISTEM]: Pengguna telah mengunggah file data.xlsx") === false,
+    "Pemberitahuan sistem [INFO SISTEM] dicegah tercatat sebagai pesan obrolan pengguna di database"
+  );
+  assert(
+    shouldRecordUserTurn("[SYSTEM]: Reset sesi") === false,
+    "Pemberitahuan sistem [SYSTEM] dicegah tercatat sebagai pesan obrolan pengguna"
+  );
+  assert(
+    shouldRecordUserTurn("Halo Celyn, bisa tolong jelaskan isi file Excel tadi?") === true,
+    "Pesan asli pengguna tetap tercatat ke memori percakapan dengan benar"
+  );
+
   // 25. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

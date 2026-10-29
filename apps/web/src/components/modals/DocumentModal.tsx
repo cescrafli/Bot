@@ -241,11 +241,23 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
           </button>
         </div>
 
-        {/* Banner Pesan / Status */}
-        {statusMessage && (
-          <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center gap-2.5 text-xs text-rose-300 animate-in fade-in">
+        {/* Banner Pesan / Status (Deduplikasi: sembunyikan jika sudah ada errorMessage) */}
+        {statusMessage && !errorMessage && (
+          <div
+            className={`mb-4 p-3 rounded-xl flex items-center gap-2.5 text-xs animate-in fade-in ${
+              statusMessage.toLowerCase().includes("gagal") ||
+              statusMessage.toLowerCase().includes("error") ||
+              statusMessage.toLowerCase().includes("tidak didukung")
+                ? "bg-red-500/10 border border-red-500/20 text-red-300"
+                : "bg-rose-500/10 border border-rose-500/20 text-rose-300"
+            }`}
+          >
             {isUploading || isGenerating ? (
               <Loader2 className="w-4 h-4 animate-spin text-rose-400 shrink-0" />
+            ) : statusMessage.toLowerCase().includes("gagal") ||
+              statusMessage.toLowerCase().includes("error") ||
+              statusMessage.toLowerCase().includes("tidak didukung") ? (
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
             ) : (
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             )}
