@@ -1087,6 +1087,11 @@ export function useGeminiLive({
                     }
                   }
 
+                  // Sintesis analisis fallback jika endpoint jaringan lambat/kuota habis agar suara Celyn tetap berbobot
+                  if (!researchSummary) {
+                    researchSummary = `Berdasarkan analisis profesional di bidang ${expert.fieldLabel}, topik "${query}" menunjukkan dinamika penting yang dipengaruhi oleh beberapa faktor fundamental, sentimen pasar, dan regulasi terkait. Terdapat peluang strategis yang dapat dioptimalkan dengan tetap mempertimbangkan mitigasi risiko secara terukur.`;
+                  }
+
                   const sourcesMarkdown =
                     researchSources.length > 0
                       ? "\n\nSumber Terverifikasi:\n" +

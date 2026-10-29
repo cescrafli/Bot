@@ -2262,6 +2262,54 @@ async function runTtsTests() {
     "api/documents-generate.js menggunakan verifyAuth yang mendukung Bearer token JWT"
   );
 
+  // --- SECTION 33: Fast-Fail Grounding & Expert Scoping Hardening ---
+  console.log("\n🧪 --- SECTION 33: Fast-Fail Grounding & Expert Scoping Hardening ---");
+
+  // A. expert dideklarasikan sebelum if (kind === "xlsx") di documents-generate.js
+  const xlsxIndex = generateCode.indexOf('if (kind === "xlsx")');
+  const expertIndex = generateCode.indexOf("const expert = inferExpertPersona");
+  assert(
+    expertIndex > -1 && expertIndex < xlsxIndex,
+    "api/documents-generate.js mendeklarasikan expert di luar percabangan agar berlaku untuk semua format (docx, pdf, xlsx)"
+  );
+
+  // B. documents-generate.js memprioritaskan kunci standar AIzaSy...
+  assert(
+    generateCode.includes('a.startsWith("AIzaSy")') && generateCode.includes("sortedEnvKeys"),
+    "api/documents-generate.js memprioritaskan kunci standar AIzaSy... dibanding kunci restricted"
+  );
+
+  // C. documents-process.js memprioritaskan kunci standar AIzaSy...
+  assert(
+    processCode.includes('a.startsWith("AIzaSy")') && processCode.includes("sortedEnvKeys"),
+    "api/documents-process.js memprioritaskan kunci standar AIzaSy... dibanding kunci restricted"
+  );
+
+  // D. api/research.js mengimplementasikan Fast-Fail Grounding
+  assert(
+    researchCode.includes("skipGrounding") && researchCode.includes("break"),
+    "api/research.js mengimplementasikan Fast-Fail Grounding untuk segera beralih ke fallback saat kuota habis"
+  );
+
+  // E. api/research.js memiliki timeout guard dengan withTimeout
+  assert(
+    researchCode.includes("withTimeout"),
+    "api/research.js memiliki batas timeout per request untuk mencegah 504 FUNCTION_INVOCATION_TIMEOUT"
+  );
+
+  // F. api/research.js memprioritaskan standard keys AIzaSy...
+  assert(
+    researchCode.includes('a.startsWith("AIzaSy")') && researchCode.includes("sortedEnvKeys"),
+    "api/research.js memprioritaskan standard keys AIzaSy... sebelum restricted keys"
+  );
+
+  // G. useGeminiLive.ts memiliki fallback analisis cerdas sintetik
+  const liveCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"), "utf8");
+  assert(
+    liveCode.includes("!researchSummary") && liveCode.includes("expert.fieldLabel"),
+    "useGeminiLive.ts memiliki fallback analisis profesional sintetik jika network API riset lambat/gagal"
+  );
+
   // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

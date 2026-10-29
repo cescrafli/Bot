@@ -453,7 +453,14 @@ export default async function handler(req, res) {
     .map((k) => k.trim())
     .filter(Boolean);
 
-  const candidateKeys = customKey ? [customKey, ...envKeys] : envKeys;
+  // Prioritaskan kunci standar AIzaSy... dibanding kunci restricted AQ...
+  const sortedEnvKeys = [...envKeys].sort((a, b) => {
+    if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
+    if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
+    return 0;
+  });
+
+  const candidateKeys = customKey ? [customKey, ...sortedEnvKeys] : sortedEnvKeys;
   if (candidateKeys.length === 0) {
     return res.status(500).json({ error: "Layanan Celyn belum siap: Konfigurasi API belum lengkap." });
   }
