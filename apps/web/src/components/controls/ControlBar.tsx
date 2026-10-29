@@ -18,6 +18,7 @@ interface ControlBarProps {
   isTextInputOpen: boolean;
   volume?: number; // 0..1
   activeDocumentsCount?: number;
+  quotaCooldownSeconds?: number;
   onToggleConnection: () => void;
   onToggleMic: () => void;
   onToggleScreenShare: () => void;
@@ -36,6 +37,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   isPushToTalk,
   isTextInputOpen,
   activeDocumentsCount,
+  quotaCooldownSeconds = 0,
   onToggleConnection,
   onToggleMic,
   onToggleScreenShare,
@@ -105,7 +107,11 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         onMouseUp={isConnected && isPushToTalk ? () => onPttHoldEnd?.() : undefined}
         onMouseLeave={isConnected && isPushToTalk ? () => onPttHoldEnd?.() : undefined}
         title={
-          isPushToTalk
+          !isConnected && quotaCooldownSeconds > 0
+            ? `Pendinginan Kuota AI (${quotaCooldownSeconds}s) - Klik untuk coba rotasi kunci`
+            : !isConnected
+            ? "Mulai Percakapan Suara"
+            : isPushToTalk
             ? "Tahan untuk Bicara (PTT)"
             : isMicActive
             ? "Matikan Mikrofon (M)"
@@ -114,6 +120,8 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         className={`relative group p-3.5 rounded-full transition-all cursor-pointer ${
           isMicActive
             ? "bg-gradient-to-tr from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/40 hover:shadow-rose-500/60 hover:scale-105 active:scale-95"
+            : !isConnected && quotaCooldownSeconds > 0
+            ? "bg-amber-950/70 hover:bg-amber-900/80 text-amber-300 border border-amber-500/30 hover:scale-105 active:scale-95 shadow-md"
             : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 hover:border-rose-500/40 hover:scale-105 active:scale-95 shadow-md"
         }`}
       >
@@ -125,9 +133,14 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           {isMicActive ? (
             <Mic className="w-5 h-5 text-white animate-pulse" />
           ) : (
-            <MicOff className="w-5 h-5 text-rose-300" />
+            <MicOff className={`w-5 h-5 ${!isConnected && quotaCooldownSeconds > 0 ? "text-amber-300" : "text-rose-300"}`} />
           )}
         </div>
+        {!isConnected && quotaCooldownSeconds > 0 && (
+          <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-amber-500 text-[9px] font-bold text-black shadow animate-pulse">
+            {quotaCooldownSeconds}s
+          </span>
+        )}
       </button>
 
       {/* 4. Bagi Layar / Visual Context */}

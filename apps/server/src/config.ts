@@ -9,12 +9,20 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
+const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+const geminiApiKeys = rawGeminiKeys
+  .split(",")
+  .map((k) => k.trim())
+  .filter(Boolean);
+const primaryGeminiApiKey = geminiApiKeys[0] || "";
+
 export const config = {
   port: parseInt(process.env.PORT || "3001", 10),
   adminPassword: process.env.ADMIN_PASSWORD || "admin",
   userPassword: process.env.USER_PASSWORD || "login",
   authSecret: process.env.AUTH_SECRET || "celyn-secret-session-key-2026",
-  geminiApiKey: process.env.GEMINI_API_KEY || "",
+  geminiApiKey: primaryGeminiApiKey,
+  geminiApiKeys,
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",
   textModel: process.env.TEXT_MODEL || "gemini-3-flash-preview",
   geminiVoice: process.env.GEMINI_VOICE || "Aoede",

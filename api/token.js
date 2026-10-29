@@ -22,6 +22,8 @@ function verifyToken(token, secret) {
 
 // In-memory IP rate limiter sederhana (maks 15 token / menit per IP pada warm instance)
 const rateLimitMap = new Map();
+const keyCooldownMap = new Map();
+let currentKeyRotationIndex = 0;
 
 async function getTursoMemoryBlock() {
   const url = process.env.TURSO_DATABASE_URL;
@@ -157,7 +159,7 @@ function isRateLimited(ip) {
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization, x-gemini-key");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
   if (req.method === "OPTIONS") {
@@ -214,31 +216,96 @@ export default async function handler(req, res) {
     });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY || "";
   const model = process.env.GEMINI_MODEL || "gemini-3.8-live";
   const requestedVoice = req.query?.voice || (req.body && typeof req.body === "object" ? req.body.voice : "");
   const voice = requestedVoice || process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "Aoede";
 
-  if (!apiKey) {
+  // 1. Kunci kustom dari klien (jika pengguna memasukkan di Pengaturan)
+  const customKey = (
+    req.headers["x-gemini-key"] ||
+    req.query?.apiKey ||
+    (req.body && typeof req.body === "object" ? req.body.apiKey : "") ||
+    ""
+  ).trim();
+
+  // 2. Kumpulan kunci dari Environment Variables
+  const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+  const envKeys = rawEnvKeys
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  let candidateKeys = [];
+  if (customKey) {
+    candidateKeys = [customKey];
+  } else if (envKeys.length > 0) {
+    candidateKeys = envKeys;
+  }
+
+  if (candidateKeys.length === 0) {
     return res.status(500).json({
       error: "Layanan Celyn belum dikonfigurasi dengan benar. Harap hubungi administrator.",
     });
   }
 
+  // Rotasi manual jika klien meminta rotate=1 atau retry=1
+  const shouldRotate = req.query?.rotate === "1" || req.query?.retry === "1";
+  if (shouldRotate && candidateKeys.length > 1) {
+    currentKeyRotationIndex = (currentKeyRotationIndex + 1) % candidateKeys.length;
+  }
+
+  // Urutkan kunci: Dahulukan kunci yang sehat (tidak sedang cooldown), lalu round-robin
+  const now = Date.now();
+  const orderedKeys = [];
+  for (let i = 0; i < candidateKeys.length; i++) {
+    const idx = (currentKeyRotationIndex + i) % candidateKeys.length;
+    orderedKeys.push(candidateKeys[idx]);
+  }
+
+  const readyKeys = orderedKeys.filter((k) => (keyCooldownMap.get(k) || 0) <= now);
+  const coolingKeys = orderedKeys.filter((k) => (keyCooldownMap.get(k) || 0) > now);
+  const keysToTry = readyKeys.length > 0 ? [...readyKeys, ...coolingKeys] : coolingKeys;
+
+  let lastError = null;
+  let tokenResource = null;
+  const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+  for (const key of keysToTry) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey: key,
+        httpOptions: { apiVersion: "v1alpha" },
+      });
+      tokenResource = await ai.authTokens.create({
+        config: {
+          uses: 5,
+          expireTime,
+        },
+      });
+      // Sukses! Hapus status cooldown jika sebelumnya pernah gagal
+      keyCooldownMap.delete(key);
+      break;
+    } catch (err) {
+      lastError = err;
+      const isQuotaErr =
+        err?.status === 429 ||
+        /quota|rate\s*limit|resource_exhausted/i.test(String(err?.message || ""));
+      if (isQuotaErr) {
+        // Tandai cooldown 60 detik untuk kunci yang kehabisan kuota
+        keyCooldownMap.set(key, Date.now() + 60 * 1000);
+        console.warn("[Vercel API /api/token] Kunci API mencapai batas kuota, mencoba kunci berikutnya...");
+      }
+    }
+  }
+
+  if (!tokenResource) {
+    console.error("[Vercel API /api/token] Semua kunci API gagal:", lastError);
+    return res.status(429).json({
+      error: "Batas kuota layanan suara AI saat ini sedang penuh. Sistem sedang mendinginkan koneksi (reset otomatis dalam 30–60 detik). Anda juga dapat memasukkan API Key cadangan di Pengaturan.",
+    });
+  }
+
   try {
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: { apiVersion: "v1alpha" },
-    });
-
-    const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    const tokenResource = await ai.authTokens.create({
-      config: {
-        uses: 5,
-        expireTime,
-      },
-    });
-
     const isAdmin = authMode === "jocelyn";
     const memoryContext = isAdmin ? await getTursoMemoryBlock() : null;
 
@@ -250,9 +317,13 @@ export default async function handler(req, res) {
       memoryContext,
     });
   } catch (err) {
-    console.error("[Vercel API /api/token] Error:", err);
-    return res.status(500).json({
-      error: `Gagal menginisialisasi sesi percakapan Celyn: ${err?.message || "Unknown error"}`,
+    console.error("[Vercel API /api/token] Error mengambil konteks memori:", err);
+    return res.status(200).json({
+      token: tokenResource.name,
+      model,
+      voice,
+      expireTime,
+      memoryContext: null,
     });
   }
 }

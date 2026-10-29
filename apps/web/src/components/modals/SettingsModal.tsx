@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { EmotionType } from "@celyn/shared";
 import {
   X,
@@ -11,6 +11,10 @@ import {
   PowerOff,
   Lock,
   Smile,
+  Key,
+  Eye,
+  EyeOff,
+  Check,
 } from "lucide-react";
 
 interface SettingsModalProps {
@@ -46,6 +50,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   currentEmotion,
   onSelectEmotion,
 }) => {
+  const [customKey, setCustomKey] = useState<string>(() => {
+    return localStorage.getItem("celyn_custom_gemini_key") || "";
+  });
+  const [showKey, setShowKey] = useState<boolean>(false);
+  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+
+  const handleSaveCustomKey = () => {
+    const trimmed = customKey.trim();
+    if (trimmed) {
+      localStorage.setItem("celyn_custom_gemini_key", trimmed);
+    } else {
+      localStorage.removeItem("celyn_custom_gemini_key");
+    }
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
+  const handleClearCustomKey = () => {
+    localStorage.removeItem("celyn_custom_gemini_key");
+    setCustomKey("");
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -242,6 +270,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               Lihat
             </button>
+          </div>
+
+          {/* Kunci API Gemini Cadangan (Bebas Quota) */}
+          <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-200">Kunci API Cadangan</p>
+                  <p className="text-[10px] text-slate-400">
+                    Bypass batas kuota jika server bersama penuh
+                  </p>
+                </div>
+              </div>
+              {customKey && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Tersimpan
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showKey ? "text" : "password"}
+                  value={customKey}
+                  onChange={(e) => setCustomKey(e.target.value)}
+                  placeholder="AIzaSy... (Kunci API Google AI)"
+                  className="w-full px-3 py-1.5 pr-8 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  title={showKey ? "Sembunyikan" : "Tampilkan"}
+                >
+                  {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveCustomKey}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition-all cursor-pointer flex items-center gap-1 shrink-0"
+              >
+                {saveSuccess ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    <span>Tersimpan</span>
+                  </>
+                ) : (
+                  <span>Simpan</span>
+                )}
+              </button>
+
+              {customKey && (
+                <button
+                  type="button"
+                  onClick={handleClearCustomKey}
+                  className="px-2 py-1.5 rounded-xl text-xs font-medium bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-white/10 hover:border-rose-500/30 transition-all cursor-pointer shrink-0"
+                  title="Hapus Kunci Cadangan"
+                >
+                  Hapus
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Putuskan Sesi Percakapan */}

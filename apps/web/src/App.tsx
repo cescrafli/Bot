@@ -266,7 +266,13 @@ export function App() {
     : live.status;
 
   const effectiveStatusMessage = !live.isConnected
-    ? "Siaga • Siap Berbicara"
+    ? live.quotaCooldownSeconds > 0
+      ? `Pendinginan Kuota AI (${live.quotaCooldownSeconds}s) • Cek Pengaturan`
+      : live.status === "error"
+      ? live.statusMessage || "Koneksi Celyn bermasalah"
+      : live.statusMessage && live.statusMessage !== "Siaga • Siap Berbicara"
+      ? live.statusMessage
+      : "Siaga • Siap Berbicara"
     : live.status === "error"
     ? live.statusMessage || "Koneksi Celyn bermasalah"
     : audioEngine.isPlaying
@@ -526,6 +532,7 @@ export function App() {
             isPushToTalk={isPushToTalk}
             isTextInputOpen={isTextInputOpen}
             volume={audioEngine.volume}
+            quotaCooldownSeconds={live.quotaCooldownSeconds}
             onToggleConnection={handleToggleConnection}
             onToggleMic={handleToggleMic}
             onToggleScreenShare={handleToggleScreenShare}

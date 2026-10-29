@@ -73,11 +73,15 @@ function getReqAuth(req: http.IncomingMessage): { valid: boolean; mode?: AuthMod
   return { valid: false };
 }
 
+// State rotasi multi-key untuk /api/token
+const serverKeyCooldownMap = new Map<string, number>();
+let serverKeyRotationIndex = 0;
+
 const server = http.createServer((req, res) => {
   // CORS Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization, x-gemini-key");
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -326,40 +330,93 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (!config.geminiApiKey) {
+    const rawClientKey = req.headers["x-gemini-key"] || parsedUrl.searchParams.get("apiKey");
+    const customKey = (Array.isArray(rawClientKey) ? rawClientKey[0] : rawClientKey || "").trim();
+
+    let candidateKeys: string[] = [];
+    if (customKey) {
+      candidateKeys = [customKey];
+    } else if (config.geminiApiKeys && config.geminiApiKeys.length > 0) {
+      candidateKeys = config.geminiApiKeys;
+    } else if (config.geminiApiKey) {
+      candidateKeys = [config.geminiApiKey];
+    }
+
+    if (candidateKeys.length === 0) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "GEMINI_API_KEY belum diisi di .env" }));
       return;
     }
 
+    const shouldRotate = parsedUrl.searchParams.get("rotate") === "1" || parsedUrl.searchParams.get("retry") === "1";
+    if (shouldRotate && candidateKeys.length > 1) {
+      serverKeyRotationIndex = (serverKeyRotationIndex + 1) % candidateKeys.length;
+    }
+
+    const now = Date.now();
+    const orderedKeys: string[] = [];
+    for (let i = 0; i < candidateKeys.length; i++) {
+      const idx = (serverKeyRotationIndex + i) % candidateKeys.length;
+      orderedKeys.push(candidateKeys[idx]);
+    }
+
+    const readyKeys = orderedKeys.filter((k) => (serverKeyCooldownMap.get(k) || 0) <= now);
+    const coolingKeys = orderedKeys.filter((k) => (serverKeyCooldownMap.get(k) || 0) > now);
+    const keysToTry = readyKeys.length > 0 ? [...readyKeys, ...coolingKeys] : coolingKeys;
+
     const selectedVoice = resolveVoiceId(parsedUrl.searchParams.get("voice") || config.geminiVoice);
 
     (async () => {
-      try {
-        const ai = new GoogleGenAI({
-          apiKey: config.geminiApiKey,
-          httpOptions: { apiVersion: "v1alpha" },
-        });
-        const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-        const tokenResource = await ai.authTokens.create({
-          config: { uses: 5, expireTime },
-        });
-        const isAdmin = authPass === "admin" || authPass === config.adminPassword;
-        const memoryContext = isAdmin ? await memoryService.getMemoryPromptBlock() : undefined;
-        res.writeHead(200, { "Content-Type": "application/json" });
+      let tokenResource: any = null;
+      let lastErr: any = null;
+      const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+      for (const key of keysToTry) {
+        try {
+          const ai = new GoogleGenAI({
+            apiKey: key,
+            httpOptions: { apiVersion: "v1alpha" },
+          });
+          tokenResource = await ai.authTokens.create({
+            config: { uses: 5, expireTime },
+          });
+          serverKeyCooldownMap.delete(key);
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          const isQuota =
+            err?.status === 429 ||
+            /quota|rate\s*limit|resource_exhausted/i.test(String(err?.message || ""));
+          if (isQuota) {
+            serverKeyCooldownMap.set(key, Date.now() + 60 * 1000);
+            console.warn("[Local Server /api/token] Kunci API mencapai batas kuota, mencoba kunci berikutnya...");
+          }
+        }
+      }
+
+      if (!tokenResource) {
+        res.writeHead(429, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
-            token: tokenResource.name,
-            model: config.geminiModel,
-            voice: selectedVoice,
-            expireTime,
-            memoryContext: memoryContext || null,
+            error:
+              "Batas kuota layanan suara AI saat ini sedang penuh. Harap tunggu sekitar 1 menit untuk reset otomatis kuota atau gunakan API Key cadangan di Pengaturan.",
           })
         );
-      } catch (err: any) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: err?.message || "Gagal membuat token" }));
+        return;
       }
+
+      const isAdmin = authPass === "admin" || authPass === config.adminPassword;
+      const memoryContext = isAdmin ? await memoryService.getMemoryPromptBlock() : undefined;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          token: tokenResource.name,
+          model: config.geminiModel,
+          voice: selectedVoice,
+          expireTime,
+          memoryContext: memoryContext || null,
+        })
+      );
     })();
     return;
   }

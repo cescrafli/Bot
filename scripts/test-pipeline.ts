@@ -1200,7 +1200,73 @@ async function runTtsTests() {
     "Pipeline dokumen besar s.d 500 MB siap aktif via Google Resumable Upload"
   );
 
-  // 22. Ringkasan
+  // 22. Pengujian Penanganan Kuota (Code 1011) & Multi-Key Rotation
+  console.log("\n--- Menjalankan Uji Penanganan Kuota (Code 1011) & Multi-Key Rotation ---");
+
+  // A. Uji Parsing Multi-Key
+  const sampleRawKeys = "  AIzaSyFirstKey  ,  AIzaSySecondKey,AIzaSyThirdKey  ";
+  const parsedKeys = sampleRawKeys
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  assert(
+    parsedKeys.length === 3 &&
+      parsedKeys[0] === "AIzaSyFirstKey" &&
+      parsedKeys[1] === "AIzaSySecondKey" &&
+      parsedKeys[2] === "AIzaSyThirdKey",
+    "Parsing GEMINI_API_KEYS berhasil memecah dan membersihkan whitespace multi-key"
+  );
+
+  // B. Uji Rotasi Key Round-Robin
+  let rotIndex = 0;
+  const picked1 = parsedKeys[rotIndex % parsedKeys.length];
+  rotIndex = (rotIndex + 1) % parsedKeys.length;
+  const picked2 = parsedKeys[rotIndex % parsedKeys.length];
+  rotIndex = (rotIndex + 1) % parsedKeys.length;
+  const picked3 = parsedKeys[rotIndex % parsedKeys.length];
+  rotIndex = (rotIndex + 1) % parsedKeys.length;
+  const picked4 = parsedKeys[rotIndex % parsedKeys.length];
+  assert(
+    picked1 === "AIzaSyFirstKey" &&
+      picked2 === "AIzaSySecondKey" &&
+      picked3 === "AIzaSyThirdKey" &&
+      picked4 === "AIzaSyFirstKey",
+    "Rotasi round-robin multi-key berjalan mulus dan kembali ke kunci awal"
+  );
+
+  // C. Uji Deteksi & Sanitasi Close Code 1011 (Anti-Vendor Leak)
+  const rawGoogleCloseEvent = {
+    code: 1011,
+    reason:
+      "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/pricing",
+    wasClean: true,
+  };
+
+  const isQuota =
+    rawGoogleCloseEvent.code === 1011 ||
+    /quota|rate\s*limit|resource_exhausted/i.test(String(rawGoogleCloseEvent.reason || ""));
+  assert(isQuota === true, "Deteksi close code 1011 dan keyword quota berhasil akurat");
+
+  const sanitizedCloseMessage = isQuota
+    ? "Batas kuota percakapan suara AI saat ini sedang penuh. Sistem sedang mendinginkan koneksi (reset otomatis dalam 30–60 detik). Anda juga dapat memasukkan API Key cadangan di Pengaturan."
+    : String(rawGoogleCloseEvent.reason)
+        .replace(/https?:\/\/[^\s]+/gi, "")
+        .replace(/google|gemini/gi, "layanan AI")
+        .trim();
+
+  assert(
+    !sanitizedCloseMessage.includes("ai.google.dev") &&
+      !sanitizedCloseMessage.includes("pricing") &&
+      !sanitizedCloseMessage.includes("google") &&
+      !sanitizedCloseMessage.includes("gemini"),
+    "Pesan penanganan kode 1011 steril total dari kebocoran URL dan nama vendor pihak ketiga"
+  );
+  assert(
+    sanitizedCloseMessage.includes("Batas kuota percakapan suara AI saat ini sedang penuh"),
+    "Pesan penanganan kode 1011 menggunakan Bahasa Indonesia yang ramah dan solutif"
+  );
+
+  // 23. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

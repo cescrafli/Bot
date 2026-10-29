@@ -78,6 +78,39 @@ export function useGeminiLive({
   const sessionMaxDurationTimerRef = useRef<number | null>(null);
   const disconnectRef = useRef<() => void>(() => {});
 
+  // State dan ref untuk pendinginan kuota (quota cooldown) & rotasi kunci
+  const [quotaCooldownSeconds, setQuotaCooldownSeconds] = useState<number>(0);
+  const quotaTimerRef = useRef<number | null>(null);
+  const shouldRotateKeyRef = useRef<boolean>(false);
+
+  const startQuotaCooldown = useCallback((seconds: number = 30) => {
+    if (quotaTimerRef.current) {
+      clearInterval(quotaTimerRef.current);
+      quotaTimerRef.current = null;
+    }
+    setQuotaCooldownSeconds(seconds);
+    quotaTimerRef.current = window.setInterval(() => {
+      setQuotaCooldownSeconds((prev) => {
+        if (prev <= 1) {
+          if (quotaTimerRef.current) {
+            clearInterval(quotaTimerRef.current);
+            quotaTimerRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (quotaTimerRef.current) {
+        clearInterval(quotaTimerRef.current);
+      }
+    };
+  }, []);
+
   const sessionIdRef = useRef<string>(
     `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
   );
@@ -279,8 +312,14 @@ export function useGeminiLive({
 
       const authPass = getStoredAuthPassword() || "admin";
       const token = getStoredAuthToken();
+      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+
       const queryParams = new URLSearchParams();
       if (voicePreference) queryParams.set("voice", voicePreference);
+      if (shouldRotateKeyRef.current) {
+        queryParams.set("rotate", "1");
+        shouldRotateKeyRef.current = false;
+      }
       const queryStr = queryParams.toString() ? `?${queryParams.toString()}` : "";
 
       const headers: Record<string, string> = {
@@ -289,11 +328,24 @@ export function useGeminiLive({
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
+      if (customKey) {
+        headers["x-gemini-key"] = customKey;
+      }
 
       const res = await fetch(`/api/token${queryStr}`, { headers });
       const data = await res.json();
 
       if (!res.ok || !data.token) {
+        const isQuota =
+          res.status === 429 ||
+          /quota|rate\s*limit|penuh|resource_exhausted/i.test(String(data.error || ""));
+        if (isQuota) {
+          startQuotaCooldown(30);
+          shouldRotateKeyRef.current = true;
+          throw new Error(
+            "Batas kuota layanan suara AI saat ini sedang penuh. Sistem sedang mendinginkan koneksi (reset otomatis dalam 30–60 detik). Anda juga dapat memasukkan API Key cadangan di Pengaturan."
+          );
+        }
         throw new Error(
           data.error ||
             "Gagal mendapatkan token sesi dari server. Pastikan layanan Celyn sudah dikonfigurasi di Environment Variables."
@@ -912,9 +964,21 @@ export function useGeminiLive({
             directSessionRef.current = null;
             setIsConnected(false);
             setStatus("error");
-            setStatusMessage(
-              `Koneksi Celyn bermasalah: ${err?.message || "Terjadi kendala koneksi"}`
-            );
+            const rawMsg = String(err?.message || "Terjadi kendala koneksi");
+            const isQuota = /quota|rate\s*limit|resource_exhausted|429/i.test(rawMsg);
+            if (isQuota) {
+              shouldRotateKeyRef.current = true;
+              startQuotaCooldown(30);
+              setStatusMessage(
+                "Batas kuota layanan suara AI saat ini sedang penuh. Sistem sedang mendinginkan koneksi (reset otomatis dalam 30–60 detik). Anda juga dapat memasukkan API Key cadangan di Pengaturan."
+              );
+            } else {
+              const sanitizedErr = rawMsg
+                .replace(/https?:\/\/[^\s]+/gi, "")
+                .replace(/google|gemini/gi, "layanan AI")
+                .trim();
+              setStatusMessage(`Koneksi Celyn bermasalah: ${sanitizedErr}`);
+            }
           },
           onclose: (event: any) => {
             console.warn("🔌 [Celyn Live Direct] Sesi WebSocket ditutup:", {
@@ -926,11 +990,28 @@ export function useGeminiLive({
             directSessionRef.current = null;
             setIsConnected(false);
             setStatus("idle");
-            setStatusMessage(
-              event?.code === 1000
-                ? "Sesi Celyn telah selesai."
-                : `Koneksi Celyn ditutup (Kode: ${event?.code || "1006"}${event?.reason ? `, ${event.reason}` : ""}). Klik tombol telepon untuk terhubung kembali.`
-            );
+
+            const isQuotaExceeded =
+              event?.code === 1011 ||
+              /quota|rate\s*limit|resource_exhausted/i.test(String(event?.reason || ""));
+
+            if (isQuotaExceeded) {
+              shouldRotateKeyRef.current = true;
+              startQuotaCooldown(30);
+              setStatusMessage(
+                "Batas kuota percakapan suara AI saat ini sedang penuh. Sistem sedang mendinginkan koneksi (reset otomatis dalam 30–60 detik). Anda juga dapat memasukkan API Key cadangan di Pengaturan."
+              );
+            } else if (event?.code === 1000) {
+              setStatusMessage("Sesi Celyn telah selesai.");
+            } else {
+              const sanitizedReason = String(event?.reason || "")
+                .replace(/https?:\/\/[^\s]+/gi, "")
+                .replace(/google|gemini/gi, "layanan AI")
+                .trim();
+              setStatusMessage(
+                `Koneksi Celyn ditutup (Kode: ${event?.code || "1006"}${sanitizedReason ? `, ${sanitizedReason}` : ""}). Klik tombol telepon untuk terhubung kembali.`
+              );
+            }
           },
         },
       });
@@ -1564,5 +1645,7 @@ export function useGeminiLive({
     sendText,
     clearTranscripts,
     onBargeIn,
+    quotaCooldownSeconds,
+    startQuotaCooldown,
   };
 }
