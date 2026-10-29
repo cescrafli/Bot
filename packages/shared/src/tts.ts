@@ -463,6 +463,26 @@ export function inferIndonesianProsody(
  * - Mengubah tawa teks ("wkwk", "hehe") menjadi lafal alami
  * - Menambahkan jeda mikro setelah interjeksi pembuka kalimat
  */
+/**
+ * Membersihkan artefak tag suara & prosodi internal model AI:
+ * - <speaker_audio>, <speaker>, <audio>, <think>
+ * - Token jeda lisan: {pause}, [pause], {sigh}, {laughter}, {breath}, dll.
+ * Menghindari teks kontrol tersebut bocor ke audio TTS maupun tampilan transkrip.
+ */
+export function stripVoiceMetadataTags(raw: string): string {
+  if (!raw) return "";
+  return String(raw)
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think[^>]*>/gi, "")
+    .replace(/<\/?speaker_audio[^>]*>/gi, "")
+    .replace(/<\/?speaker[^>]*>/gi, "")
+    .replace(/<\/?audio[^>]*>/gi, "")
+    .replace(/\{pause\}|\{sigh\}|\{laughter\}|\{giggle\}|\{chuckle\}|\{breath\}|\{whisper\}|\{gasp\}/gi, "")
+    .replace(/\[pause\]|\[sigh\]|\[laughter\]|\[giggle\]|\[chuckle\]|\[breath\]|\[whisper\]/gi, "")
+    .replace(/\{[a-zA-Z_-]+\}/g, "")
+    .replace(/^\s+/, "");
+}
+
 export function normalizeSpokenIndonesian(rawText: string): string {
   if (!rawText) return "";
 
@@ -553,7 +573,8 @@ export function normalizeSpokenIndonesian(rawText: string): string {
  * menormalisasi teks lisan, lalu meng-escape entitas XML untuk SSML Microsoft Edge ReadAloud.
  */
 export function cleanAndEscapeForSsml(rawText: string): string {
-  const normalized = normalizeSpokenIndonesian(rawText);
+  const stripped = stripVoiceMetadataTags(rawText);
+  const normalized = normalizeSpokenIndonesian(stripped);
   const cleaned = String(normalized || "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [teks link](url) -> teks link
     .replace(/```[\s\S]*?```/g, " ")
@@ -640,7 +661,7 @@ export function extractIndonesianSentences(
   forceAll: boolean,
   isFirstChunk?: boolean
 ): { sentences: string[]; remaining: string } {
-  let text = buffer;
+  let text = stripVoiceMetadataTags(buffer);
   const sentences: string[] = [];
 
   const ABBREVIATIONS = [

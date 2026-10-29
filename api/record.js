@@ -834,7 +834,32 @@ export default async function handler(req, res) {
 
     const cleanContent = String(content).trim();
     const wibNow = getWibTimestamp();
-    const db = createClient({ url, authToken });
+    const rawDb = createClient({ url, authToken });
+    const db = {
+      execute: async (statement) => {
+        let lastError;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            return await rawDb.execute(statement);
+          } catch (err) {
+            lastError = err;
+            const isTransient =
+              err?.message?.includes("502") ||
+              err?.message?.includes("503") ||
+              err?.message?.includes("504") ||
+              err?.message?.includes("fetch failed") ||
+              err?.message?.includes("ECONNRESET") ||
+              err?.message?.includes("ETIMEDOUT") ||
+              err?.code === "SERVER_ERROR";
+            if (!isTransient || attempt === 3) {
+              throw err;
+            }
+            await new Promise((r) => setTimeout(r, 150 * attempt));
+          }
+        }
+        throw lastError;
+      },
+    };
 
     // 1. Debounce check untuk chat_logs agar tidak ada duplikasi data akibat double trigger
     const lastIdentical = await db.execute({
@@ -887,7 +912,15 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true, created_at: wibNow, duplicate_skipped: isDuplicate, auto_saved: autoSavedFacts });
   } catch (err) {
-    console.error("[Vercel API /api/record] Error:", err);
+    console.warn("[Vercel API /api/record] Turso warning/error:", err?.message || err);
+    const isTransient =
+      err?.message?.includes("502") ||
+      err?.message?.includes("503") ||
+      err?.message?.includes("504") ||
+      err?.message?.includes("fetch failed");
+    if (isTransient) {
+      return res.status(200).json({ ok: false, warning: "Database transient delay", error: err.message });
+    }
     return res.status(500).json({ error: err.message });
   }
 }

@@ -23,6 +23,7 @@ import {
   buildSafeDocumentGenerationContext,
   splitTextIntoChunks,
   friendlyDocumentError,
+  stripVoiceMetadataTags,
 } from "@celyn/shared";
 import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
 
@@ -195,7 +196,7 @@ export function useGeminiLive({
       .then(async (res) => {
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          console.error(`❌ [/api/record HTTP ${res.status}]:`, errData);
+          console.warn(`ℹ️ [/api/record HTTP ${res.status}]:`, errData);
         }
       })
       .catch((e) => {
@@ -255,6 +256,10 @@ export function useGeminiLive({
           hour: "2-digit",
           minute: "2-digit",
         });
+        const cleanMsgText = stripVoiceMetadataTags(msg.text);
+        if (!cleanMsgText && msg.speaker === "celyn") {
+          return;
+        }
         setTranscripts((prev) => {
           const isSameOngoingTurn =
             activeTurnSpeakerRef.current === msg.speaker && prev.length > 0;
@@ -265,21 +270,21 @@ export function useGeminiLive({
             // Smart word boundary spacing untuk Bahasa Indonesia (cegah "Halokamu")
             const needsSpace =
               !last.text.endsWith(" ") &&
-              !msg.text.startsWith(" ") &&
-              !/^[.,!?;:)%]/.test(msg.text) &&
+              !cleanMsgText.startsWith(" ") &&
+              !/^[.,!?;:)%]/.test(cleanMsgText) &&
               /[a-zA-Z0-9]$/.test(last.text);
             const sep = needsSpace ? " " : "";
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...last,
-              text: `${last.text}${sep}${msg.text}`,
+              text: `${last.text}${sep}${cleanMsgText}`,
             };
             return updated;
           }
 
           return [
             ...prev.slice(-99),
-            { speaker: msg.speaker, text: msg.text.replace(/^\s+/, ""), time },
+            { speaker: msg.speaker, text: cleanMsgText.replace(/^\s+/, ""), time },
           ];
         });
       } else if (msg.type === "tool_call") {
@@ -723,7 +728,8 @@ export function useGeminiLive({
               }
 
               if (!bargeInMutedRef.current) {
-                const celynText = msg.serverContent.outputTranscription.text;
+                const rawCelynText = msg.serverContent.outputTranscription.text;
+                const celynText = stripVoiceMetadataTags(rawCelynText);
                 if (celynText) {
                   directTurnCelynTextRef.current += celynText;
                   handleServerMessage({
@@ -778,14 +784,16 @@ export function useGeminiLive({
                 }
                 if (part.text && !msg.serverContent?.outputTranscription?.text) {
                   if (bargeInMutedRef.current) continue;
-                  directTurnCelynTextRef.current += part.text;
+                  const cleanPart = stripVoiceMetadataTags(part.text);
+                  if (!cleanPart) continue;
+                  directTurnCelynTextRef.current += cleanPart;
                   handleServerMessage({
                     type: "transcript",
                     speaker: "celyn",
-                    text: part.text,
+                    text: cleanPart,
                   });
                   if (useEdgeTts) {
-                    directTtsBufferRef.current += part.text;
+                    directTtsBufferRef.current += cleanPart;
                     flushDirectSentences(false);
                   }
                 }

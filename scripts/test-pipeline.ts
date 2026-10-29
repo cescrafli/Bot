@@ -44,6 +44,7 @@ import {
   isRateLimitError,
   parseRetryDelayMs,
   friendlyDocumentError,
+  stripVoiceMetadataTags,
   buildDocumentChunkPrompt,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
@@ -1484,6 +1485,40 @@ async function runTtsTests() {
     if (prevKeys !== undefined) process.env.GEMINI_API_KEYS = prevKeys;
     if (prevKey !== undefined) process.env.GEMINI_API_KEY = prevKey;
   }
+
+  // 23. Uji Pembersihan Tag Audio & Metadata Suara (<speaker_audio>, {pause}, dll)
+  console.log("-> Menguji stripVoiceMetadataTags (Pembersihan Tag Audio & Metadata Suara)...");
+  const dirtySpeaker1 = "<speaker_audio>{pause} Eh, siang! Semoga harimu lancar dan selalu menyenangkan ya.";
+  const cleanSpeaker1 = stripVoiceMetadataTags(dirtySpeaker1);
+  assert(
+    !cleanSpeaker1.includes("<speaker_audio>") &&
+    !cleanSpeaker1.includes("{pause}") &&
+    cleanSpeaker1.includes("Eh, siang!"),
+    "Tag <speaker_audio> dan {pause} terhapus tuntas dari teks pembicaraan Celyn"
+  );
+
+  const dirtySpeaker2 = "<speaker_audio>Dokumen sudah siap diunduh!</speaker_audio>";
+  const cleanSpeaker2 = stripVoiceMetadataTags(dirtySpeaker2);
+  assert(
+    cleanSpeaker2 === "Dokumen sudah siap diunduh!",
+    "Tag penutup </speaker_audio> dibersihkan tanpa merusak isi pesan"
+  );
+
+  const dirtyPauses = "Semangat ya! {pause} Kamu pasti bisa! [sigh] Tenang aja {breath} ya.";
+  const cleanPauses = stripVoiceMetadataTags(dirtyPauses);
+  assert(
+    !cleanPauses.includes("{pause}") &&
+    !cleanPauses.includes("[sigh]") &&
+    !cleanPauses.includes("{breath}") &&
+    cleanPauses.includes("Semangat ya!"),
+    "Semua token jeda & aksi prosodi {pause}, [sigh], {breath} dibersihkan sempurna"
+  );
+
+  const docReadMod = await import("../api/documents-read.js");
+  assert(
+    docReadMod.config?.api?.bodyParser === false,
+    "api/documents-read.js mengekspor config bodyParser: false untuk streaming multipart Busboy Vercel"
+  );
 
   // 24. Ringkasan
   console.log("\n=======================================================");
