@@ -323,10 +323,79 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
       return JSON.parse(aiRes.text || "{}");
     } catch (err) {
       lastErr = err;
-      console.warn(`[documents-process] Gagal dengan API key (${key.slice(0, 8)}...):`, err?.message || err);
+      console.warn(`[documents-process] Gagal dengan API key (kunci #${candidateKeys.indexOf(key) + 1}):`, err?.message || err);
     }
   }
   throw lastErr || new Error("Semua API key Gemini gagal memproses dokumen.");
+}
+
+function isRateLimitError(err) {
+  const msg = String(err?.message || err || "");
+  return err?.status === 429 || err?.code === 429 || /429|quota|resource_exhausted|rate.?limit/i.test(msg);
+}
+
+function parseRetryDelayMs(err) {
+  const msg = String(err?.message || err || "");
+  const m1 = msg.match(/retry in ([\d.]+)\s*s/i);
+  const m2 = msg.match(/retryDelay"?\s*:\s*"?(\d+)s/i);
+  const sec = m1 ? parseFloat(m1[1]) : m2 ? parseFloat(m2[1]) : NaN;
+  if (!isFinite(sec)) return 30000;
+  return Math.min(Math.max(Math.ceil(sec * 1000) + 1000, 2000), 45000);
+}
+
+function friendlyError(err) {
+  if (isRateLimitError(err)) {
+    return "Celyn sedang sibuk karena dokumennya cukup besar. Coba lagi sebentar lagi ya.";
+  }
+  const msg = String(err?.message || err || "");
+  if (/timeout|timed out|504|aborted/i.test(msg)) {
+    return "Pemrosesan dokumen memakan waktu terlalu lama. Coba lagi ya.";
+  }
+  if (/401|403|api.?key|permission/i.test(msg)) {
+    return "Layanan Celyn sedang bermasalah dengan konfigurasi. Hubungi administrator.";
+  }
+  return "Celyn belum berhasil memproses dokumen ini. Coba lagi sebentar lagi ya.";
+}
+
+function buildChunkPrompt(p) {
+  const instr = p.instruction || `Lakukan ${p.operation} pada dokumen ini.`;
+  const lang = p.targetLanguage ? `Bahasa Tujuan: "${p.targetLanguage}"\n` : "";
+  const schema = `KEMBALIKAN HANYA JSON VALID:
+{
+  "sections": [
+    {
+      "heading": "Nama Bagian",
+      "paragraphs": ["Isi paragraf tanpa markdown mentah (**, ##, _)."],
+      "bulletPoints": [],
+      "table": { "headers": [], "rows": [] }
+    }
+  ]
+}`;
+  if (p.reduce) {
+    return `Anda adalah editor dokumen profesional. Berikut ringkasan per bagian dari dokumen "${p.fileName}".
+${lang}Instruksi Pengguna: "${instr}"
+
+Susun SATU bagian "Ringkasan Keseluruhan" yang padat, akurat, dan mengalir dari ringkasan di bawah.
+
+RINGKASAN PER BAGIAN:
+"""
+${p.content}
+"""
+
+${schema}`;
+  }
+  return `Anda adalah editor dokumen profesional. Ini bagian ${p.chunkIndex + 1} dari ${p.totalChunks} dokumen "${p.fileName}".
+Lakukan proses (${String(p.operation).toUpperCase()}) HANYA pada bagian ini.
+${lang}Instruksi Pengguna: "${instr}"
+
+Aturan: pertahankan struktur heading, paragraf, poin, dan tabel. Untuk terjemahan/penulisan ulang, jangan menghilangkan isi. Untuk ringkasan, tulis ringkasan padat bagian ini dengan data/angka penting tetap akurat.
+
+ISI BAGIAN:
+"""
+${p.content}
+"""
+
+${schema}`;
 }
 
 export default async function handler(req, res) {
@@ -372,8 +441,42 @@ export default async function handler(req, res) {
 
   try {
     const { fileName, operation = "edit", originalContent, instruction, targetLanguage } = req.body || {};
-    if (!originalContent) {
+    if (!originalContent && req.body?.stage !== "render") {
       return res.status(400).json({ error: "Parameter 'originalContent' wajib disertakan." });
+    }
+
+    const stage = req.body?.stage ? String(req.body.stage) : "";
+    if (stage === "render") {
+      const sections = Array.isArray(req.body.sections) ? req.body.sections : [];
+      const rawName = String(fileName || "dokumen.pdf");
+      const base = rawName.replace(/\.[^/.]+$/, "").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 40) || "Dokumen";
+      const opLbl = operation === "translate" ? `terjemahan_${targetLanguage || "id"}` : operation;
+      const payload = { title: base, subtitle: "Diperbarui oleh Celyn AI", sections };
+      const isWord = /\.(docx|doc)$/i.test(rawName);
+      const buf = isWord ? await createWordBuffer(payload) : await createPdfBuffer(payload);
+      res.setHeader(
+        "Content-Type",
+        isWord ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf"
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(base + "_" + opLbl)}.${isWord ? "docx" : "pdf"}"`);
+      res.setHeader("Content-Length", buf.length);
+      return res.status(200).send(buf);
+    }
+    if (stage === "chunk") {
+      const chunkModel = process.env.DOC_GENERATE_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
+      const chunkPrompt = buildChunkPrompt({
+        fileName,
+        operation,
+        instruction,
+        targetLanguage,
+        content: String(originalContent),
+        chunkIndex: Number(req.body.chunkIndex || 0),
+        totalChunks: Number(req.body.totalChunks || 1),
+        reduce: !!req.body.reduce,
+      });
+      const parsedChunk = await callGeminiJsonWithFailover(candidateKeys, chunkModel, chunkPrompt);
+      const sectionsOut = Array.isArray(parsedChunk?.sections) ? parsedChunk.sections : [];
+      return res.status(200).json({ ok: true, sections: sectionsOut });
     }
 
     let safeOriginal = String(originalContent);
@@ -478,6 +581,9 @@ KEMBALIKAN HANYA JSON:
     }
   } catch (err) {
     console.error("[Vercel /api/documents-process] Error:", err);
-    return res.status(500).json({ error: `Gagal memproses dokumen in-place: ${err?.message || "Unknown error"}` });
+    if (isRateLimitError(err)) {
+      return res.status(429).json({ error: friendlyError(err), retryAfterMs: parseRetryDelayMs(err) });
+    }
+    return res.status(500).json({ error: friendlyError(err) });
   }
 }

@@ -40,6 +40,11 @@ import {
   RESEARCH_STATUS_TEXT,
   buildSafeLiveDocumentContext,
   buildSafeDocumentGenerationContext,
+  splitTextIntoChunks,
+  isRateLimitError,
+  parseRetryDelayMs,
+  friendlyDocumentError,
+  buildDocumentChunkPrompt,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1373,6 +1378,47 @@ async function runTtsTests() {
       safeMassiveGenContext.includes("350 Halaman") &&
       safeMassiveGenContext.includes("diringkas secara cerdas untuk batas kapasitas pemrosesan"),
     "Konteks dokumen masif memuat metadata judul, halaman, dan catatan perangkuman"
+  );
+
+  // D. Uji pemrosesan dokumen besar bertahap (chunked) & penanganan kuota 429
+  console.log("  -> Menguji pemrosesan bertahap (chunked map-reduce) & penanganan kuota 429...");
+  const chunkSrc =
+    ("# Bab\n" + "Kalimat isi dokumen tarif pelayanan kesehatan. ".repeat(40) + "\n\n").repeat(300);
+  const chunkList = splitTextIntoChunks(chunkSrc, 100000);
+  assert(
+    chunkList.length > 1 && chunkList.join("") === chunkSrc,
+    `Pemecahan dokumen ${chunkSrc.length} karakter menjadi ${chunkList.length} bagian tanpa kehilangan satu karakter pun`
+  );
+  assert(
+    chunkList.every((c) => c.length <= 100000),
+    "Setiap bagian dokumen <= 100.000 karakter (aman di bawah batas 250 rb token/menit tier gratis)"
+  );
+  assert(
+    splitTextIntoChunks("pendek").length === 1 && splitTextIntoChunks("").length === 0,
+    "Dokumen kecil tidak dipecah dan teks kosong menghasilkan nol bagian"
+  );
+
+  const rawQuotaErr = new Error(
+    '{"error":{"code":429,"message":"You exceeded your current quota. Please retry in 29.769964073s.","status":"RESOURCE_EXHAUSTED"}}'
+  );
+  assert(isRateLimitError(rawQuotaErr), "Error kuota 429 / RESOURCE_EXHAUSTED terdeteksi");
+  const retryMs = parseRetryDelayMs(rawQuotaErr);
+  assert(retryMs >= 30000 && retryMs <= 45000, `Jeda tunggu dibaca dari pesan kuota (${retryMs} ms)`);
+  const friendlyQuota = friendlyDocumentError(rawQuotaErr);
+  assert(
+    !/gemini|google|ai\.dev|http|quota|\{/i.test(friendlyQuota) && /Celyn/.test(friendlyQuota),
+    "Pesan error kuota steril dari nama vendor, URL, dan JSON mentah"
+  );
+  const chunkPrompt = buildDocumentChunkPrompt({
+    fileName: "PMK.pdf",
+    operation: "summarize",
+    content: "isi",
+    chunkIndex: 1,
+    totalChunks: 4,
+  });
+  assert(
+    chunkPrompt.includes("bagian 2 dari 4") && chunkPrompt.includes('"sections"'),
+    "Prompt per bagian memuat nomor bagian dan skema JSON sections"
   );
 
   // 24. Ringkasan

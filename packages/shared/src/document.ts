@@ -194,3 +194,126 @@ export function buildSafeDocumentGenerationContext(
     })
     .join("\n\n---\n\n");
 }
+
+// =========================================================================
+// PEMROSESAN DOKUMEN BESAR BERTAHAP (CHUNKED MAP-REDUCE) & PENANGANAN KUOTA
+// =========================================================================
+
+/** Ukuran aman satu potongan (~25 rb token) agar jauh di bawah batas token/menit tier gratis. */
+export const DOC_CHUNK_MAX_CHARS = 100000;
+
+/**
+ * Memecah teks dokumen menjadi potongan <= maxChars tanpa kehilangan satu karakter pun
+ * (gabungan semua potongan identik dengan teks asli). Pemotongan diutamakan pada
+ * batas heading Markdown, lalu baris kosong, lalu akhir baris.
+ */
+export function splitTextIntoChunks(text: string, maxChars: number = DOC_CHUNK_MAX_CHARS): string[] {
+  if (!text) return [];
+  if (text.length <= maxChars) return [text];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + maxChars, text.length);
+    if (end < text.length) {
+      const window = text.slice(start, end);
+      const minCut = Math.floor(maxChars * 0.5);
+      let cut = window.lastIndexOf("\n#");
+      if (cut < minCut) cut = window.lastIndexOf("\n\n");
+      if (cut < minCut) cut = window.lastIndexOf("\n");
+      if (cut >= minCut) end = start + cut + 1;
+    }
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
+}
+
+/** Mengenali error batas kuota / laju (HTTP 429, RESOURCE_EXHAUSTED) dari penyedia model. */
+export function isRateLimitError(err: unknown): boolean {
+  const e = err as any;
+  const msg = String(e?.message || e || "");
+  return e?.status === 429 || e?.code === 429 || /429|quota|resource_exhausted|rate.?limit/i.test(msg);
+}
+
+/** Membaca jeda tunggu (ms) yang disarankan dari pesan error kuota. Default 30 detik. */
+export function parseRetryDelayMs(err: unknown, fallbackMs: number = 30000): number {
+  const msg = String((err as any)?.message || err || "");
+  const m1 = msg.match(/retry in ([\d.]+)\s*s/i);
+  const m2 = msg.match(/retryDelay"?\s*:\s*"?(\d+)s/i);
+  const sec = m1 ? parseFloat(m1[1]) : m2 ? parseFloat(m2[1]) : NaN;
+  if (!isFinite(sec)) return fallbackMs;
+  return Math.min(Math.max(Math.ceil(sec * 1000) + 1000, 2000), 45000);
+}
+
+/**
+ * Mengubah error mentah (JSON penyedia, URL, nama model) menjadi pesan Bahasa Indonesia
+ * yang ramah dan steril dari nama vendor.
+ */
+export function friendlyDocumentError(err: unknown): string {
+  if (isRateLimitError(err)) {
+    return "Celyn sedang sibuk karena dokumennya cukup besar. Coba lagi sebentar lagi ya.";
+  }
+  const msg = String((err as any)?.message || err || "");
+  if (/413|too large|payload/i.test(msg)) {
+    return "Dokumennya terlalu besar untuk dikirim sekaligus. Celyn akan memprosesnya per bagian.";
+  }
+  if (/timeout|timed out|504|aborted/i.test(msg)) {
+    return "Pemrosesan dokumen memakan waktu terlalu lama. Coba lagi ya.";
+  }
+  if (/401|403|api.?key|permission/i.test(msg)) {
+    return "Layanan Celyn sedang bermasalah dengan konfigurasi. Hubungi administrator.";
+  }
+  return "Celyn belum berhasil memproses dokumen ini. Coba lagi sebentar lagi ya.";
+}
+
+/** Prompt untuk satu potongan dokumen (tahap map) atau penggabungan ringkasan (tahap reduce). */
+export function buildDocumentChunkPrompt(p: {
+  fileName: string;
+  operation: string;
+  instruction?: string;
+  targetLanguage?: string;
+  content: string;
+  chunkIndex: number;
+  totalChunks: number;
+  reduce?: boolean;
+}): string {
+  const instr = p.instruction || `Lakukan ${p.operation} pada dokumen ini.`;
+  const lang = p.targetLanguage ? `Bahasa Tujuan: "${p.targetLanguage}"\n` : "";
+  const schema = `KEMBALIKAN HANYA JSON VALID:
+{
+  "sections": [
+    {
+      "heading": "Nama Bagian",
+      "paragraphs": ["Isi paragraf tanpa markdown mentah (**, ##, _)."],
+      "bulletPoints": [],
+      "table": { "headers": [], "rows": [] }
+    }
+  ]
+}`;
+  if (p.reduce) {
+    return `Anda adalah editor dokumen profesional. Berikut ringkasan per bagian dari dokumen "${p.fileName}".
+${lang}Instruksi Pengguna: "${instr}"
+
+Susun SATU bagian "Ringkasan Keseluruhan" yang padat, akurat, dan mengalir dari ringkasan di bawah.
+
+RINGKASAN PER BAGIAN:
+"""
+${p.content}
+"""
+
+${schema}`;
+  }
+  return `Anda adalah editor dokumen profesional. Ini bagian ${p.chunkIndex + 1} dari ${p.totalChunks} dokumen "${p.fileName}".
+Lakukan proses (${p.operation.toUpperCase()}) HANYA pada bagian ini.
+${lang}Instruksi Pengguna: "${instr}"
+
+Aturan: pertahankan struktur heading, paragraf, poin, dan tabel. Untuk terjemahan/penulisan ulang, jangan menghilangkan isi. Untuk ringkasan, tulis ringkasan padat bagian ini dengan data/angka penting tetap akurat.
+
+ISI BAGIAN:
+"""
+${p.content}
+"""
+
+${schema}`;
+}

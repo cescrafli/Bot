@@ -1,6 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import {
   DocumentKind,
+  DocumentSection,
+  buildDocumentChunkPrompt,
+  isRateLimitError,
+  parseRetryDelayMs,
   ExcelPayload,
   ExcelPayloadSchema,
   ReportPayload,
@@ -44,34 +48,91 @@ export class DocumentService {
         : [config.geminiApiKey];
 
     let lastErr: any;
-    for (const key of keys) {
-      if (!key) continue;
-      const ai = new GoogleGenAI({ apiKey: key });
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const res = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: "application/json" },
-          });
-          if (res?.text) return res;
-        } catch (err: any) {
-          lastErr = err;
-          const isRate =
-            err?.status === 429 ||
-            err?.status === 503 ||
-            /quota|resource_exhausted/i.test(String(err?.message || ""));
-          if (isRate) {
-            console.warn("[DocumentService] Kunci mencapai kuota, mencoba kunci berikutnya di pool...");
-            break; // Lanjut ke kunci berikutnya di pool
-          }
-          if (attempt === 0) {
-            await new Promise((r) => setTimeout(r, 1000));
+    // Ronde 0: coba semua kunci. Jika semua kena batas kuota, tunggu sesuai retryDelay lalu ulangi (maks 3 ronde).
+    for (let round = 0; round < 3; round++) {
+      let allRateLimited = true;
+      for (const key of keys) {
+        if (!key) continue;
+        const ai = new GoogleGenAI({ apiKey: key });
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await ai.models.generateContent({
+              model,
+              contents: prompt,
+              config: { responseMimeType: "application/json" },
+            });
+            if (res?.text) return res;
+            allRateLimited = false;
+          } catch (err: any) {
+            lastErr = err;
+            if (isRateLimitError(err) || err?.status === 503) {
+              console.warn("[DocumentService] Kunci mencapai kuota, mencoba kunci berikutnya di pool...");
+              break; // Lanjut ke kunci berikutnya di pool
+            }
+            allRateLimited = false;
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 1000));
+            }
           }
         }
       }
+      if (!allRateLimited || round === 2) break;
+      await new Promise((r) => setTimeout(r, parseRetryDelayMs(lastErr)));
     }
-    throw lastErr || new Error("Gagal memanggil model Gemini: seluruh kunci mencapai batas kuota");
+    throw lastErr || new Error("Seluruh kunci layanan mencapai batas kuota");
+  }
+
+  /**
+   * Tahap map/reduce: memproses SATU potongan teks dokumen dan mengembalikan section terstruktur.
+   * Dipanggil berulang oleh klien (di latar belakang) agar tiap request kecil dan aman dari batas token/menit.
+   */
+  async processChunk(params: {
+    fileName: string;
+    operation: string;
+    instruction?: string;
+    targetLanguage?: string;
+    content: string;
+    chunkIndex: number;
+    totalChunks: number;
+    reduce?: boolean;
+  }): Promise<DocumentSection[]> {
+    const model = config.docGenerateModel || "gemini-3-flash-preview";
+    const prompt = buildDocumentChunkPrompt(params);
+    const res = await this.callGeminiJson(model, prompt);
+    const parsed = JSON.parse(res.text || "{}");
+    const sections = Array.isArray(parsed?.sections) ? parsed.sections : [];
+    return ReportPayloadSchema.parse({ title: "x", sections: sections.length ? sections : [{ heading: "", paragraphs: [] }] })
+      .sections;
+  }
+
+  /** Merender section hasil gabungan menjadi file PDF/Word sesuai format dokumen asal. */
+  async renderSections(params: {
+    fileName: string;
+    operation: string;
+    targetLanguage?: string;
+    sections: DocumentSection[];
+  }): Promise<GeneratedDocumentResult> {
+    const { fileName, operation, targetLanguage, sections } = params;
+    const baseName = fileName.replace(/\.[^/.]+$/, "").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 40) || "Dokumen";
+    const opLabel = operation === "translate" ? `terjemahan_${targetLanguage || "id"}` : operation;
+    const resultBaseName = `${baseName}_${opLabel}`;
+    const payload: ReportPayload = ReportPayloadSchema.parse({
+      title: baseName,
+      subtitle: "Diperbarui oleh Celyn AI",
+      sections,
+    });
+    if (fileName.toLowerCase().endsWith(".docx") || fileName.toLowerCase().endsWith(".doc")) {
+      return {
+        buffer: await documentWriterService.createWord(payload),
+        fileName: `${resultBaseName}.docx`,
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      };
+    }
+    return {
+      buffer: await documentWriterService.createPdf(payload),
+      fileName: `${resultBaseName}.pdf`,
+      mimeType: "application/pdf",
+    };
   }
 
   /**

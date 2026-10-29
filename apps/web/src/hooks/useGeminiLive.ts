@@ -21,6 +21,8 @@ import {
   RESEARCH_STATUS_TEXT,
   buildSafeLiveDocumentContext,
   buildSafeDocumentGenerationContext,
+  splitTextIntoChunks,
+  friendlyDocumentError,
 } from "@celyn/shared";
 import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
 
@@ -946,7 +948,7 @@ export function useGeminiLive({
                     status: "started",
                     docId,
                     operation,
-                    instruction: `Operasi '${operation}' pada dokumen '${docId}' telah dimulai dan hasilnya akan langsung diunduh ke komputer pengguna. Berikan penjelasan dan tanggapan lisanmu dengan santai, ceria, dan hangat dalam Bahasa Indonesia bahwa kamu sedang mengerjakannya!`,
+                    instruction: `Operasi '${operation}' pada dokumen '${docId}' sedang diproses di latar belakang (dokumen besar dikerjakan per bagian, bisa memakan beberapa menit). Sampaikan secara lisan dengan santai, ceria, dan hangat dalam Bahasa Indonesia bahwa kamu sudah mulai mengerjakannya, pengguna boleh lanjut ngobrol, dan kamu akan memberi kabar begitu hasilnya selesai dan terunduh. JANGAN bilang sudah selesai sekarang.`,
                   };
                 } else if (fc.name === "research") {
                   const query = String((fc.args as any)?.query || "").trim();
@@ -1507,6 +1509,8 @@ export function useGeminiLive({
     generateDocumentRef.current = generateDocument;
   }, [generateDocument]);
 
+  const processingDocRef = useRef(false);
+
   const processDocument = useCallback(
     async (
       docId: string,
@@ -1514,8 +1518,23 @@ export function useGeminiLive({
       instruction?: string,
       targetLanguage?: string
     ) => {
+      if (processingDocRef.current) {
+        console.warn("[processDocument] Masih ada proses dokumen berjalan, permintaan baru diabaikan.");
+        return;
+      }
+      processingDocRef.current = true;
       setIsGeneratingDoc(true);
       setDocStatusMessage(`Celyn sedang memproses (${operation}) dokumen...`);
+
+      // Memberi tahu Celyn (tanpa menambah transkrip pengguna) agar ia merespons lisan saat proses selesai/gagal
+      const notifyCelyn = (text: string) => {
+        try {
+          sendMessageRef.current({ type: "text", text });
+        } catch (e) {
+          console.warn("[processDocument] Gagal memberi tahu Celyn:", e);
+        }
+      };
+
       try {
         const password = getStoredAuthPassword() || "admin";
         const token = getStoredAuthToken();
@@ -1545,34 +1564,114 @@ export function useGeminiLive({
           throw new Error(`Dokumen '${docId}' tidak ditemukan di memori Celyn.`);
         }
 
-        const res = await fetch("/api/documents/process", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
+        const lowerName = targetDoc.fileName.toLowerCase();
+        const isSheet = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
+        const baseName = targetDoc.fileName.replace(/\.[^/.]+$/, "");
+        const ext = isSheet ? "xlsx" : lowerName.endsWith(".docx") ? "docx" : "pdf";
+        const chunks = isSheet ? [targetDoc.markdownContent] : splitTextIntoChunks(targetDoc.markdownContent);
+        const effectiveInstruction = instruction || `Lakukan ${operation} pada dokumen ini.`;
+
+        // Fungsi POST dengan tunggu otomatis saat batas kuota (HTTP 429), maksimal 4 percobaan
+        const postWithRetry = async (payload: Record<string, unknown>): Promise<Response> => {
+          let lastStatus = 0;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            const r = await fetch("/api/documents/process", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ ...payload, password }),
+            });
+            if (r.status !== 429) return r;
+            lastStatus = r.status;
+            const info = await r.json().catch(() => ({}));
+            const waitMs = Math.min(Math.max(Number(info?.retryAfterMs) || 30000, 3000), 45000);
+            setDocStatusMessage("Celyn menunggu giliran kapasitas sebentar, lalu lanjut memproses...");
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+          }
+          throw new Error(`RATE_LIMIT_${lastStatus}`);
+        };
+
+        let blob: Blob;
+
+        if (chunks.length <= 1) {
+          // Dokumen kecil: satu kali proses langsung
+          const res = await postWithRetry({
             fileName: targetDoc.fileName,
             operation,
             originalContent: targetDoc.markdownContent,
-            instruction: instruction || `Lakukan ${operation} pada dokumen ini.`,
+            instruction: effectiveInstruction,
             targetLanguage,
-            password,
-          }),
-        });
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData?.error || friendlyDocumentError(new Error(`HTTP ${res.status}`)));
+          }
+          blob = await res.blob();
+        } else {
+          // Dokumen besar: proses bertahap per bagian di latar belakang, lalu gabungkan
+          const collected: any[] = [];
+          for (let i = 0; i < chunks.length; i++) {
+            setDocStatusMessage(`Celyn memproses bagian ${i + 1} dari ${chunks.length}...`);
+            const res = await postWithRetry({
+              stage: "chunk",
+              fileName: targetDoc.fileName,
+              operation,
+              originalContent: chunks[i],
+              instruction: effectiveInstruction,
+              targetLanguage,
+              chunkIndex: i,
+              totalChunks: chunks.length,
+            });
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData?.error || friendlyDocumentError(new Error(`HTTP ${res.status}`)));
+            }
+            const data = await res.json();
+            collected.push(...(Array.isArray(data?.sections) ? data.sections : []));
+          }
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData?.error || `Gagal memproses dokumen (HTTP ${res.status})`);
+          let finalSections = collected;
+          if (operation === "summarize") {
+            setDocStatusMessage("Celyn menyusun ringkasan keseluruhan...");
+            const digest = collected
+              .map((sec: any) => `${sec.heading || ""}\n${(sec.paragraphs || []).join("\n")}`)
+              .join("\n\n")
+              .slice(0, 100000);
+            const resReduce = await postWithRetry({
+              stage: "chunk",
+              reduce: true,
+              fileName: targetDoc.fileName,
+              operation,
+              originalContent: digest,
+              instruction: effectiveInstruction,
+              targetLanguage,
+              chunkIndex: 0,
+              totalChunks: 1,
+            });
+            if (resReduce.ok) {
+              const dataReduce = await resReduce.json();
+              const overall = Array.isArray(dataReduce?.sections) ? dataReduce.sections : [];
+              finalSections = [...overall, ...collected];
+            }
+          }
+
+          setDocStatusMessage("Celyn menyusun file hasil akhir...");
+          const resRender = await postWithRetry({
+            stage: "render",
+            fileName: targetDoc.fileName,
+            operation,
+            targetLanguage,
+            sections: finalSections,
+          });
+          if (!resRender.ok) {
+            const errData = await resRender.json().catch(() => ({}));
+            throw new Error(errData?.error || friendlyDocumentError(new Error(`HTTP ${resRender.status}`)));
+          }
+          blob = await resRender.blob();
         }
 
-        const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        const baseName = targetDoc.fileName.replace(/\.[^/.]+$/, "");
-        const ext = targetDoc.fileName.toLowerCase().endsWith(".xlsx")
-          ? "xlsx"
-          : targetDoc.fileName.toLowerCase().endsWith(".docx")
-          ? "docx"
-          : "pdf";
         a.download = `${baseName}_${operation}.${ext}`;
         document.body.appendChild(a);
         a.click();
@@ -1583,12 +1682,24 @@ export function useGeminiLive({
           `Dokumen '${targetDoc.fileName}' berhasil diproses (${operation}) & diunduh!`
         );
         setTimeout(() => setDocStatusMessage(null), 5000);
+        notifyCelyn(
+          `[INFO SISTEM] Proses '${operation}' untuk dokumen '${targetDoc.fileName}' sudah SELESAI dan file hasilnya sudah terunduh otomatis. Sampaikan secara lisan dengan ceria dan singkat dalam Bahasa Indonesia bahwa dokumennya sudah selesai dan bisa dibuka di folder unduhan.`
+        );
       } catch (err: any) {
         console.error("Gagal memproses dokumen:", err);
-        setDocStatusMessage(`Gagal memproses dokumen: ${err?.message || "Error"}`);
-        setTimeout(() => setDocStatusMessage(null), 5000);
-        throw err;
+        const rawMsg = String(err?.message || "");
+        const friendly = /^RATE_LIMIT_/.test(rawMsg)
+          ? friendlyDocumentError({ status: 429 })
+          : /Dokumen '.*' tidak ditemukan/.test(rawMsg) || /^Celyn /.test(rawMsg)
+          ? rawMsg
+          : friendlyDocumentError(err);
+        setDocStatusMessage(friendly);
+        setTimeout(() => setDocStatusMessage(null), 8000);
+        notifyCelyn(
+          `[INFO SISTEM] Proses dokumen gagal: ${friendly} Sampaikan secara lisan dengan ramah dan singkat dalam Bahasa Indonesia, tawarkan untuk mencoba lagi nanti. Jangan sebut nama penyedia layanan atau detail teknis.`
+        );
       } finally {
+        processingDocRef.current = false;
         setIsGeneratingDoc(false);
       }
     },

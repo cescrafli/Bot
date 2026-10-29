@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
 import { memoryService } from "./services/MemoryService.js";
-import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken, resolveVoiceId } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken, resolveVoiceId, isRateLimitError, parseRetryDelayMs, friendlyDocumentError } from "@celyn/shared";
 import { parseMultipartUpload } from "./middlewares/upload.js";
 import { documentReaderService } from "./services/DocumentReaderService.js";
 import { documentService } from "./services/DocumentService.js";
@@ -836,6 +836,43 @@ const server = http.createServer((req, res) => {
         const body = JSON.parse(rawBody || "{}");
         const fileName = String(body.fileName || "dokumen.pdf").trim();
         const operation = body.operation || "edit";
+        const stage = body.stage ? String(body.stage) : "";
+
+        // Tahap bertahap (dipanggil klien di latar belakang): potongan teks -> section JSON
+        if (stage === "chunk") {
+          const sections = await documentService.processChunk({
+            fileName,
+            operation,
+            instruction: body.instruction ? String(body.instruction) : undefined,
+            targetLanguage: body.targetLanguage ? String(body.targetLanguage) : undefined,
+            content: String(body.originalContent || ""),
+            chunkIndex: Number(body.chunkIndex || 0),
+            totalChunks: Number(body.totalChunks || 1),
+            reduce: !!body.reduce,
+          });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, sections }));
+          return;
+        }
+
+        // Tahap render: gabungan section -> file PDF/Word
+        if (stage === "render") {
+          const rendered = await documentService.renderSections({
+            fileName,
+            operation,
+            targetLanguage: body.targetLanguage ? String(body.targetLanguage) : undefined,
+            sections: Array.isArray(body.sections) ? body.sections : [],
+          });
+          const asciiRender = rendered.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+          res.writeHead(200, {
+            "Content-Type": rendered.mimeType,
+            "Content-Disposition": `attachment; filename="${asciiRender}"; filename*=UTF-8''${encodeURIComponent(rendered.fileName)}`,
+            "Content-Length": rendered.buffer.length,
+          });
+          res.end(rendered.buffer);
+          return;
+        }
+
         const originalContent = String(body.originalContent || "").trim();
         const instruction = body.instruction ? String(body.instruction).trim() : undefined;
         const targetLanguage = body.targetLanguage ? String(body.targetLanguage).trim() : undefined;
@@ -866,10 +903,11 @@ const server = http.createServer((req, res) => {
         res.end(result.buffer);
       } catch (procErr: any) {
         console.error("[Index /api/documents/process] Error:", procErr);
-        res.writeHead(500, { "Content-Type": "application/json" });
+        res.writeHead(isRateLimitError(procErr) ? 429 : 500, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
-            error: `Gagal memproses dokumen in-place: ${procErr?.message || "Unknown error"}`,
+            error: friendlyDocumentError(procErr),
+            retryAfterMs: isRateLimitError(procErr) ? parseRetryDelayMs(procErr) : undefined,
           })
         );
       }
