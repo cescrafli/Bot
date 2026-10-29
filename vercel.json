@@ -11,9 +11,16 @@
     },
     "api/documents-generate.js": {
       "maxDuration": 60
+    },
+    "api/documents-process.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
+    {
+      "source": "/api/auth/verify",
+      "destination": "/api/auth-verify"
+    },
     {
       "source": "/api/memory/remember",
       "destination": "/api/remember"
@@ -25,6 +32,10 @@
     {
       "source": "/api/documents/upload",
       "destination": "/api/documents-read"
+    },
+    {
+      "source": "/api/documents/process",
+      "destination": "/api/documents-process"
     },
     {
       "source": "/api/documents/generate",

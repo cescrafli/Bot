@@ -1,5 +1,7 @@
-import * as crypto from "node:crypto";
+import * as cryptoModule from "node:crypto";
 import type { AuthMode } from "./avatar.js";
+
+const crypto = (cryptoModule as any)?.default || cryptoModule || {};
 
 interface TokenPayload {
   m: AuthMode;
