@@ -94,10 +94,15 @@ async function handleAuthVerify(req, res) {
  * Public probe returns only { status: "ok" }. Detailed diagnostics require admin authorization.
  */
 export default async function handler(req, res) {
-  // Route auth-verify requests that are rewritten to /api/health?route=auth-verify
-  // or that come via /api/auth-verify path
+  // Route auth-verify requests that are rewritten to /api/health?route=auth-verify,
+  // or that come via POST method / auth-verify path
   const url = req.url || "";
-  if (url.includes("auth-verify") || url.includes("auth/verify") || req.query?.route === "auth-verify") {
+  if (
+    req.method === "POST" ||
+    url.includes("auth-verify") ||
+    url.includes("auth/verify") ||
+    req.query?.route === "auth-verify"
+  ) {
     return handleAuthVerify(req, res);
   }
 

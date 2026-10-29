@@ -2218,7 +2218,7 @@ async function runTtsTests() {
     fs.readFileSync(path.resolve(process.cwd(), "vercel.json"), "utf8")
   );
   const authRewrite = vercelConfig.rewrites?.find(
-    (rw: any) => rw.source === "/api/auth/verify" && rw.destination === "/api/health"
+    (rw: any) => rw.source === "/api/auth/verify" && rw.destination?.startsWith("/api/health")
   );
   assert(
     Boolean(authRewrite),

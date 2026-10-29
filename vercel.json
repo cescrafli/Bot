@@ -28,11 +28,11 @@
   "rewrites": [
     {
       "source": "/api/auth/verify",
-      "destination": "/api/health"
+      "destination": "/api/health?route=auth-verify"
     },
     {
       "source": "/api/auth-verify",
-      "destination": "/api/health"
+      "destination": "/api/health?route=auth-verify"
     },
     {
       "source": "/api/memory/remember",

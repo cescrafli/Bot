@@ -121,7 +121,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Endpoint Verifikasi Autentikasi (Server-side Auth dengan HMAC Token)
-  if (req.url === "/api/auth/verify" && req.method === "POST") {
+  if ((req.url === "/api/auth/verify" || req.url === "/api/auth-verify") && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk.toString();
