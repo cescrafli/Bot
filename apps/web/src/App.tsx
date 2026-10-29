@@ -9,6 +9,7 @@ import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { VoiceSelectorModal } from "./components/modals/VoiceSelectorModal";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { DocumentModal } from "./components/modals/DocumentModal";
+import { DocumentActionPill } from "./components/controls/DocumentActionPill";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
@@ -494,6 +495,12 @@ export function App() {
             transcripts={live.transcripts}
             statusMessage={effectiveStatusMessage}
             status={effectiveStatus}
+          />
+
+          {/* Document Action Pill — center-bottom, between subtitle and text input */}
+          <DocumentActionPill
+            job={live.activeDocJob}
+            onDismiss={live.dismissDocJob}
           />
 
           {/* Toggleable Luxury Text Input Form */}

@@ -76,7 +76,13 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         setErrorMessage(
           "File ini dilindungi password sehingga tidak dapat saya buka. Silakan kirim versi tanpa password atau buka enkripsinya terlebih dahulu."
         );
-      } else if (msg.includes("LEGACY_FORMAT") || msg.toLowerCase().includes(".doc") || msg.toLowerCase().includes(".xls")) {
+      } else if (
+        msg.includes("LEGACY_FORMAT") ||
+        // Match ".doc" but NOT ".docx" / ".docm" / ".dotx"
+        /\.doc(?!x|m)(\b|")/i.test(msg) ||
+        // Match ".xls" but NOT ".xlsx" / ".xlsm" / ".xlsb"
+        /\.xls(?!x|m|b)(\b|")/i.test(msg)
+      ) {
         setErrorMessage(
           "Format file ini tidak dapat dibaca. Coba konversi ke format modern (.docx atau .xlsx) lalu kirim lagi."
         );

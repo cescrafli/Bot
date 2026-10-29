@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
+import type { ActiveDocJob } from "../components/controls/DocumentActionPill";
 import { getStoredAuthPassword, getStoredAuthMode, getStoredAuthToken } from "./useAuth";
 import {
   ClientMessage,
@@ -86,6 +87,14 @@ export function useGeminiLive({
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
   const [docStatusMessage, setDocStatusMessage] = useState<string | null>(null);
+  const [activeDocJob, setActiveDocJob] = useState<ActiveDocJob | null>(null);
+  const activeDocBlobRef = useRef<Blob | null>(null);
+  const dismissDocJob = useCallback(() => {
+    if (activeDocBlobRef.current) {
+      activeDocBlobRef.current = null;
+    }
+    setActiveDocJob(null);
+  }, []);
   const [jobs, setJobs] = useState<any[]>([]);
   const dismissJob = useCallback((id: string) => {
     setJobs((prev) => prev.filter((j) => j.id !== id));
@@ -1554,8 +1563,18 @@ export function useGeminiLive({
       }
       lastGenRef.current = { key: genKey, at: nowTs, running: true };
 
+      const jobId = `docjob_${Date.now()}`;
+      const fileName = `${title || "Dokumen_Celyn"}.${kind}`;
       setIsGeneratingDoc(true);
       setDocStatusMessage(`Celyn sedang membuat dokumen ${kind.toUpperCase()}...`);
+      setActiveDocJob({
+        id: jobId,
+        title: title || fileName,
+        fileName,
+        kind,
+        stage: "processing",
+        message: `Celyn sedang membuat dokumen ${kind.toUpperCase()}...`,
+      });
 
       const notifyCelyn = (text: string) => {
         try {
@@ -1589,8 +1608,11 @@ export function useGeminiLive({
                 .join("\n\n---\n\n")
             : "");
         const chunks = kind !== "xlsx" ? splitTextIntoChunks(fullText) : [fullText];
-        const waitNote = () =>
-          setDocStatusMessage("Celyn menunggu giliran kapasitas sebentar, lalu lanjut memproses...");
+        const waitNote = () => {
+          const waitMsg = "Celyn menunggu giliran kapasitas sebentar, lalu lanjut memproses...";
+          setDocStatusMessage(waitMsg);
+          setActiveDocJob((prev) => prev ? { ...prev, message: waitMsg } : prev);
+        };
 
         let blob: Blob;
         if (chunks.length > 1) {
@@ -1600,7 +1622,9 @@ export function useGeminiLive({
           const fileNameForRender = `${title || "Dokumen_Celyn"}.${kind}`;
           const collected: any[] = [];
           for (let i = 0; i < chunks.length; i++) {
-            setDocStatusMessage(`Celyn memproses bagian ${i + 1} dari ${chunks.length}...`);
+            const chunkMsg = `Celyn memproses bagian ${i + 1} dari ${chunks.length}...`;
+            setDocStatusMessage(chunkMsg);
+            setActiveDocJob((prev) => prev ? { ...prev, message: chunkMsg } : prev);
             const res = await postDocWithRetry(
               "/api/documents/process",
               headers,
@@ -1623,7 +1647,9 @@ export function useGeminiLive({
 
           let finalSections = collected;
           if (isSummary) {
-            setDocStatusMessage("Celyn menyusun ringkasan keseluruhan...");
+            const finalMsg = "Celyn menyusun ringkasan keseluruhan...";
+          setDocStatusMessage(finalMsg);
+          setActiveDocJob((prev) => prev ? { ...prev, message: finalMsg } : prev);
             const digest = collected
               .map((sec: any) => `${sec.heading || ""}\n${(sec.paragraphs || []).join("\n")}`)
               .join("\n\n")
@@ -1651,7 +1677,9 @@ export function useGeminiLive({
             }
           }
 
-          setDocStatusMessage("Celyn menyusun file hasil akhir...");
+          const renderMsg = "Celyn menyusun file hasil akhir...";
+          setDocStatusMessage(renderMsg);
+          setActiveDocJob((prev) => prev ? { ...prev, message: renderMsg } : prev);
           const resRender = await postDocWithRetry(
             "/api/documents/process",
             headers,
@@ -1684,20 +1712,26 @@ export function useGeminiLive({
           blob = await res.blob();
         }
 
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        const ext = kind === "pdf" ? "pdf" : kind === "docx" ? "docx" : "xlsx";
-        a.download = `${title || "Dokumen_Celyn"}.${ext}`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        a.remove();
+        // Store blob and show DocumentActionPill (let user click "Unduh")
+        activeDocBlobRef.current = blob;
+        setActiveDocJob((prev) =>
+          prev
+            ? { ...prev, stage: "done", message: "Siap diunduh", blob }
+            : {
+                id: jobId,
+                title: title || fileName,
+                fileName,
+                kind,
+                stage: "done",
+                message: "Siap diunduh",
+                blob,
+              }
+        );
 
-        setDocStatusMessage(`Dokumen ${kind.toUpperCase()} berhasil dibuat & diunduh!`);
+        setDocStatusMessage(`Dokumen ${kind.toUpperCase()} berhasil dibuat & siap diunduh!`);
         setTimeout(() => setDocStatusMessage(null), 5000);
         notifyCelyn(
-          `[INFO SISTEM] Dokumen ${kind.toUpperCase()} berjudul '${title}' sudah SELESAI dibuat dan terunduh otomatis. Sampaikan secara lisan dengan ceria dan singkat dalam Bahasa Indonesia bahwa dokumennya sudah jadi dan bisa dibuka di folder unduhan.`
+          `[INFO SISTEM] Dokumen ${kind.toUpperCase()} berjudul '${title}' sudah SELESAI dibuat. Tombol unduh muncul di layar. Sampaikan secara lisan dengan ceria dan singkat dalam Bahasa Indonesia bahwa dokumennya sudah jadi dan bisa diunduh lewat tombol yang muncul.`
         );
       } catch (err: any) {
         console.error("Gagal generate dokumen:", err);
@@ -1709,6 +1743,9 @@ export function useGeminiLive({
           : friendlyDocumentError(err);
         setDocStatusMessage(friendly);
         setTimeout(() => setDocStatusMessage(null), 8000);
+        setActiveDocJob((prev) =>
+          prev ? { ...prev, stage: "error", error: friendly } : null
+        );
         notifyCelyn(
           `[INFO SISTEM] Pembuatan dokumen gagal: ${friendly} Sampaikan secara lisan dengan ramah dan singkat dalam Bahasa Indonesia, tawarkan untuk mencoba lagi nanti. Jangan sebut nama penyedia layanan atau detail teknis.`
         );
@@ -1826,7 +1863,9 @@ export function useGeminiLive({
           // Dokumen besar: proses bertahap per bagian di latar belakang, lalu gabungkan
           const collected: any[] = [];
           for (let i = 0; i < chunks.length; i++) {
-            setDocStatusMessage(`Celyn memproses bagian ${i + 1} dari ${chunks.length}...`);
+            const chunkMsg = `Celyn memproses bagian ${i + 1} dari ${chunks.length}...`;
+            setDocStatusMessage(chunkMsg);
+            setActiveDocJob((prev) => prev ? { ...prev, message: chunkMsg } : prev);
             const res = await postWithRetry({
               stage: "chunk",
               fileName: targetDoc.fileName,
@@ -1847,7 +1886,9 @@ export function useGeminiLive({
 
           let finalSections = collected;
           if (operation === "summarize") {
-            setDocStatusMessage("Celyn menyusun ringkasan keseluruhan...");
+            const finalMsg = "Celyn menyusun ringkasan keseluruhan...";
+          setDocStatusMessage(finalMsg);
+          setActiveDocJob((prev) => prev ? { ...prev, message: finalMsg } : prev);
             const digest = collected
               .map((sec: any) => `${sec.heading || ""}\n${(sec.paragraphs || []).join("\n")}`)
               .join("\n\n")
@@ -1870,7 +1911,9 @@ export function useGeminiLive({
             }
           }
 
-          setDocStatusMessage("Celyn menyusun file hasil akhir...");
+          const renderMsg = "Celyn menyusun file hasil akhir...";
+          setDocStatusMessage(renderMsg);
+          setActiveDocJob((prev) => prev ? { ...prev, message: renderMsg } : prev);
           const resRender = await postWithRetry({
             stage: "render",
             fileName: targetDoc.fileName,
@@ -2113,6 +2156,8 @@ export function useGeminiLive({
     activeDocuments,
     jobs,
     dismissJob,
+    activeDocJob,
+    dismissDocJob,
     isUploadingDoc,
     isGeneratingDoc,
     docStatusMessage,

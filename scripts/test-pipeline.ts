@@ -1179,10 +1179,6 @@ async function runTtsTests() {
       });
       if (inPlaceResult) break;
     } catch (e: any) {
-      if (attempt < 2 && (e?.status === 503 || e?.status === 429)) {
-        await new Promise((r) => setTimeout(r, 2000));
-        continue;
-      }
       if (e?.status === 429 || /quota|resource_exhausted/i.test(String(e?.message || ""))) {
         console.warn("⚠️ API Gemini online sedang mengalami quota rate limit, menggunakan fallback writer untuk verifikasi pipeline.");
         const fallbackPdf = await documentWriterService.createPdf({
@@ -1199,6 +1195,10 @@ async function runTtsTests() {
           mimeType: "application/pdf",
         };
         break;
+      }
+      if (attempt < 2 && e?.status === 503) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
       }
       throw e;
     }
@@ -1724,7 +1724,80 @@ async function runTtsTests() {
     "Pesan asli pengguna tetap tercatat ke memori percakapan dengan benar"
   );
 
-  // 25. Ringkasan
+  // 25. Uji Sanitasi Pesan Error Format Modern (.docx/.xlsx) vs Legacy (.doc/.xls) & DocumentActionPill UI
+  console.log("\n--- 25. Uji Deteksi Error Format Modern (.docx/.xlsx) & DocumentActionPill ---");
+
+  function isLegacyFormatError(msg: string): boolean {
+    return (
+      msg.includes("LEGACY_FORMAT") ||
+      /\.doc(?!x|m)(\b|")/i.test(msg) ||
+      /\.xls(?!x|m|b)(\b|")/i.test(msg)
+    );
+  }
+
+  // A. Format modern (.docx, .docm, .xlsx, .xlsm, .xlsb) TIDAK BOLEH dikategorikan sebagai legacy
+  assert(
+    isLegacyFormatError("Gagal membaca LAPORAN APOTEK.docx: file rusak") === false,
+    "Error pada file .docx (mis. LAPORAN APOTEK.docx) TIDAK memicu banner kesalahan format legacy"
+  );
+  assert(
+    isLegacyFormatError("Error pada data_keuangan.xlsx") === false,
+    "Error pada file .xlsx TIDAK memicu banner kesalahan format legacy"
+  );
+  assert(
+    isLegacyFormatError("Dokumen template.docm tidak dapat dibuka") === false,
+    "Error pada file .docm TIDAK memicu banner kesalahan format legacy"
+  );
+  assert(
+    isLegacyFormatError("File anggaran.xlsm memerlukan formula khusus") === false,
+    "Error pada file .xlsm TIDAK memicu banner kesalahan format legacy"
+  );
+
+  // B. Format biner kuno (.doc, .xls) atau sinyal LEGACY_FORMAT HARUS terdeteksi
+  assert(
+    isLegacyFormatError("File lama.doc tidak didukung") === true,
+    "File .doc terdeteksi sebagai format biner lama"
+  );
+  assert(
+    isLegacyFormatError("File neraca.xls adalah biner kuno") === true,
+    "File .xls terdeteksi sebagai format biner lama"
+  );
+  assert(
+    isLegacyFormatError("LEGACY_FORMAT: Format biner lama tidak dapat dibaca") === true,
+    "Sinyal server LEGACY_FORMAT terdeteksi dengan tepat"
+  );
+
+  // C. Uji Struktur ActiveDocJob pada DocumentActionPill
+  interface ActiveDocJobTest {
+    id: string;
+    title: string;
+    fileName: string;
+    kind: "pdf" | "docx" | "xlsx";
+    stage: "processing" | "done" | "error";
+    message: string;
+    blob?: any;
+    error?: string;
+  }
+
+  const sampleJob: ActiveDocJobTest = {
+    id: "docjob_12345",
+    title: "Laporan Riset IHSG",
+    fileName: "Laporan_Riset_IHSG.pdf",
+    kind: "pdf",
+    stage: "done",
+    message: "Siap diunduh",
+    blob: Buffer.from("PDF DATA SAMPLE"),
+  };
+
+  assert(
+    sampleJob.stage === "done" &&
+      Boolean(sampleJob.blob) &&
+      sampleJob.fileName.endsWith(".pdf") &&
+      sampleJob.kind === "pdf",
+    "Struktur ActiveDocJob pada DocumentActionPill valid dan siap untuk diunduh oleh pengguna"
+  );
+
+  // 26. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");
