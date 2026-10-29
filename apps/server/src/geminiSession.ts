@@ -967,11 +967,17 @@ export class GeminiSession {
         const docName = msg.fileName || "dokumen";
         this.activeDocs.set(docName.toLowerCase(), { fileName: docName, content: msg.text });
         const safeText = msg.text.replace(/<\/document_context>/gi, "&lt;/document_context&gt;");
+        let livePayload = safeText;
+        if (safeText.length > 25000) {
+          const head = safeText.slice(0, 15000);
+          const tail = safeText.slice(-5000);
+          livePayload = `${head}\n\n... [Bagian tengah dokumen tersimpan lengkap di memori Celyn (${safeText.length} karakter)] ...\n\n${tail}`;
+        }
         await this.session.sendClientContent({
           turns: [
             {
               role: "user",
-              parts: [{ text: safeText }],
+              parts: [{ text: livePayload }],
             },
           ],
           turnComplete: true,

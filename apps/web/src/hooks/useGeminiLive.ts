@@ -19,6 +19,7 @@ import {
   ParsedDocument,
   DocumentKind,
   RESEARCH_STATUS_TEXT,
+  buildSafeLiveDocumentContext,
 } from "@celyn/shared";
 import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
 
@@ -47,6 +48,10 @@ export function useGeminiLive({
     Array<{ speaker: "user" | "celyn"; text: string; time: string }>
   >([]);
   const [activeDocuments, setActiveDocuments] = useState<ParsedDocument[]>([]);
+  const activeDocumentsRef = useRef<ParsedDocument[]>([]);
+  useEffect(() => {
+    activeDocumentsRef.current = activeDocuments;
+  }, [activeDocuments]);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
   const [docStatusMessage, setDocStatusMessage] = useState<string | null>(null);
@@ -924,11 +929,19 @@ export function useGeminiLive({
                 } else if (fc.name === "process_document") {
                   const docId = String((fc.args as any)?.docId || "").trim();
                   const operation = String((fc.args as any)?.operation || "summarize").trim();
+                  const instruction = String((fc.args as any)?.instruction || "").trim();
+                  const targetLanguage = String((fc.args as any)?.targetLanguage || "").trim();
+                  console.log("📄 [Direct Live Tool] Memproses dokumen (in-place):", { docId, operation });
+
+                  processDocumentRef.current(docId, operation, instruction, targetLanguage).catch((e) => {
+                    console.warn("Gagal process document in-place:", e);
+                  });
+
                   toolOutput = {
-                    status: "applied",
+                    status: "started",
                     docId,
                     operation,
-                    instruction: `Operasi '${operation}' pada dokumen '${docId}' telah dicatat. Berikan penjelasan dan tanggapan lisanmu secara langsung dalam Bahasa Indonesia!`,
+                    instruction: `Operasi '${operation}' pada dokumen '${docId}' telah dimulai dan hasilnya akan langsung diunduh ke komputer pengguna. Berikan penjelasan dan tanggapan lisanmu dengan santai, ceria, dan hangat dalam Bahasa Indonesia bahwa kamu sedang mengerjakannya!`,
                   };
                 } else if (fc.name === "research") {
                   const query = String((fc.args as any)?.query || "").trim();
@@ -1411,6 +1424,24 @@ export function useGeminiLive({
         if (token) {
           headers["Authorization"] = `Bearer ${token}`;
         }
+        const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+        if (customKey) {
+          headers["x-gemini-key"] = customKey;
+        }
+
+        // Jika konteks belum diisi secara eksplisit, gunakan teks lengkap 100% dari activeDocuments
+        const effectiveContext =
+          context ||
+          (activeDocumentsRef.current.length > 0
+            ? activeDocumentsRef.current
+                .map(
+                  (d) =>
+                    `# Dokumen: ${d.fileName} (${d.totalPages || 1} Halaman, ${(
+                      d.characterCount || d.markdownContent.length
+                    ).toLocaleString("id-ID")} Karakter)\n\n${d.markdownContent}`
+                )
+                .join("\n\n---\n\n")
+            : undefined);
 
         const res = await fetch("/api/documents/generate", {
           method: "POST",
@@ -1419,7 +1450,7 @@ export function useGeminiLive({
             kind,
             title,
             instruction,
-            context,
+            context: effectiveContext,
             password,
           }),
         });
@@ -1457,6 +1488,99 @@ export function useGeminiLive({
   useEffect(() => {
     generateDocumentRef.current = generateDocument;
   }, [generateDocument]);
+
+  const processDocument = useCallback(
+    async (
+      docId: string,
+      operation: string,
+      instruction?: string,
+      targetLanguage?: string
+    ) => {
+      setIsGeneratingDoc(true);
+      setDocStatusMessage(`Celyn sedang memproses (${operation}) dokumen...`);
+      try {
+        const password = getStoredAuthPassword() || "admin";
+        const token = getStoredAuthToken();
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "x-admin-password": password,
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+        if (customKey) {
+          headers["x-gemini-key"] = customKey;
+        }
+
+        // Cari dokumen di activeDocumentsRef (menggunakan teks utuh 100%)
+        let targetDoc = activeDocumentsRef.current.find(
+          (d) =>
+            d.fileName.toLowerCase() === docId.toLowerCase() ||
+            d.fileName.toLowerCase().includes(docId.toLowerCase())
+        );
+        if (!targetDoc && activeDocumentsRef.current.length > 0) {
+          targetDoc = activeDocumentsRef.current[0];
+        }
+
+        if (!targetDoc) {
+          throw new Error(`Dokumen '${docId}' tidak ditemukan di memori Celyn.`);
+        }
+
+        const res = await fetch("/api/documents/process", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            fileName: targetDoc.fileName,
+            operation,
+            originalContent: targetDoc.markdownContent,
+            instruction: instruction || `Lakukan ${operation} pada dokumen ini.`,
+            targetLanguage,
+            password,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error || `Gagal memproses dokumen (HTTP ${res.status})`);
+        }
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const baseName = targetDoc.fileName.replace(/\.[^/.]+$/, "");
+        const ext = targetDoc.fileName.toLowerCase().endsWith(".xlsx")
+          ? "xlsx"
+          : targetDoc.fileName.toLowerCase().endsWith(".docx")
+          ? "docx"
+          : "pdf";
+        a.download = `${baseName}_${operation}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+
+        setDocStatusMessage(
+          `Dokumen '${targetDoc.fileName}' berhasil diproses (${operation}) & diunduh!`
+        );
+        setTimeout(() => setDocStatusMessage(null), 5000);
+      } catch (err: any) {
+        console.error("Gagal memproses dokumen:", err);
+        setDocStatusMessage(`Gagal memproses dokumen: ${err?.message || "Error"}`);
+        setTimeout(() => setDocStatusMessage(null), 5000);
+        throw err;
+      } finally {
+        setIsGeneratingDoc(false);
+      }
+    },
+    []
+  );
+
+  const processDocumentRef = useRef(processDocument);
+  useEffect(() => {
+    processDocumentRef.current = processDocument;
+  }, [processDocument]);
 
   const uploadDocument = useCallback(
     async (file: File): Promise<ParsedDocument> => {
@@ -1555,8 +1679,9 @@ export function useGeminiLive({
           doc,
         ]);
 
-        // Injeksi konteks dokumen ke sesi percakapan aktif secara terstruktur dengan instruksi respon proaktif
-        const systemContent = `[PENGGUNA MENGUNGGAH DOKUMEN: ${doc.fileName}]\nBerikut adalah isi dokumen yang baru saja dibaca:\n\n<document_context fileName="${doc.fileName}" usedOcr="${doc.usedOcr}">\n${doc.markdownContent}\n</document_context>\n\nINSTRUKSI RESPON WAJIB: Dokumen '${doc.fileName}' baru saja diunggah oleh pengguna. Segera respon secara lisan dengan hangat, ramah, dan natural bahwa kamu sudah membaca isi file '${doc.fileName}' tersebut, lalu tanyakan kepada pengguna dokumen ini mau diapakan (contohnya: mau dirangkum/disummarize, diedit isinya, diterjemahkan, dianalisis datanya, atau ada bagian tertentu yang mau ditanyakan). JANGAN bacakan seluruh isi dokumen, cukup sapa dan tanyakan rencana pengguna terhadap dokumen ini.`;
+        // Injeksi konteks dokumen ke sesi percakapan aktif secara terstruktur dengan batas aman kuota TPM Live
+        // Teks lengkap 100% (592.613 karakter) tetap tersimpan utuh di activeDocuments untuk kebutuhan create_document / edit / proses
+        const systemContent = buildSafeLiveDocumentContext(doc, 20000);
 
         let isLiveActive = false;
         if (directSessionRef.current) {
@@ -1637,6 +1762,7 @@ export function useGeminiLive({
     uploadDocument,
     removeDocument,
     generateDocument,
+    processDocument,
     connect,
     disconnect,
     sendAudio,

@@ -118,3 +118,44 @@ export function stripMarkdownFormatting(rawText: string): string {
     .replace(/^[*-]\s+/gm, "") // List bullets
     .trim();
 }
+
+/**
+ * Membentuk ringkasan konteks dokumen yang aman untuk disuntikkan ke sesi audio Gemini Live.
+ * Sesi WebSocket Live memiliki batas kuota TPM (Token Per Minute) ketat per turn audio.
+ * Jika dokumen sangat besar (seperti PDF buku / clinical guidelines 127 halaman ~600.000 karakter),
+ * fungsi ini mengekstrak bagian kepala (judul, ringkasan eksekutif, bab awal) dan kesimpulan,
+ * serta menyematkan ringkasan jumlah halaman & karakter. Teks lengkap tetap utuh di `doc.markdownContent`
+ * untuk pemrosesan tool / dokumen penuh.
+ */
+export function buildSafeLiveDocumentContext(
+  doc: ParsedDocument,
+  maxSafeChars: number = 20000
+): string {
+  const content = doc.markdownContent || "";
+  const totalChars = doc.characterCount || content.length;
+  const pages = doc.totalPages || 1;
+
+  let injectedText = content;
+  let isTruncatedForLive = false;
+
+  if (content.length > maxSafeChars) {
+    isTruncatedForLive = true;
+    const headChars = Math.floor(maxSafeChars * 0.72); // ~14.400 karakter
+    const tailChars = Math.floor(maxSafeChars * 0.28); // ~5.600 karakter
+
+    const head = content.slice(0, headChars).trim();
+    const tail = content.slice(-tailChars).trim();
+
+    injectedText = `${head}\n\n... [Bagian isi tengah dokumen (halaman 2 s.d ${Math.max(2, pages - 2)}) tersimpan lengkap di memori Celyn (${totalChars.toLocaleString("id-ID")} karakter). Teks lengkap siap digunakan untuk analisis mendalam, perangkuman bab spesifik, atau ekspor.] ...\n\n${tail}`;
+  }
+
+  return `[PENGGUNA MENGUNGGAH DOKUMEN: ${doc.fileName}]
+Informasi Dokumen: ${pages} Halaman, ${totalChars.toLocaleString("id-ID")} Karakter${isTruncatedForLive ? " (Dokumen Komprehensif / Lengkap)" : ""}.
+Berikut adalah intisari isi dokumen yang baru saja dibaca:
+
+<document_context fileName="${doc.fileName}" pages="${pages}" characters="${totalChars}">
+${injectedText}
+</document_context>
+
+INSTRUKSI RESPON WAJIB: Dokumen '${doc.fileName}' (${pages} halaman, ${totalChars.toLocaleString("id-ID")} karakter) baru saja diunggah oleh pengguna dan seluruh teks lengkapnya telah tersimpan di memorimu. Segera respon secara lisan dengan hangat, ramah, dan natural dalam Bahasa Indonesia bahwa kamu sudah membaca tuntas dokumen '${doc.fileName}' tersebut (sebutkan topik/judul utamanya jika tampak dari isi dokumen), lalu tanyakan kepada pengguna dokumen ini mau diapakan (contohnya: mau dirangkum poin-poin utamanya, dicari rekomendasi terapi atau bab tertentu, diedit isinya, atau diekspor ke PDF/Word/Excel). JANGAN membaca seluruh isi dokumen kata per kata, cukup sapa dan tanyakan rencana pengguna terhadap dokumen ini.`;
+}

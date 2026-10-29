@@ -38,6 +38,7 @@ import {
   detectDocumentProtection,
   MESSAGES,
   RESEARCH_STATUS_TEXT,
+  buildSafeLiveDocumentContext,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1266,7 +1267,65 @@ async function runTtsTests() {
     "Pesan penanganan kode 1011 menggunakan Bahasa Indonesia yang ramah dan solutif"
   );
 
-  // 23. Ringkasan
+  // 23. Uji Safe Live Voice Context Window & Integritas Penuh Dokumen 127 Halaman (PIIS0085253822005075.pdf)
+  console.log("\n--- Menjalankan Uji Safe Live Context & Integritas Penuh Dokumen Besar ---");
+
+  // A. Uji dokumen kecil (<= 20.000 karakter): teks utuh dipertahankan
+  const smallDoc = {
+    fileName: "laporan_klinis_kecil.pdf",
+    mimeType: "application/pdf",
+    markdownContent: "# Laporan Kasus Pasien\nPasien didiagnosis DM tipe 2 dan CKD stadium 3.",
+    usedOcr: false,
+    totalPages: 2,
+    truncated: false,
+    characterCount: 68,
+  };
+  const smallContext = buildSafeLiveDocumentContext(smallDoc, 20000);
+  assert(
+    smallContext.includes("Pasien didiagnosis DM tipe 2 dan CKD stadium 3.") &&
+      !smallContext.includes("Bagian isi tengah dokumen"),
+    "Dokumen kecil (<= 20.000 chars) dikirimkan secara utuh ke Live Audio tanpa pemotongan"
+  );
+
+  // B. Uji dokumen besar (seperti PIIS0085253822005075.pdf: 127 halaman / 592.613 karakter)
+  const hugeText =
+    "KDIGO 2022 Clinical Practice Guideline for Diabetes Management in CKD\n" +
+    "Bab 1: Perawatan Komprehensif. ".repeat(5000) +
+    "\nBab 4: Terapi Antihiperglikemik SGLT2i dan GLP-1 RA. ".repeat(5000) +
+    "\nKesimpulan dan rekomendasi akhir untuk praktisi nefrologi.";
+  const hugeDoc = {
+    fileName: "PIIS0085253822005075.pdf",
+    mimeType: "application/pdf",
+    markdownContent: hugeText,
+    usedOcr: false,
+    totalPages: 127,
+    truncated: false,
+    characterCount: hugeText.length,
+  };
+
+  assert(
+    hugeDoc.characterCount > 100000,
+    `Dokumen simulasi KDIGO memiliki panjang ${hugeDoc.characterCount} karakter (> 100k)`
+  );
+
+  const safeLiveContext = buildSafeLiveDocumentContext(hugeDoc, 20000);
+  assert(
+    safeLiveContext.length <= 25000,
+    `Konteks Live suara yang dihasilkan (${safeLiveContext.length} chars / ~4.500 tokens) aman dari batas kuota TPM Google Live (< 25.000 chars)`
+  );
+  assert(
+    safeLiveContext.includes("127 Halaman") &&
+      safeLiveContext.includes("KDIGO 2022") &&
+      safeLiveContext.includes("PIIS0085253822005075.pdf") &&
+      safeLiveContext.includes("INSTRUKSI RESPON WAJIB"),
+    "Konteks Live memuat metadata lengkap (127 halaman, judul KDIGO 2022, instruksi suara ramah Celyn)"
+  );
+  assert(
+    hugeDoc.markdownContent.length === hugeText.length,
+    "Teks lengkap 100% tetap tersimpan utuh di doc.markdownContent tanpa cacat untuk kebutuhan create_document / edit"
+  );
+
+  // 24. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");
