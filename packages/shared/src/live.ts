@@ -24,6 +24,12 @@ export type ClientMessage =
     }
   | {
       type: "audio_stream_end";
+    }
+  | {
+      type: "doc_context";
+      text: string;
+      docId?: string;
+      fileName?: string;
     };
 
 // Pesan Server -> Client
@@ -42,7 +48,7 @@ export type ServerMessage =
   | {
       type: "tool_call";
       id?: string;
-      name: "set_expression" | "point_at_screen" | "remember_fact" | "create_document";
+      name: "set_expression" | "point_at_screen" | "remember_fact" | "create_document" | "process_document" | "research";
       args: Record<string, unknown>;
     }
   | {
@@ -50,8 +56,20 @@ export type ServerMessage =
     }
   | {
       type: "status";
-      status: "idle" | "listening" | "thinking" | "speaking" | "error";
+      status: "idle" | "listening" | "thinking" | "researching" | "working" | "speaking" | "error";
       message?: string;
+    }
+  | {
+      type: "job";
+      jobId: string;
+      kind: "read" | "summarize" | "translate" | "paraphrase" | "edit" | "create" | "research" | "custom";
+      stage: "queued" | "running" | "done" | "error" | "needs_input";
+      progress: number;
+      message?: string;
+      fileName?: string;
+      resultId?: string;
+      downloadUrl?: string;
+      error?: { code: string; userMessage: string };
     }
   | {
       type: "session_info";

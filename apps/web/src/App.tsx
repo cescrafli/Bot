@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, Suspense, lazy } from "react";
 import { AvatarCanvas2D } from "./components/avatar/AvatarCanvas2D";
 import { ControlBar } from "./components/controls/ControlBar";
+import { JobTray } from "./components/controls/JobTray";
 import { ScreenPreview } from "./components/screen/ScreenPreview";
 import { SubtitleOverlay } from "./components/transcript/SubtitleOverlay";
 import { TranscriptDrawer } from "./components/chat/TranscriptDrawer";
@@ -235,8 +236,14 @@ export function App() {
   // Status sinkron dengan pemutaran audio riil dan mikrofon di browser
   const effectiveStatus = !live.isConnected
     ? "idle"
+    : live.status === "error"
+    ? "error"
     : audioEngine.isPlaying
     ? "speaking"
+    : live.status === "researching"
+    ? "researching"
+    : live.status === "working"
+    ? "working"
     : live.status === "thinking"
     ? "thinking"
     : !audioEngine.isMicActive
@@ -245,8 +252,14 @@ export function App() {
 
   const effectiveStatusMessage = !live.isConnected
     ? "Siaga • Siap Berbicara"
+    : live.status === "error"
+    ? live.statusMessage || "Koneksi Celyn bermasalah"
     : audioEngine.isPlaying
     ? "Berbicara • Merespons Anda"
+    : effectiveStatus === "researching"
+    ? "Tunggu sebentar ya, saya sedang research..."
+    : effectiveStatus === "working"
+    ? "Sedang memproses dokumen di latar belakang..."
     : effectiveStatus === "thinking"
     ? "Menyimak • Merangkai Jawaban"
     : !audioEngine.isMicActive
@@ -417,6 +430,7 @@ export function App() {
               intonation={audioEngine.intonation}
               isSpeaking={audioEngine.isPlaying || effectiveStatus === "speaking"}
               lookAt={live.lookAt}
+              status={effectiveStatus}
               isRigPanelOpen={isRigPanelOpen}
               onToggleRigPanel={() => setIsRigPanelOpen((prev) => !prev)}
             />
@@ -522,6 +536,9 @@ export function App() {
         onClose={() => setIsHistoryOpen(false)}
         onClear={live.clearTranscripts}
       />
+
+      {/* Tray Notifikasi Pekerjaan Latar Belakang */}
+      <JobTray jobs={live.jobs} onDismissJob={live.dismissJob} />
 
       {/* Modal Bantuan & Pintasan Keyboard */}
       <ShortcutsModal

@@ -495,7 +495,7 @@ export function useAudioEngine({
       lowPass.Q.value = 0.707;
       lowPassFilterRef.current = lowPass;
 
-      const workletNode = new AudioWorkletNode(ctx, "gemini-audio-recorder");
+      const workletNode = new AudioWorkletNode(ctx, "celyn-audio-recorder");
       workletNodeRef.current = workletNode;
 
       workletNode.port.onmessage = (e) => {

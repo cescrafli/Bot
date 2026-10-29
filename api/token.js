@@ -1,5 +1,24 @@
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@libsql/client";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifyToken(token, secret) {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.trim().split(".");
+  if (parts.length !== 2) return null;
+  const [payloadB64, sigB64] = parts;
+  try {
+    const expectedSig = createHmac("sha256", secret).update(payloadB64).digest();
+    const givenSig = Buffer.from(sigB64, "base64url");
+    if (givenSig.length === expectedSig.length && timingSafeEqual(givenSig, expectedSig)) {
+      const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+      if (payload.exp && payload.exp > Date.now() / 1000) {
+        return payload.m;
+      }
+    }
+  } catch {}
+  return null;
+}
 
 // In-memory IP rate limiter sederhana (maks 15 token / menit per IP pada warm instance)
 const rateLimitMap = new Map();
@@ -149,17 +168,37 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed. Gunakan GET atau POST." });
   }
 
-  // Verifikasi Kata Sandi ('admin' atau 'login')
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
-  const validPasswords = ["admin", "login", expectedPassword];
-  const providedPassword =
-    req.headers["x-admin-password"] ||
-    req.query?.password ||
-    req.query?.key;
+  // Verifikasi Autentikasi (Token HMAC atau Kata Sandi)
+  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
+  const expectedPassword = (process.env.ADMIN_PASSWORD || "admin").trim().toLowerCase();
+  const expectedUserPassword = (process.env.USER_PASSWORD || "login").trim().toLowerCase();
+  let authMode = null;
 
-  if (!providedPassword || !validPasswords.includes(String(providedPassword).trim())) {
+  // 1. Cek Header Authorization (Bearer token)
+  const authHeader = req.headers["authorization"] || "";
+  if (authHeader.startsWith("Bearer ")) {
+    authMode = verifyToken(authHeader.slice(7).trim(), secret);
+  }
+
+  // 2. Cek Header / Query sandi langsung
+  if (!authMode) {
+    const directPass = (
+      req.headers["x-admin-password"] ||
+      req.query?.password ||
+      req.query?.key ||
+      ""
+    ).trim().toLowerCase();
+
+    if (directPass === "admin" || directPass === expectedPassword) {
+      authMode = "jocelyn";
+    } else if (directPass === "login" || directPass === expectedUserPassword) {
+      authMode = "default";
+    }
+  }
+
+  if (!authMode) {
     return res.status(401).json({
-      error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') diperlukan.",
+      error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') atau token sesi diperlukan.",
     });
   }
 
@@ -182,8 +221,7 @@ export default async function handler(req, res) {
 
   if (!apiKey) {
     return res.status(500).json({
-      error:
-        "GEMINI_API_KEY belum dipasang di Environment Variables Vercel. Silakan buka Vercel Dashboard -> Settings -> Environment Variables dan tambahkan GEMINI_API_KEY.",
+      error: "Layanan Celyn belum dikonfigurasi dengan benar. Harap hubungi administrator.",
     });
   }
 
@@ -201,9 +239,7 @@ export default async function handler(req, res) {
       },
     });
 
-    const isAdmin =
-      String(providedPassword).trim() === "admin" ||
-      String(providedPassword).trim() === expectedPassword;
+    const isAdmin = authMode === "jocelyn";
     const memoryContext = isAdmin ? await getTursoMemoryBlock() : null;
 
     return res.status(200).json({
@@ -216,7 +252,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("[Vercel API /api/token] Error:", err);
     return res.status(500).json({
-      error: `Gagal membuat Ephemeral Token Gemini: ${err?.message || "Unknown error"}`,
+      error: `Gagal menginisialisasi sesi percakapan Celyn: ${err?.message || "Unknown error"}`,
     });
   }
 }

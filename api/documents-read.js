@@ -1,31 +1,104 @@
 import Busboy from "busboy";
-import { fileTypeFromBuffer } from "file-type";
-import { extractText } from "unpdf";
+import { getDocumentProxy, extractText } from "unpdf";
 import ExcelJS from "exceljs";
 import mammoth from "mammoth";
 import TurndownService from "turndown";
+import { gfm } from "turndown-plugin-gfm";
 import { GoogleGenAI } from "@google/genai";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
-const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4 MB batas Vercel serverless body
+const PDF_MAGIC = Buffer.from([0x25, 0x50, 0x44, 0x46]); // %PDF
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]); // PK..
+const CFB_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]); // Compound File Binary
 
-function parseMultipart(req) {
+function verifyAuth(req) {
+  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
+  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
+  const expectedUserPassword = process.env.USER_PASSWORD || "login";
+
+  // Check Bearer Token
+  const authHeader = req.headers["authorization"] || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const parts = token.split(".");
+    if (parts.length === 2) {
+      try {
+        const [payloadB64, sigB64] = parts;
+        const expectedSig = createHmac("sha256", secret).update(payloadB64).digest();
+        const givenSig = Buffer.from(sigB64, "base64url");
+        if (givenSig.length === expectedSig.length && timingSafeEqual(givenSig, expectedSig)) {
+          const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+          if (payload.exp && payload.exp > Date.now() / 1000) {
+            return { valid: true, mode: payload.m };
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // Check direct password
+  const directPass = req.headers["x-admin-password"] || req.query?.password || req.query?.key;
+  if (directPass) {
+    const trimmed = String(directPass).trim();
+    if (trimmed === expectedPassword || trimmed === "admin") {
+      return { valid: true, mode: "jocelyn" };
+    }
+    if (trimmed === expectedUserPassword || trimmed === "login") {
+      return { valid: true, mode: "default" };
+    }
+  }
+
+  return { valid: false };
+}
+
+function validateMagicBytes(buffer, fileName) {
+  if (!buffer || buffer.length < 4) {
+    return { valid: false, error: "File kosong" };
+  }
+  const ext = (fileName.toLowerCase().split(".").pop() || "");
+  const head = buffer.subarray(0, Math.min(buffer.length, 8192));
+
+  if (ext === "pdf") {
+    const idx = head.indexOf(PDF_MAGIC);
+    if (idx !== -1 && idx <= 1024) {
+      return { valid: true, kind: "pdf", mime: "application/pdf" };
+    }
+    return { valid: false, error: "Bukan file PDF yang valid" };
+  }
+
+  if (ext === "docx" || ext === "xlsx") {
+    if (head.subarray(0, 4).equals(ZIP_MAGIC)) {
+      return { valid: true, kind: ext, mime: ext === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
+    }
+    if (head.length >= 8 && head.subarray(0, 8).equals(CFB_MAGIC)) {
+      return { valid: true, kind: "cfb_encrypted", mime: "application/x-cfb" };
+    }
+    return { valid: false, error: `Bukan file .${ext} yang valid` };
+  }
+
+  if (ext === "doc" || ext === "xls") {
+    if (head.length >= 8 && head.subarray(0, 8).equals(CFB_MAGIC)) {
+      return { valid: true, kind: "legacy_binary", mime: "application/x-cfb" };
+    }
+    return { valid: false, error: `Bukan file .${ext} yang valid` };
+  }
+
+  return { valid: false, error: "Ekstensi tidak didukung" };
+}
+
+async function parseMultipart(req) {
   return new Promise((resolve, reject) => {
     let fileBuffer = null;
     let fileName = "document";
     let fileMime = "application/octet-stream";
-    let fileSize = 0;
-    let limitExceeded = false;
 
     let bb;
     try {
       bb = Busboy({
         headers: req.headers,
-        limits: {
-          fileSize: MAX_UPLOAD_BYTES,
-          files: 1,
-        },
+        limits: { files: 1 },
       });
-    } catch (e) {
+    } catch {
       return reject(new Error("INVALID_MULTIPART_HEADERS"));
     }
 
@@ -35,66 +108,39 @@ function parseMultipart(req) {
 
       const chunks = [];
       fileStream.on("data", (chunk) => {
-        fileSize += chunk.length;
-        if (fileSize > MAX_UPLOAD_BYTES) {
-          limitExceeded = true;
-          fileStream.resume();
-          return;
-        }
         chunks.push(chunk);
       });
 
-      fileStream.on("limit", () => {
-        limitExceeded = true;
-      });
-
       fileStream.on("end", () => {
-        if (!limitExceeded) {
-          fileBuffer = Buffer.concat(chunks);
-        }
+        fileBuffer = Buffer.concat(chunks);
       });
     });
 
-    bb.on("finish", async () => {
-      if (limitExceeded) {
-        return reject(new Error("FILE_TOO_LARGE"));
-      }
+    bb.on("finish", () => {
       if (!fileBuffer || fileBuffer.length === 0) {
         return reject(new Error("NO_FILE_UPLOADED"));
       }
 
-      const lowerName = fileName.toLowerCase();
-      const isPdfExt = lowerName.endsWith(".pdf");
-      const isExcelExt = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
-      const isWordExt = lowerName.endsWith(".docx") || lowerName.endsWith(".doc");
-
-      if (!isPdfExt && !isExcelExt && !isWordExt) {
+      const magicCheck = validateMagicBytes(fileBuffer, fileName);
+      if (!magicCheck.valid) {
         return reject(new Error("INVALID_FILE_TYPE"));
       }
 
-      const detected = await fileTypeFromBuffer(fileBuffer);
-      const ALLOWED_MIMES = [
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/zip",
-        "application/x-cfb",
-      ];
-
-      if (detected && !ALLOWED_MIMES.includes(detected.mime) && !isPdfExt && !isExcelExt && !isWordExt) {
-        return reject(new Error("INVALID_FILE_TYPE"));
+      if (magicCheck.kind === "cfb_encrypted") {
+        return reject(new Error("PASSWORD_REQUIRED"));
+      }
+      if (magicCheck.kind === "legacy_binary") {
+        return reject(new Error("LEGACY_FORMAT"));
       }
 
-      const finalMime = detected?.mime || fileMime;
       resolve({
         buffer: fileBuffer,
         fileName,
-        mimeType: finalMime,
+        mimeType: magicCheck.mime || fileMime,
       });
     });
 
     bb.on("error", (err) => reject(err));
-
     req.pipe(bb);
   });
 }
@@ -103,72 +149,73 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
   const isPdf = mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
   const isExcel =
     mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-    fileName.toLowerCase().endsWith(".xlsx") ||
-    fileName.toLowerCase().endsWith(".xls");
+    fileName.toLowerCase().endsWith(".xlsx");
   const isWord =
     mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    fileName.toLowerCase().endsWith(".docx") ||
-    fileName.toLowerCase().endsWith(".doc");
+    fileName.toLowerCase().endsWith(".docx");
 
   if (isPdf) {
-    let cleanText = "";
-    let totalPages = 1;
+    let pdf;
     try {
-      const res = await extractText(new Uint8Array(buffer), { mergePages: true });
-      totalPages = res.totalPages || 1;
-      cleanText = (res.text || "").trim();
-    } catch {}
+      pdf = await getDocumentProxy(new Uint8Array(buffer));
+    } catch (e) {
+      if (e?.name === "PasswordException" || String(e?.message).toLowerCase().includes("password")) {
+        throw new Error("PASSWORD_REQUIRED");
+      }
+      throw e;
+    }
 
-    const avgChars = cleanText.length / Math.max(totalPages, 1);
-    if (avgChars >= 30 && cleanText.length >= 40) {
+    const { totalPages, text } = await extractText(pdf, { mergePages: true });
+    const cleanText = (text || "").trim();
+    const avgChars = totalPages > 0 ? cleanText.length / totalPages : 0;
+
+    if (cleanText.length > 50 && avgChars > 20) {
       return {
         fileName,
         mimeType: "application/pdf",
         markdownContent: cleanText,
         usedOcr: false,
-        totalPages,
+        pages: totalPages,
         truncated: false,
         characterCount: cleanText.length,
       };
     }
 
-    // OCR Fallback
     if (apiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const ocrRes = await ai.models.generateContent({
-          model: process.env.DOC_OCR_MODEL || "gemini-3-flash-preview",
-          contents: [
-            {
-              inlineData: {
-                data: buffer.toString("base64"),
-                mimeType: "application/pdf",
-              },
+      const ai = new GoogleGenAI({ apiKey });
+      const ocrModel = process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
+      const resp = await ai.models.generateContent({
+        model: ocrModel,
+        contents: [
+          {
+            inlineData: {
+              data: buffer.toString("base64"),
+              mimeType: "application/pdf",
             },
-            {
-              text: "Lakukan OCR secara presisi pada dokumen PDF ini. Pertahankan struktur judul, paragraf, daftar poin, dan ubah semua tabel menjadi Markdown Table. Jawab hanya dengan isi dokumen tanpa pengantar.",
-            },
-          ],
-        });
-        const ocrText = (ocrRes.text || "").trim();
-        return {
-          fileName,
-          mimeType: "application/pdf",
-          markdownContent: ocrText || cleanText,
-          usedOcr: true,
-          totalPages,
-          truncated: false,
-          characterCount: ocrText.length,
-        };
-      } catch {}
+          },
+          {
+            text: "Ekstrak seluruh teks dari file PDF ini secara lengkap dan akurat. Pertahankan struktur judul, paragraf, dan tabel dalam format Markdown.",
+          },
+        ],
+      });
+      const ocrText = resp.text || "";
+      return {
+        fileName,
+        mimeType: "application/pdf",
+        markdownContent: ocrText,
+        usedOcr: true,
+        pages: totalPages,
+        truncated: false,
+        characterCount: ocrText.length,
+      };
     }
 
     return {
       fileName,
       mimeType: "application/pdf",
-      markdownContent: cleanText || "(PDF scan/gambar tanpa teks digital)",
+      markdownContent: cleanText || "(PDF kosong atau berupa gambar pindai)",
       usedOcr: false,
-      totalPages,
+      pages: totalPages,
       truncated: false,
       characterCount: cleanText.length,
     };
@@ -177,64 +224,65 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
   if (isExcel) {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
-    const sections = [];
+    const lines = [];
 
-    workbook.eachSheet((sheet) => {
-      const rows = [`### Sheet: ${sheet.name}\n`];
-      let maxCols = 0;
-      sheet.eachRow({ includeEmpty: false }, (r) => {
-        if (r.actualCellCount > maxCols) maxCols = r.actualCellCount;
-      });
-      maxCols = Math.min(Math.max(maxCols, 1), 25);
-
-      let rowCount = 0;
-      let isFirst = true;
-
-      sheet.eachRow({ includeEmpty: false }, (row) => {
-        rowCount++;
-        if (rowCount > 100) return;
-
-        const cells = [];
-        for (let col = 1; col <= maxCols; col++) {
-          const cell = row.getCell(col);
+    workbook.eachSheet((worksheet) => {
+      const isHidden = worksheet.state === "hidden";
+      lines.push(`### Sheet: ${worksheet.name}${isHidden ? " [TERSEMBUNYI]" : ""}\n`);
+      const rows = [];
+      worksheet.eachRow({ includeEmpty: false }, (row) => {
+        const rowVals = [];
+        row.eachCell({ includeEmpty: true }, (cell) => {
           let val = cell.value;
           if (val && typeof val === "object") {
-            if ("result" in val && val.result !== undefined && val.result !== null) val = val.result;
-            else if ("text" in val) val = val.text;
+            if ("result" in val) {
+              const f = val.formula ? ` [Rumus: =${val.formula}]` : "";
+              val = `${val.result ?? ""}${f}`;
+            } else if ("richText" in val && Array.isArray(val.richText)) {
+              val = val.richText.map((t) => t.text).join("");
+            } else if (val instanceof Date) {
+              val = val.toISOString().slice(0, 10);
+            } else {
+              val = JSON.stringify(val);
+            }
           }
-          if (val instanceof Date) val = val.toISOString().split("T")[0];
-          const str = val === null || val === undefined ? "" : String(val);
-          cells.push(str.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ").trim());
-        }
-
-        rows.push(`| ${cells.join(" | ")} |`);
-        if (isFirst) {
-          rows.push(`| ${cells.map(() => "---").join(" | ")} |`);
-          isFirst = false;
-        }
+          if (cell.note) {
+            val = `${val ?? ""} [Komentar: ${cell.note}]`;
+          }
+          rowVals.push(String(val ?? "").replace(/\|/g, "\\|").trim());
+        });
+        rows.push(rowVals);
       });
 
-      sections.push(rows.join("\n"));
+      if (rows.length > 0) {
+        const header = rows[0];
+        lines.push(`| ${header.join(" | ")} |`);
+        lines.push(`| ${header.map(() => "---").join(" | ")} |`);
+        for (let i = 1; i < rows.length; i++) {
+          lines.push(`| ${rows[i].join(" | ")} |`);
+        }
+      }
+      lines.push("");
     });
 
-    const md = sections.join("\n\n---\n\n").trim();
+    const fullContent = lines.join("\n").trim();
     return {
       fileName,
       mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      markdownContent: md || "(Excel kosong)",
+      markdownContent: fullContent || "(Excel kosong)",
       usedOcr: false,
       truncated: false,
-      characterCount: md.length,
+      characterCount: fullContent.length,
     };
   }
 
   if (isWord) {
     const td = new TurndownService({ headingStyle: "atx" });
+    td.use(gfm);
     const res = await mammoth.convertToHtml(
       { buffer },
       {
         ignoreEmptyParagraphs: true,
-        convertImage: (mammoth.images && mammoth.images.imgElement) ? mammoth.images.imgElement(() => Promise.resolve({ src: "" })) : undefined,
       }
     );
     const md = td.turndown(res.value || "").trim();
@@ -264,11 +312,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed. Gunakan POST." });
   }
 
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
-  const authPass = req.headers["x-admin-password"] || req.query?.password || req.query?.key;
-
-  if (authPass !== "admin" && authPass !== "login" && authPass !== expectedPassword) {
-    return res.status(401).json({ error: "Akses ditolak: Autentikasi diperlukan." });
+  const auth = verifyAuth(req);
+  if (!auth.valid) {
+    return res.status(401).json({ error: "Akses ditolak: Autentikasi valid diperlukan." });
   }
 
   try {
@@ -276,22 +322,25 @@ export default async function handler(req, res) {
     const apiKey = process.env.GEMINI_API_KEY;
     const document = await extractDoc(uploaded.buffer, uploaded.fileName, uploaded.mimeType, apiKey);
 
-    const maxChars = parseInt(process.env.DOC_MAX_CONTEXT_CHARS || "60000", 10);
-    if (document.markdownContent.length > maxChars) {
-      document.markdownContent =
-        document.markdownContent.slice(0, maxChars) +
-        "\n\n*(Catatan: Sebagian isi dokumen dipotong karena batas maksimum konteks)*";
-      document.truncated = true;
-      document.characterCount = document.markdownContent.length;
-    }
-
     return res.status(200).json({ ok: true, document });
   } catch (err) {
+    if (err.message === "PASSWORD_REQUIRED") {
+      return res.status(422).json({
+        code: "PASSWORD_REQUIRED",
+        error: "File ini dilindungi password sehingga tidak dapat saya buka. Silakan masukkan password atau kirim versi tanpa password.",
+      });
+    }
+    if (err.message === "LEGACY_FORMAT") {
+      return res.status(422).json({
+        code: "LEGACY_FORMAT",
+        error: "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi.",
+      });
+    }
     if (err.message === "FILE_TOO_LARGE") {
-      return res.status(413).json({ error: "Ukuran file melebihi batas maksimum (maks 4 MB di Vercel)" });
+      return res.status(413).json({ error: "Ukuran file melebihi batas maksimum di lingkungan serverless." });
     }
     if (err.message === "INVALID_FILE_TYPE") {
-      return res.status(415).json({ error: "Format file tidak didukung. Unggah PDF, Excel (.xlsx/.xls), atau Word (.docx/.doc)." });
+      return res.status(415).json({ error: "Format file tidak didukung atau isi file tidak valid. Celyn mendukung PDF, Excel (.xlsx), atau Word (.docx)." });
     }
     return res.status(400).json({ error: err?.message || "Gagal memproses file dokumen" });
   }

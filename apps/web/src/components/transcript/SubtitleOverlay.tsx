@@ -3,7 +3,7 @@ import React from "react";
 interface SubtitleOverlayProps {
   transcripts: Array<{ speaker: "user" | "celyn"; text: string; time: string }>;
   statusMessage?: string;
-  status?: "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
+  status?: "idle" | "connecting" | "listening" | "thinking" | "speaking" | "researching" | "working" | "error";
 }
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({

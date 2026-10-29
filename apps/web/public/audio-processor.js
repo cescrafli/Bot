@@ -55,4 +55,7 @@ class GeminiAudioRecorderProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor("gemini-audio-recorder", GeminiAudioRecorderProcessor);
+registerProcessor("celyn-audio-recorder", GeminiAudioRecorderProcessor);
+try {
+  registerProcessor("gemini-audio-recorder", GeminiAudioRecorderProcessor);
+} catch {}

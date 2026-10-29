@@ -500,8 +500,9 @@ Format output WAJIB JSON:
   "newFacts": ["fakta 1"]
 }`;
 
+    const modelName = process.env.TEXT_MODEL || "gemini-3-flash-preview";
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: modelName,
       contents: prompt,
       config: { responseMimeType: "application/json" },
     });

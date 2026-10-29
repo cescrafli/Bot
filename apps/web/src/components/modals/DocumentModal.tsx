@@ -53,16 +53,22 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 4 * 1024 * 1024) {
-      setErrorMessage("Ukuran file melebihi batas 4 MB.");
-      return;
-    }
-
     setErrorMessage(null);
     try {
       await onUploadDocument(file);
     } catch (err: any) {
-      setErrorMessage(err?.message || "Gagal mengunggah dokumen.");
+      const msg = err?.message || "Gagal mengunggah dokumen.";
+      if (msg.includes("PASSWORD_REQUIRED") || msg.toLowerCase().includes("password")) {
+        setErrorMessage(
+          "File ini dilindungi password sehingga tidak dapat saya buka. Silakan kirim versi tanpa password atau buka enkripsinya terlebih dahulu."
+        );
+      } else if (msg.includes("LEGACY_FORMAT") || msg.toLowerCase().includes(".doc") || msg.toLowerCase().includes(".xls")) {
+        setErrorMessage(
+          "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi."
+        );
+      } else {
+        setErrorMessage(msg);
+      }
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }

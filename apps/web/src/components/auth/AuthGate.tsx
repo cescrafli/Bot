@@ -5,7 +5,7 @@ interface AuthGateProps {
   error: string | null;
   isLocked: boolean;
   lockoutSeconds: number;
-  onLogin: (password: string, rememberMe: boolean) => boolean;
+  onLogin: (password: string, rememberMe: boolean) => boolean | Promise<boolean>;
   onClearError: () => void;
 }
 
@@ -35,11 +35,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     }
   }, [error]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!password.trim() || isLocked) return;
 
-    const success = onLogin(password, true);
+    const success = await onLogin(password, true);
     if (!success) {
       setPassword("");
       inputRef.current?.focus();

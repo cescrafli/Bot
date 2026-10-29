@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+import { config } from "../config.js";
 import { createClient, Client } from "@libsql/client";
 import { GoogleGenAI } from "@google/genai";
 import {
@@ -692,8 +693,11 @@ Format output WAJIB JSON:
 }`;
 
       let responseText = "";
-      const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"];
-      for (const modelName of modelsToTry) {
+      const preferredModel = config.textModel || process.env.TEXT_MODEL || "gemini-3-flash-preview";
+      const modelsToTry = [preferredModel, "gemini-3.8-flash", "gemini-3-flash-preview"];
+      // Dedup models
+      const uniqueModels = Array.from(new Set(modelsToTry));
+      for (const modelName of uniqueModels) {
         try {
           const response = await ai.models.generateContent({
             model: modelName,

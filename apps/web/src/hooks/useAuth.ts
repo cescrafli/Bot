@@ -16,6 +16,12 @@ const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 jam TTL
 export function isTokenValid(token: string | null): boolean {
   if (!token) return false;
   try {
+    if (token.includes(".")) {
+      const [payloadB64] = token.split(".");
+      const jsonStr = atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/"));
+      const payload = JSON.parse(jsonStr);
+      return Boolean(payload.exp && payload.exp > Math.floor(Date.now() / 1000));
+    }
     const decoded = atob(token);
     if (!decoded.startsWith("celyn_auth:")) return false;
     const parts = decoded.split(":");
@@ -29,6 +35,14 @@ export function isTokenValid(token: string | null): boolean {
   } catch {
     return false;
   }
+}
+
+export function getStoredAuthToken(): string | null {
+  const sessionToken = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (sessionToken && isTokenValid(sessionToken)) return sessionToken;
+  const localToken = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (localToken && isTokenValid(localToken)) return localToken;
+  return null;
 }
 
 export function getStoredAuthMode(): AuthMode {
@@ -121,25 +135,50 @@ export function useAuth() {
   }, [checkLockout]);
 
   const login = useCallback(
-    (inputPassword: string, rememberMe = false): boolean => {
+    async (inputPassword: string, rememberMe = false): Promise<boolean> => {
       if (checkLockout()) {
         setError(`Terlalu banyak percobaan. Harap tunggu ${lockoutSeconds} detik.`);
         return false;
       }
 
       const trimmed = inputPassword.trim().toLowerCase();
-      // Hanya 2 password yang valid: 'admin' (mode Jocelyn) dan 'login' (mode default)
-      if (trimmed === "admin" || trimmed === "login") {
-        const mode: AuthMode = trimmed === "admin" ? "jocelyn" : "default";
-        const token = btoa(`celyn_auth:${Date.now()}:${mode}`);
+
+      // Coba verifikasi server-side (HMAC signed token)
+      let verifiedMode: AuthMode | null = null;
+      let sessionToken: string | null = null;
+
+      try {
+        const resp = await fetch("/api/auth/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: trimmed }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.valid && data.mode) {
+            verifiedMode = data.mode;
+            sessionToken = data.token || null;
+          }
+        }
+      } catch {
+        // Fallback jika server lokal/offline belum siap
+      }
+
+      // Kredensial mandatori: 'admin' (mode jocelyn) dan 'login' (mode default)
+      if (!verifiedMode && (trimmed === "admin" || trimmed === "login")) {
+        verifiedMode = trimmed === "admin" ? "jocelyn" : "default";
+      }
+
+      if (verifiedMode) {
+        const token = sessionToken || btoa(`celyn_auth:${Date.now()}:${verifiedMode}`);
         if (rememberMe) {
           localStorage.setItem(AUTH_STORAGE_KEY, token);
-          localStorage.setItem(AUTH_MODE_KEY, mode);
+          localStorage.setItem(AUTH_MODE_KEY, verifiedMode);
           localStorage.setItem(AUTH_PASSWORD_KEY, trimmed);
           localStorage.setItem(AUTH_REMEMBER_KEY, "true");
         } else {
           sessionStorage.setItem(AUTH_STORAGE_KEY, token);
-          sessionStorage.setItem(AUTH_MODE_KEY, mode);
+          sessionStorage.setItem(AUTH_MODE_KEY, verifiedMode);
           sessionStorage.setItem(AUTH_PASSWORD_KEY, trimmed);
         }
 

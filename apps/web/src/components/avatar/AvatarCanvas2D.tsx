@@ -14,6 +14,7 @@ interface AvatarCanvas2DProps {
   intonation?: number; // 0.0 - 1.0 (vocal emphasis & stress)
   isSpeaking: boolean;
   lookAt: LookAtTarget | null;
+  status?: "idle" | "connecting" | "listening" | "thinking" | "researching" | "working" | "speaking" | "error";
   isRigPanelOpen?: boolean;
   onToggleRigPanel?: () => void;
 }
@@ -24,6 +25,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   intonation = 0,
   isSpeaking,
   lookAt,
+  status = "idle",
   isRigPanelOpen: externalRigPanelOpen,
   onToggleRigPanel,
 }) => {
@@ -516,6 +518,66 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
             mouthPivotY={rigConfig.mouthPivotY}
             mouthScale={rigConfig.mouthScale}
           />
+
+          {/* ============================================================= */}
+          {/* LAPISAN ANIMASI LAPTOP RISET (Membuka laptop saat research)  */}
+          {/* ============================================================= */}
+          <div
+            className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-[72%] max-w-[340px] pointer-events-none z-35 transition-all duration-700 ease-out flex flex-col items-center ${
+              status === "researching" || status === "working"
+                ? "translate-y-4 opacity-100 scale-100"
+                : "translate-y-48 opacity-0 scale-90"
+            }`}
+            style={{ perspective: "600px" }}
+          >
+            {/* Layar Laptop Terbuka */}
+            <div
+              className={`w-[85%] h-36 bg-gradient-to-b from-slate-900 to-slate-950 border-2 border-slate-700/80 rounded-t-xl shadow-2xl p-2.5 flex flex-col justify-between transition-transform duration-700 ease-out ${
+                status === "researching" || status === "working"
+                  ? "rotate-x-[-12deg] shadow-cyan-500/20"
+                  : "rotate-x-[-90deg]"
+              }`}
+              style={{ transformOrigin: "bottom center" }}
+            >
+              <div className="w-full flex items-center justify-center pb-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-600 border border-slate-500" />
+              </div>
+              <div className="flex-1 rounded-lg bg-slate-950/90 border border-cyan-500/30 p-2 flex flex-col justify-between overflow-hidden relative shadow-inner">
+                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/5 via-transparent to-cyan-500/10 pointer-events-none" />
+                <div className="flex items-center justify-between z-10">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-[9px] font-mono font-bold text-cyan-300 uppercase tracking-wider">
+                      {status === "researching" ? "Celyn Research Engine" : "Doc Processing"}
+                    </span>
+                  </div>
+                  <span className="text-[8px] font-mono text-slate-400">ONLINE</span>
+                </div>
+
+                <div className="space-y-1 z-10 py-1 font-mono text-[8px] text-slate-300">
+                  <div className="flex items-center gap-1 text-cyan-200">
+                    <span className="text-cyan-400">&gt;</span>
+                    <span className="truncate">
+                      {status === "researching" ? "Mencari data & referensi web..." : "Memproses dokumen pengguna..."}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                    <div className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full w-2/3 animate-pulse" />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[7px] font-mono text-slate-500 z-10">
+                  <span>SSL SECURE</span>
+                  <span>GROUNDED SEARCH</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Keyboard / Body Bawah Laptop */}
+            <div className="w-full h-7 bg-gradient-to-b from-slate-700 to-slate-800 border-t border-slate-600 rounded-b-lg shadow-xl flex items-center justify-center relative">
+              <div className="w-10 h-1 bg-slate-900 rounded-b-md mx-auto" />
+            </div>
+          </div>
 
 
           {/* ============================================================= */}

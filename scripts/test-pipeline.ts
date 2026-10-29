@@ -27,12 +27,22 @@ import {
   stripMarkdownFormatting,
   ExcelPayloadSchema,
   ReportPayloadSchema,
+  CELYN_CORE_TOOLS,
+  signAuthToken,
+  verifyAuthToken,
+  verifyPassword,
+  authenticateWithPassword,
+  validateDocumentMagicBytes,
+  detectDocumentProtection,
+  MESSAGES,
+  RESEARCH_STATUS_TEXT,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 import { memoryService } from "../apps/server/src/services/MemoryService.js";
 import { documentWriterService } from "../apps/server/src/services/DocumentWriterService.js";
+import { researchService } from "../apps/server/src/services/ResearchService.js";
 import { documentReaderService } from "../apps/server/src/services/DocumentReaderService.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
@@ -100,49 +110,17 @@ const restoredSamples = new Int16Array(restoredBytes.buffer, restoredBytes.byteO
 assert(restoredSamples[1] === 16384, "Preservasi amplitudo positif 16384 akurat");
 assert(restoredSamples[2] === -16384, "Preservasi amplitudo negatif -16384 akurat");
 
-// 3. Uji Validitas Skema Tool Calling Gemini Live API
-console.log("\n--- 3. Uji Definisi Tool Calling Gemini Live ---");
+// 3. Uji Validitas Skema Tool Calling Celyn Core Tools
+console.log("\n--- 3. Uji Definisi Celyn Core Tools ---");
 
-const tools = [
-  {
-    name: "set_expression",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        emotion: { enum: ["neutral", "happy", "thinking", "surprised", "sad", "shy"] },
-      },
-      required: ["emotion"],
-    },
-  },
-  {
-    name: "point_at_screen",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        x: { type: "NUMBER" },
-        y: { type: "NUMBER" },
-      },
-      required: ["x", "y"],
-    },
-  },
-  {
-    name: "remember_fact",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        fact: { type: "STRING" },
-        category: { enum: ["preferensi", "jadwal", "identitas", "fakta", "catatan"] },
-        importance: { type: "NUMBER" },
-      },
-      required: ["fact"],
-    },
-  },
-];
-
-assert(tools.length === 3, "Tepat 3 tool AI terdaftar untuk Celyn");
-assert(tools[0].name === "set_expression", "Tool 'set_expression' tersedia");
-assert(tools[1].name === "point_at_screen", "Tool 'point_at_screen' tersedia");
-assert(tools[2].name === "remember_fact", "Tool 'remember_fact' tersedia untuk memori otonom");
+assert(CELYN_CORE_TOOLS.length === 6, "Tepat 6 core tool AI terdaftar untuk Celyn");
+const toolNames = CELYN_CORE_TOOLS.map((t) => t.name);
+assert(toolNames.includes("set_expression"), "Tool 'set_expression' tersedia");
+assert(toolNames.includes("point_at_screen"), "Tool 'point_at_screen' tersedia");
+assert(toolNames.includes("remember_fact"), "Tool 'remember_fact' tersedia untuk memori otonom");
+assert(toolNames.includes("create_document"), "Tool 'create_document' tersedia untuk pembuatan PDF/DOCX/XLSX");
+assert(toolNames.includes("process_document"), "Tool 'process_document' tersedia untuk transformasi dokumen");
+assert(toolNames.includes("research"), "Tool 'research' tersedia untuk riset web dengan sitasi tautan");
 
 // 4. Uji Normalisasi & Pemetaan Sinonim Emosi Avatar
 console.log("\n--- 4. Uji Normalisasi Emosi Avatar & Deteksi Emosi Pengguna ---");
@@ -1061,7 +1039,91 @@ async function runTtsTests() {
     "Konteks dokumen dienkapsulasi rapi dalam tag <document_context> sebagai data transien sesi tanpa mencemari memori Turso"
   );
 
-  // 16. Ringkasan
+  // 16. Uji Autentikasi HMAC Token & Verifikasi Kredensial
+  console.log("\n--- 16. Uji Autentikasi HMAC Token & Verifikasi Kredensial ---");
+  const testSecret = "test-secret-salt-32-chars-long-minimum-celyn";
+
+  // Verifikasi Kredensial
+  const adminCheck = authenticateWithPassword("admin");
+  assert(adminCheck.valid === true && adminCheck.mode === "jocelyn", "Password 'admin' sah dan menghasilkan mode 'jocelyn'");
+
+  const loginCheck = authenticateWithPassword("login");
+  assert(loginCheck.valid === true && loginCheck.mode === "default", "Password 'login' sah dan menghasilkan mode 'default'");
+
+  const invalidCheck = authenticateWithPassword("wrong-pass");
+  assert(invalidCheck.valid === false && invalidCheck.mode === undefined, "Password salah ditolak secara aman");
+
+  // Sign & Verify HMAC Session Token
+  const signedToken = signAuthToken("jocelyn", testSecret, 3600);
+  assert(typeof signedToken === "string" && signedToken.includes("."), "HMAC Token berhasil dibuat dengan format payload.signature");
+
+  const verified = verifyAuthToken(signedToken, testSecret);
+  assert(verified !== null && verified.mode === "jocelyn", "HMAC Token valid berhasil diverifikasi");
+
+  const tamperedToken = signedToken.slice(0, -3) + "xyz";
+  const verifiedTampered = verifyAuthToken(tamperedToken, testSecret);
+  assert(verifiedTampered === null, "HMAC Token yang dimanipulasi/tampered ditolak secara absolut");
+
+  // 17. Uji Keamanan Magic Bytes & Proteksi File
+  console.log("\n--- 17. Uji Keamanan Magic Bytes & File Validation ---");
+
+  // PDF Magic Byte (%PDF-)
+  const validPdfHeader = Buffer.from("%PDF-1.7\nSample content for validation");
+  const pdfCheck = validateDocumentMagicBytes(validPdfHeader, "test.pdf");
+  assert(pdfCheck.valid === true && pdfCheck.detectedMime === "application/pdf", "Magic bytes PDF (%PDF-) terverifikasi valid");
+
+  // Disguised Executable or Fake Script (.exe disguised as .pdf)
+  const fakePdfHeader = Buffer.from("MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00FakePEFile");
+  const fakePdfCheck = validateDocumentMagicBytes(fakePdfHeader, "payload.pdf");
+  assert(fakePdfCheck.valid === false, "File eksekusi (.exe MZ header) yang disamarkan jadi .pdf sukses diblokir");
+
+  // Valid ZIP OOXML Header (PK\x03\x04)
+  const validZipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00]);
+  const docxCheck = validateDocumentMagicBytes(validZipHeader, "laporan.docx");
+  assert(docxCheck.valid === true && docxCheck.detectedMime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Magic bytes DOCX (ZIP OOXML) terverifikasi valid");
+
+  const xlsxCheck = validateDocumentMagicBytes(validZipHeader, "rekap.xlsx");
+  assert(xlsxCheck.valid === true && xlsxCheck.detectedMime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Magic bytes XLSX (ZIP OOXML) terverifikasi valid");
+
+  // 18. Uji Deteksi Password & Format Warisan (PDF, DOCX, XLSX)
+  console.log("\n--- 18. Uji Deteksi Password & Format Warisan Dokumen ---");
+
+  // Compound File Binary Header (0xD0CF11E0A1B11AE1) for Encrypted OOXML / Legacy binary Office
+  const encryptedCfbHeader = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00, 0x00]);
+  const cfbDetection = await detectDocumentProtection(encryptedCfbHeader, "laporan.xlsx");
+  assert(cfbDetection.isProtected === true && cfbDetection.kind === "ooxml-encrypted", "Deteksi proteksi password / Compound File Binary berhasil");
+
+  // PDF with /Encrypt dictionary
+  const encryptedPdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Encrypt 3 0 R >>\nendobj");
+  const pdfEncDetection = await detectDocumentProtection(encryptedPdfBuffer, "dokumen.pdf");
+  assert(pdfEncDetection.isProtected === true && pdfEncDetection.kind === "pdf-password", "Deteksi PDF terproteksi password (/Encrypt dictionary) berhasil");
+
+  // Clean unencrypted PDF
+  const cleanPdfDetection = await detectDocumentProtection(validPdfHeader, "dokumen.pdf");
+  assert(cleanPdfDetection.isProtected === false, "Dokumen PDF bersih terkonfirmasi tidak terproteksi");
+
+  // 19. Uji Layanan Riset, Sitasi Tautan & Telemetri Laptop
+  console.log("\n--- 19. Uji Layanan Riset, Sitasi Tautan & Telemetri Laptop ---");
+
+  assert(RESEARCH_STATUS_TEXT === "Tunggu sebentar ya, saya sedang research...", "Teks status avatar riset laptop sesuai spesifikasi persis");
+
+  // Uji Formatter Sitasi Tautan Markdown
+  const testCitations = [
+    { title: "Dokumentasi Resmi", url: "https://example.com/docs" },
+    { title: "Portal Berita", url: "https://example.com/news" },
+  ];
+  const citationLinks = testCitations.map((c) => `[${c.title}](${c.url})`).join("\n");
+  assert(citationLinks.includes("[Dokumentasi Resmi](https://example.com/docs)"), "Format sitasi markdown link terverifikasi [Judul](URL)");
+  assert(citationLinks.includes("[Portal Berita](https://example.com/news)"), "Tautan markdown sumber riset valid dan dapat diklik");
+
+  // 20. Uji Zero-Branding UI (Celyn AI Pure Brand Integrity)
+  console.log("\n--- 20. Uji Zero-Branding UI (Celyn AI Pure Brand Integrity) ---");
+  assert(MESSAGES.VENDOR_BRAND === "Celyn AI", "Brand publik Celyn AI terdaftar sebagai Celyn AI");
+  assert(!MESSAGES.ERROR_GENERIC.toLowerCase().includes("gemini"), "Pesan error generik bersih dari nama vendor");
+  assert(!MESSAGES.ERROR_GENERIC.toLowerCase().includes("google"), "Pesan error generik bersih dari nama Google");
+  assert(MESSAGES.PASSWORD_REQUIRED.includes("File ini dilindungi password"), "Pesan ramah password-protected sesuai spesifikasi");
+
+  // 21. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

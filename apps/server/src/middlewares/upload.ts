@@ -1,6 +1,6 @@
 import http from "node:http";
 import Busboy from "busboy";
-import { fileTypeFromBuffer } from "file-type";
+import { validateDocumentMagicBytes } from "@celyn/shared";
 
 export interface UploadedFile {
   buffer: Buffer;
@@ -8,9 +8,14 @@ export interface UploadedFile {
   mimeType: string;
 }
 
+/**
+ * Parse multipart upload with streaming chunks and strict magic byte validation.
+ * @param req Incoming HTTP request
+ * @param maxBytes Max bytes allowed (0 = unlimited / no artificial cap)
+ */
 export async function parseMultipartUpload(
   req: http.IncomingMessage,
-  maxBytes: number = 4 * 1024 * 1024
+  maxBytes: number = 0
 ): Promise<UploadedFile> {
   return new Promise((resolve, reject) => {
     let fileBuffer: Buffer | null = null;
@@ -24,11 +29,11 @@ export async function parseMultipartUpload(
       bb = Busboy({
         headers: req.headers,
         limits: {
-          fileSize: maxBytes,
+          fileSize: maxBytes > 0 ? maxBytes : undefined,
           files: 1,
         },
       });
-    } catch (e) {
+    } catch {
       return reject(new Error("INVALID_MULTIPART_HEADERS"));
     }
 
@@ -39,7 +44,7 @@ export async function parseMultipartUpload(
       const chunks: Buffer[] = [];
       fileStream.on("data", (chunk: Buffer) => {
         fileSize += chunk.length;
-        if (fileSize > maxBytes) {
+        if (maxBytes > 0 && fileSize > maxBytes) {
           limitExceeded = true;
           fileStream.resume();
           return;
@@ -66,31 +71,15 @@ export async function parseMultipartUpload(
         return reject(new Error("NO_FILE_UPLOADED"));
       }
 
-      const lowerName = fileName.toLowerCase();
-      const isPdfExt = lowerName.endsWith(".pdf");
-      const isExcelExt = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
-      const isWordExt = lowerName.endsWith(".docx") || lowerName.endsWith(".doc");
+      // Validasi Magic Bytes secara ketat dari 8 KB pertama
+      const head = fileBuffer.subarray(0, Math.min(fileBuffer.length, 8192));
+      const validation = validateDocumentMagicBytes(head, fileName);
 
-      if (!isPdfExt && !isExcelExt && !isWordExt) {
+      if (!validation.valid) {
         return reject(new Error("INVALID_FILE_TYPE"));
       }
 
-      // Validasi Magic Bytes
-      const detected = await fileTypeFromBuffer(fileBuffer);
-      const ALLOWED_MIMES = [
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/zip", // DOCX dan XLSX berbasis kontainer ZIP
-        "application/x-cfb", // Format legacy binary XLS / DOC
-      ];
-
-      // Jika terdeteksi tipe biner berbahaya (seperti exe, dll)
-      if (detected && !ALLOWED_MIMES.includes(detected.mime)) {
-        return reject(new Error("INVALID_FILE_TYPE"));
-      }
-
-      const finalMime = detected?.mime || fileMime;
+      const finalMime = validation.detectedMime || fileMime;
       resolve({
         buffer: fileBuffer,
         fileName,

@@ -29,9 +29,9 @@ async function testGeminiVisionPoC() {
 
   const prompt = "Deskripsikan secara detail karakter apa yang ada dalam gambar ini, ciri-ciri fisiknya, pakaian, dan ekspresinya dalam Bahasa Indonesia yang ramah.";
 
-  const rawModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  // Model live (misal gemini-3.8-live) hanya untuk sesi bidirectional WebSocket; untuk endpoint REST generateContent gunakan gemini-2.5-flash
-  const model = rawModel.includes("live") ? "gemini-2.5-flash" : rawModel;
+  const rawModel = process.env.TEXT_MODEL || process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+  // Model live hanya untuk sesi bidirectional WebSocket; untuk endpoint REST generateContent gunakan model teks vision
+  const model = rawModel.includes("live") ? "gemini-3-flash-preview" : rawModel;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   console.log(`📡 Mengirim permintaan ke Gemini API (${model})...`);

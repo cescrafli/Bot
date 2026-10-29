@@ -5,10 +5,11 @@ import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
 import { memoryService } from "./services/MemoryService.js";
-import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken } from "@celyn/shared";
 import { parseMultipartUpload } from "./middlewares/upload.js";
 import { documentReaderService } from "./services/DocumentReaderService.js";
 import { documentService } from "./services/DocumentService.js";
+import { jobService } from "./services/JobService.js";
 
 // Metrik Global Server
 const serverStats = {
@@ -34,6 +35,44 @@ function getClientIp(req: http.IncomingMessage): string {
   return req.socket.remoteAddress || "unknown";
 }
 
+/**
+ * Resolves authentication status from Bearer Token or legacy passwords ('admin' / 'login')
+ */
+function getReqAuth(req: http.IncomingMessage): { valid: boolean; mode?: AuthMode } {
+  // 1. Cek Authorization Header (Bearer token)
+  const authHeader = req.headers["authorization"] || "";
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const verified = verifyAuthToken(token, config.authSecret);
+    if (verified) {
+      return { valid: true, mode: verified.mode };
+    }
+  }
+
+  // 2. Cek Header atau Query sandi langsung
+  const parsedUrl = new URL(req.url || "/", `http://localhost:${config.port}`);
+  const rawHeader = req.headers["x-admin-password"];
+  const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  const pass = (
+    headerPass ||
+    parsedUrl.searchParams.get("password") ||
+    parsedUrl.searchParams.get("key") ||
+    ""
+  ).trim().toLowerCase();
+
+  const adminPass = config.adminPassword.toLowerCase();
+  const userPass = config.userPassword.toLowerCase();
+
+  if (pass === "admin" || pass === adminPass) {
+    return { valid: true, mode: "jocelyn" };
+  }
+  if (pass === "login" || pass === userPass) {
+    return { valid: true, mode: "default" };
+  }
+
+  return { valid: false };
+}
+
 const server = http.createServer((req, res) => {
   // CORS Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -46,18 +85,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Health check endpoint (Liveness & Readiness Probe)
+  // Health check endpoint publik (Liveness & Readiness Probe - anti vendor leak)
   if (req.url === "/api/health" || req.url === "/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  // Diagnostics endpoint khusus admin terotentikasi
+  if (req.url === "/api/admin/diagnostics") {
+    const auth = getReqAuth(req);
+    if (!auth.valid || auth.mode !== "jocelyn") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Hanya mode admin yang diizinkan." }));
+      return;
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
         status: "ok",
         service: "Celyn AI Bot Backend Server",
-        geminiConfigured: !!config.geminiApiKey,
+        aiConfigured: !!config.geminiApiKey,
         tursoConnected: memoryService.isReady(),
         memoryProvider: "Turso Cloud libSQL (aws-ap-southeast-1)",
-        model: config.geminiModel,
-        voice: config.geminiVoice,
         activeConnections: serverStats.activeConnections,
         uptimeSeconds: Math.floor((Date.now() - serverStats.startTime) / 1000),
       })
@@ -65,7 +115,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Endpoint Verifikasi Autentikasi (Server-side Auth)
+  // Endpoint Verifikasi Autentikasi (Server-side Auth dengan HMAC Token)
   if (req.url === "/api/auth/verify" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => {
@@ -76,12 +126,14 @@ const server = http.createServer((req, res) => {
         const parsed = JSON.parse(body || "{}");
         const trimmed = String(parsed.password || "").trim().toLowerCase();
         if (trimmed === "admin" || trimmed === config.adminPassword.toLowerCase()) {
+          const token = signAuthToken("jocelyn", config.authSecret);
           res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ valid: true, mode: "jocelyn" }));
+          return res.end(JSON.stringify({ valid: true, mode: "jocelyn", token }));
         }
-        if (trimmed === "login") {
+        if (trimmed === "login" || trimmed === config.userPassword.toLowerCase()) {
+          const token = signAuthToken("default", config.authSecret);
           res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ valid: true, mode: "default" }));
+          return res.end(JSON.stringify({ valid: true, mode: "default", token }));
         }
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ valid: false, error: "Kata sandi salah" }));
@@ -93,7 +145,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Stats endpoint
+  // Stats endpoint publik (sanitized dari nama vendor model AI)
   if (req.url === "/api/stats") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
@@ -101,10 +153,29 @@ const server = http.createServer((req, res) => {
         uptimeSeconds: Math.floor((Date.now() - serverStats.startTime) / 1000),
         totalConnections: serverStats.totalConnections,
         activeConnections: serverStats.activeConnections,
-        geminiModel: config.geminiModel,
-        geminiVoice: config.geminiVoice,
       })
     );
+    return;
+  }
+
+  // Endpoint Unduh Dokumen Hasil Proses Latar Belakang (RFC 6266)
+  if (req.url?.startsWith("/api/documents/download")) {
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
+    const jobId = parsedUrl.searchParams.get("id");
+    const job = jobId ? jobService.getJob(jobId) : undefined;
+    if (!job || !job.resultBuffer) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Dokumen tidak ditemukan atau sudah kedaluwarsa." }));
+      return;
+    }
+    const safeName = job.fileName || "dokumen";
+    const asciiName = safeName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+      "Content-Length": job.resultBuffer.length,
+    });
+    res.end(job.resultBuffer);
     return;
   }
 
@@ -368,17 +439,8 @@ const server = http.createServer((req, res) => {
       req.url?.startsWith("/api/documents/upload?")) &&
     req.method === "POST"
   ) {
-    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
-    const authPass =
-      req.headers["x-admin-password"] ||
-      parsedUrl.searchParams.get("password") ||
-      parsedUrl.searchParams.get("key");
-
-    if (
-      authPass !== "admin" &&
-      authPass !== "login" &&
-      authPass !== config.adminPassword
-    ) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
       return;
@@ -395,6 +457,24 @@ const server = http.createServer((req, res) => {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, document: parsed }));
         } catch (readErr: any) {
+          if (readErr.message === "PASSWORD_REQUIRED") {
+            res.writeHead(422, { "Content-Type": "application/json" });
+            return res.end(
+              JSON.stringify({
+                code: "PASSWORD_REQUIRED",
+                error: "File ini dilindungi password sehingga tidak dapat saya buka. Silakan masukkan password atau kirim versi tanpa password.",
+              })
+            );
+          }
+          if (readErr.message === "LEGACY_FORMAT") {
+            res.writeHead(422, { "Content-Type": "application/json" });
+            return res.end(
+              JSON.stringify({
+                code: "LEGACY_FORMAT",
+                error: "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi.",
+              })
+            );
+          }
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
@@ -404,7 +484,23 @@ const server = http.createServer((req, res) => {
         }
       })
       .catch((err: any) => {
-        if (err.message === "FILE_TOO_LARGE") {
+        if (err.message === "PASSWORD_REQUIRED") {
+          res.writeHead(422, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              code: "PASSWORD_REQUIRED",
+              error: "File ini dilindungi password sehingga tidak dapat saya buka. Silakan masukkan password atau kirim versi tanpa password.",
+            })
+          );
+        } else if (err.message === "LEGACY_FORMAT") {
+          res.writeHead(422, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              code: "LEGACY_FORMAT",
+              error: "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi.",
+            })
+          );
+        } else if (err.message === "FILE_TOO_LARGE") {
           res.writeHead(413, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
@@ -415,7 +511,7 @@ const server = http.createServer((req, res) => {
           res.writeHead(415, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              error: "Format file tidak didukung atau berbahaya. Unggah PDF, Excel (.xlsx/.xls), atau Word (.docx/.doc).",
+              error: "Format file tidak didukung atau isi file tidak valid. Celyn mendukung PDF, Excel (.xlsx), atau Word (.docx).",
             })
           );
         } else {
@@ -435,28 +531,27 @@ const server = http.createServer((req, res) => {
     (req.url === "/api/documents/generate" || req.url?.startsWith("/api/documents/generate?")) &&
     req.method === "POST"
   ) {
-    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
-    const authPass =
-      req.headers["x-admin-password"] ||
-      parsedUrl.searchParams.get("password") ||
-      parsedUrl.searchParams.get("key");
-
-    if (
-      authPass !== "admin" &&
-      authPass !== "login" &&
-      authPass !== config.adminPassword
-    ) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
       return;
     }
 
     let rawBody = "";
+    let bodyTooLarge = false;
     req.on("data", (chunk) => {
       rawBody += chunk.toString();
+      if (rawBody.length > 256 * 1024) {
+        bodyTooLarge = true;
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Ukuran JSON permintaan melebihi batas 256 KB." }));
+        req.destroy();
+      }
     });
 
     req.on("end", async () => {
+      if (bodyTooLarge) return;
       try {
         const body = JSON.parse(rawBody || "{}");
         const kind: DocumentKind = body.kind;
@@ -481,9 +576,11 @@ const server = http.createServer((req, res) => {
           context,
         });
 
+        const safeName = result.fileName;
+        const asciiName = safeName.replace(/[^a-zA-Z0-9._-]/g, "_");
         res.writeHead(200, {
           "Content-Type": result.mimeType,
-          "Content-Disposition": `attachment; filename="${encodeURIComponent(result.fileName)}"`,
+          "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
           "Content-Length": result.buffer.length,
         });
         res.end(result.buffer);
@@ -560,25 +657,45 @@ wss.on("connection", async (ws: AliveWebSocket, req) => {
   console.log(`🔌 [Klien Masuk] Terhubung dari ${clientIp} (Aktif: ${serverStats.activeConnections})`);
 
   const parsedUrl = new URL(req.url || "/", `http://localhost:${config.port}`);
-  const rawHeader = req.headers["x-admin-password"];
-  const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-  const authPass =
-    headerPass ||
-    parsedUrl.searchParams.get("password") ||
-    parsedUrl.searchParams.get("key") ||
-    undefined;
+  // Verifikasi Autentikasi WebSocket (Token HMAC atau Kata Sandi)
+  const token = parsedUrl.searchParams.get("token") || undefined;
+  let authMode: AuthMode = "default";
+  let isAuthorized = false;
 
-  const validPasswords: string[] = ["admin", "login", config.adminPassword];
-  if (authPass && !validPasswords.includes(authPass)) {
-    console.warn(`⛔ [Auth Failed] Koneksi WebSocket ditolak: Password salah dari ${clientIp}`);
-    ws.send(JSON.stringify({ type: "error", message: "Akses ditolak: Kata sandi salah." }));
-    ws.close(1008, "Unauthorized");
-    return;
+  if (token) {
+    const verified = verifyAuthToken(token, config.authSecret);
+    if (verified) {
+      isAuthorized = true;
+      authMode = verified.mode;
+    }
   }
 
-  // Tentukan authMode: HANYA izinkan mode Jocelyn jika kata sandi terbukti adalah admin (cegah query param spoofing)
-  const isAdmin = authPass === "admin" || authPass === config.adminPassword;
-  const authMode: AuthMode = isAdmin ? "jocelyn" : "default";
+  if (!isAuthorized) {
+    const rawHeader = req.headers["x-admin-password"];
+    const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    const authPass = (
+      headerPass ||
+      parsedUrl.searchParams.get("password") ||
+      parsedUrl.searchParams.get("key") ||
+      ""
+    ).trim().toLowerCase();
+
+    const adminPass = config.adminPassword.toLowerCase();
+    const userPass = config.userPassword.toLowerCase();
+
+    if (authPass === "admin" || authPass === adminPass) {
+      isAuthorized = true;
+      authMode = "jocelyn";
+    } else if (authPass === "login" || authPass === userPass) {
+      isAuthorized = true;
+      authMode = "default";
+    } else if (authPass) {
+      console.warn(`⛔ [Auth Failed] Koneksi WebSocket ditolak: Password salah dari ${clientIp}`);
+      ws.send(JSON.stringify({ type: "error", message: "Akses ditolak: Kata sandi salah." }));
+      ws.close(1008, "Unauthorized");
+      return;
+    }
+  }
 
   const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
   const requestedSessionId = parsedUrl.searchParams.get("sessionId") || undefined;

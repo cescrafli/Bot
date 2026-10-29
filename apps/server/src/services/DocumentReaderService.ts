@@ -1,11 +1,11 @@
-import { extractText } from "unpdf";
+import { extractText, getDocumentProxy } from "unpdf";
 import ExcelJS from "exceljs";
 import mammoth from "mammoth";
 import TurndownService from "turndown";
 // @ts-expect-error turndown-plugin-gfm does not have bundled TS types in some versions
 import { gfm } from "turndown-plugin-gfm";
 import { GoogleGenAI } from "@google/genai";
-import { ParsedDocument } from "@celyn/shared";
+import { ParsedDocument, detectDocumentProtection } from "@celyn/shared";
 import { config } from "../config.js";
 
 export class DocumentReaderService {
@@ -40,17 +40,22 @@ export class DocumentReaderService {
     fileName: string,
     mimeType: string
   ): Promise<ParsedDocument> {
+    // 0. Deteksi proteksi password & format lama
+    const protection = await detectDocumentProtection(buffer, fileName);
+    if (protection.isProtected) {
+      if (protection.kind === "legacy-binary") {
+        throw new Error("LEGACY_FORMAT");
+      }
+      throw new Error("PASSWORD_REQUIRED");
+    }
+
     const isPdf = mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
     const isExcel =
       mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-      mimeType === "application/vnd.ms-excel" ||
-      fileName.toLowerCase().endsWith(".xlsx") ||
-      fileName.toLowerCase().endsWith(".xls");
+      fileName.toLowerCase().endsWith(".xlsx");
     const isWord =
       mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      mimeType === "application/msword" ||
-      fileName.toLowerCase().endsWith(".docx") ||
-      fileName.toLowerCase().endsWith(".doc");
+      fileName.toLowerCase().endsWith(".docx");
 
     let result: ParsedDocument;
 
@@ -89,6 +94,9 @@ export class DocumentReaderService {
       totalPages = res.totalPages || 1;
       cleanText = (res.text || "").trim();
     } catch (e: any) {
+      if (e?.name === "PasswordException" || String(e?.message).toLowerCase().includes("password")) {
+        throw new Error("PASSWORD_REQUIRED");
+      }
       console.warn(`[DocumentReader] Gagal ekstraksi teks digital PDF (${fileName}):`, e?.message);
     }
 
@@ -122,10 +130,10 @@ export class DocumentReaderService {
       };
     }
 
-    console.log(`[DocumentReader] PDF ${fileName} terdeteksi minim teks (${avgCharsPerPage.toFixed(1)} chars/page). Mengalihkan ke Gemini OCR...`);
+    console.log(`[DocumentReader] PDF ${fileName} terdeteksi minim teks (${avgCharsPerPage.toFixed(1)} chars/page). Mengalihkan ke Celyn OCR Engine...`);
 
     try {
-      const ocrModel = config.docOcrModel || "gemini-2.5-flash";
+      const ocrModel = config.docOcrModel || config.textModel || "gemini-3-flash-preview";
       const response = await this.ai.models.generateContent({
         model: ocrModel,
         contents: [
@@ -167,43 +175,41 @@ export class DocumentReaderService {
   }
 
   /**
-   * 2. BACA EXCEL (.xlsx / .xls) -> Konversi tiap Sheet ke Markdown Table
+   * 2. BACA EXCEL (.xlsx) -> Konversi tiap Sheet ke Markdown Table (termasuk hidden sheet, rumus, dan komentar)
    */
   private async readExcel(buffer: Buffer, fileName: string): Promise<ParsedDocument> {
     const workbook = new ExcelJS.Workbook();
-    // Gunakan buffer langsung
     await workbook.xlsx.load(buffer as any);
 
     const markdownSections: string[] = [];
-    const maxRowsPerSheet = 150; // Lindungi dari spreadsheet raksasa 50.000 baris
 
     workbook.eachSheet((sheet) => {
       const sheetName = sheet.name;
-      const rowsMarkdown: string[] = [`### Sheet: ${sheetName}\n`];
+      const isHidden = sheet.state === "hidden";
+      const rowsMarkdown: string[] = [
+        `### Sheet: ${sheetName}${isHidden ? " [TERSEMBUNYI]" : ""}\n`,
+      ];
 
       // Tentukan batas kolom aktual
       let maxCols = 0;
       sheet.eachRow({ includeEmpty: false }, (row) => {
         if (row.actualCellCount > maxCols) maxCols = row.actualCellCount;
       });
-      maxCols = Math.min(Math.max(maxCols, sheet.columnCount || 0, 1), 25); // Batasi maks 25 kolom
+      maxCols = Math.max(maxCols, sheet.columnCount || 0, 1);
 
-      let rowCount = 0;
       let isFirstRow = true;
 
       sheet.eachRow({ includeEmpty: false }, (row) => {
-        rowCount++;
-        if (rowCount > maxRowsPerSheet) return;
-
         const cellValues: string[] = [];
         for (let col = 1; col <= maxCols; col++) {
           const cell = row.getCell(col);
           let val = cell.value;
 
-          // Ambil hasil formula jika berupa objek formula
+          // Ambil formula dan hasil jika ada
           if (val && typeof val === "object") {
             if ("result" in val && val.result !== undefined && val.result !== null) {
-              val = val.result;
+              const formulaNote = (val as any).formula ? ` [Rumus: =${(val as any).formula}]` : "";
+              val = `${val.result}${formulaNote}`;
             } else if ("text" in val && typeof (val as any).text === "string") {
               val = (val as any).text;
             } else if ("richText" in val && Array.isArray((val as any).richText)) {
@@ -216,6 +222,11 @@ export class DocumentReaderService {
           }
 
           let strVal = val === null || val === undefined ? "" : String(val);
+          // Lampirkan komentar sel jika ada
+          if (cell.note) {
+            strVal += ` [Komentar: ${cell.note}]`;
+          }
+
           // Bersihkan karakter pipe dan newline agar tidak merusak format markdown table
           strVal = strVal.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ").trim();
           cellValues.push(strVal);
@@ -228,10 +239,6 @@ export class DocumentReaderService {
           isFirstRow = false;
         }
       });
-
-      if (rowCount > maxRowsPerSheet) {
-        rowsMarkdown.push(`\n*(Sheet ${sheetName} dipotong: menampilkan ${maxRowsPerSheet} dari ${rowCount} baris)*`);
-      }
 
       markdownSections.push(rowsMarkdown.join("\n"));
     });

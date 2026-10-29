@@ -40,7 +40,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
               </span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Pilih karakter vokal sesuai preferensi Anda (Google Gemini Live Native Audio)
+              Pilih karakter vokal sesuai preferensi Anda (suara natural Celyn)
             </p>
           </div>
         </div>
@@ -81,7 +81,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                     {voice.description}
                   </p>
                   <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                    Engine: Gemini Live Realtime HD PCM (24kHz)
+                    Engine: Celyn HD Realtime Audio (24kHz)
                   </p>
                 </div>
 
@@ -105,10 +105,10 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
         <div className="p-3 sm:p-3.5 rounded-xl bg-slate-800/60 border border-white/5 text-xs text-slate-300 space-y-1">
           <div className="flex items-center gap-1.5 font-semibold text-rose-300 text-xs">
             <Sparkles className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>Katalog Karakter Suara HD Gemini Live</span>
+            <span>Katalog Karakter Suara Natural Celyn</span>
           </div>
           <p className="text-[10px] sm:text-[11px] leading-relaxed text-slate-400">
-            Semua suara menggunakan model <strong>Gemini Live Native Audio</strong> secara real-time. Pilih <strong>Aoede</strong> untuk karakter paling natural & tawa spontan, <strong>Zephyr</strong> untuk artikulasi ceria & bersemangat, <strong>Leda</strong> untuk kelembutan suara yang ramah, atau <strong>Kore</strong> untuk nada yang tenang dan hangat.
+            Semua suara dihasilkan secara langsung dengan karakter vokal natural Celyn. Pilih <strong>Aoede</strong> untuk karakter paling natural & tawa spontan, <strong>Zephyr</strong> untuk artikulasi ceria & bersemangat, <strong>Leda</strong> untuk kelembutan suara yang ramah, atau <strong>Kore</strong> untuk nada yang tenang dan hangat.
           </p>
         </div>
       </div>

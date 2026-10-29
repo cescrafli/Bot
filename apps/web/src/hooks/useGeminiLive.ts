@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
-import { getStoredAuthPassword, getStoredAuthMode } from "./useAuth";
+import { getStoredAuthPassword, getStoredAuthMode, getStoredAuthToken } from "./useAuth";
 import {
   ClientMessage,
   ServerMessage,
@@ -17,6 +17,7 @@ import {
   extractIndonesianSentences,
   ParsedDocument,
   DocumentKind,
+  RESEARCH_STATUS_TEXT,
 } from "@celyn/shared";
 
 interface UseGeminiLiveOptions {
@@ -30,7 +31,7 @@ export function useGeminiLive({
 }: UseGeminiLiveOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [status, setStatus] = useState<
-    "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error"
+    "idle" | "connecting" | "listening" | "thinking" | "researching" | "working" | "speaking" | "error"
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string>("Siaga • Siap Berbicara");
   const [modelInfo, setModelInfo] = useState<{ model: string; voice: string }>({
@@ -47,6 +48,10 @@ export function useGeminiLive({
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
   const [docStatusMessage, setDocStatusMessage] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const dismissJob = useCallback((id: string) => {
+    setJobs((prev) => prev.filter((j) => j.id !== id));
+  }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
   const directSessionRef = useRef<any>(null);
@@ -98,12 +103,18 @@ export function useGeminiLive({
     }
     lastRecordedTurnRef.current = { role, content: clean, time: now };
 
+    const token = getStoredAuthToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-admin-password": getStoredAuthPassword() || "admin",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
     fetch("/api/record", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-password": getStoredAuthPassword() || "admin",
-      },
+      headers,
       body: JSON.stringify({
         sessionId: sessionIdRef.current,
         role,
@@ -228,6 +239,24 @@ export function useGeminiLive({
       } else if (msg.type === "status") {
         setStatus(msg.status);
         if (msg.message) setStatusMessage(msg.message);
+      } else if (msg.type === "job") {
+        setJobs((prev) => {
+          const updatedJob = {
+            id: msg.jobId,
+            kind: msg.kind,
+            stage: msg.stage,
+            progress: msg.progress,
+            message: msg.message,
+            fileName: msg.fileName,
+            downloadUrl: msg.downloadUrl,
+            error: msg.error?.userMessage,
+          };
+          const existing = prev.find((j) => j.id === msg.jobId);
+          if (existing) {
+            return prev.map((j) => (j.id === msg.jobId ? updatedJob : j));
+          }
+          return [...prev, updatedJob];
+        });
       } else if (msg.type === "error") {
         setStatus("error");
         setStatusMessage(msg.message);
@@ -247,21 +276,25 @@ export function useGeminiLive({
       setStatusMessage("Meminta token sesi aman dari Vercel Serverless...");
 
       const authPass = getStoredAuthPassword() || "admin";
+      const token = getStoredAuthToken();
       const queryParams = new URLSearchParams();
       if (voicePreference) queryParams.set("voice", voicePreference);
       const queryStr = queryParams.toString() ? `?${queryParams.toString()}` : "";
 
-      const res = await fetch(`/api/token${queryStr}`, {
-        headers: {
-          "x-admin-password": authPass,
-        },
-      });
+      const headers: Record<string, string> = {
+        "x-admin-password": authPass,
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`/api/token${queryStr}`, { headers });
       const data = await res.json();
 
       if (!res.ok || !data.token) {
         throw new Error(
           data.error ||
-            "Gagal mendapatkan Ephemeral Token dari /api/token. Pastikan GEMINI_API_KEY sudah diatur di Environment Variables Vercel."
+            "Gagal mendapatkan token sesi dari server. Pastikan layanan Celyn sudah dikonfigurasi di Environment Variables."
         );
       }
 
@@ -272,8 +305,8 @@ export function useGeminiLive({
       const internalGeminiVoice = useEdgeTts ? "Aoede" : activeVoice;
 
       setModelInfo({ model: activeModel, voice: activeVoice });
-      setConnectionLabel("Vercel Live Direct");
-      setStatusMessage("Menghubungkan ke Gemini Live API (Bahasa Indonesia)...");
+      setConnectionLabel("Celyn Live Direct");
+      setStatusMessage("Menghubungkan Celyn...");
 
       const enqueueDirectEdgeTts = (
         sentence: string,
@@ -820,10 +853,10 @@ export function useGeminiLive({
             }
           },
           onerror: (err: any) => {
-            console.error("Gemini Live Direct Error:", err);
+            console.error("Celyn Live Direct Error:", err);
             setStatus("error");
             setStatusMessage(
-              `Koneksi Gemini Error: ${err?.message || "Terjadi kesalahan"}`
+              `Koneksi Celyn bermasalah: ${err?.message || "Terjadi kendala koneksi"}`
             );
           },
           onclose: () => {
@@ -831,7 +864,7 @@ export function useGeminiLive({
             directSessionRef.current = null;
             setIsConnected(false);
             setStatus("idle");
-            setStatusMessage("Sesi Gemini telah berakhir.");
+            setStatusMessage("Sesi Celyn telah berakhir.");
           },
         },
       });
@@ -861,7 +894,7 @@ export function useGeminiLive({
           type: "status",
           status: "listening",
           message:
-            "⚠️ Sesi Gemini Live mendekati batas 30 menit (tersisa 5 menit). Sesi akan dihentikan otomatis saat batas tercapai.",
+            "⚠️ Sesi Celyn mendekati batas 30 menit (tersisa 5 menit). Sesi akan dihentikan otomatis saat batas tercapai.",
         });
       }, 25 * 60 * 1000);
 
@@ -901,10 +934,10 @@ export function useGeminiLive({
         }
       }, 450);
     } catch (err: any) {
-      console.error("Gagal membuka sesi Serverless Gemini:", err);
+      console.error("Gagal membuka sesi Celyn:", err);
       setStatus("error");
       setStatusMessage(
-        err?.message || "Gagal terhubung ke server maupun Gemini Live API."
+        err?.message || "Gagal terhubung ke layanan percakapan Celyn."
       );
     }
   }, [handleServerMessage, recordTurnToServer]);
@@ -937,10 +970,12 @@ export function useGeminiLive({
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const authPass = getStoredAuthPassword() || "admin";
     const authMode = getStoredAuthMode();
+    const token = getStoredAuthToken();
+    const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
     const voiceQuery = selectedVoice ? `&voice=${encodeURIComponent(selectedVoice)}` : "";
     const wsUrl =
       envWs ||
-      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}&authMode=${authMode}&sessionId=${encodeURIComponent(sessionIdRef.current)}${voiceQuery}`;
+      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}&authMode=${authMode}&sessionId=${encodeURIComponent(sessionIdRef.current)}${voiceQuery}${tokenQuery}`;
 
     let opened = false;
     const ws = new WebSocket(wsUrl);
@@ -1075,6 +1110,17 @@ export function useGeminiLive({
               data: msg.data,
             },
           });
+        } else if (msg.type === "doc_context") {
+          const safeText = msg.text.replace(/<\/document_context>/gi, "&lt;/document_context&gt;");
+          await session.sendClientContent({
+            turns: [
+              {
+                role: "user",
+                parts: [{ text: safeText }],
+              },
+            ],
+            turnComplete: false,
+          });
         } else if (msg.type === "text") {
           hasUserInitiatedTurnRef.current = true;
           bargeInMutedRef.current = false;
@@ -1107,7 +1153,7 @@ export function useGeminiLive({
           });
         }
       } catch (err) {
-        console.error("Gagal mengirim pesan ke sesi Gemini:", err);
+        console.error("Gagal mengirim pesan ke sesi Celyn:", err);
       }
       return;
     }
@@ -1189,12 +1235,18 @@ export function useGeminiLive({
       setDocStatusMessage(`Celyn sedang membuat dokumen ${kind.toUpperCase()}...`);
       try {
         const password = getStoredAuthPassword() || "admin";
+        const token = getStoredAuthToken();
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "x-admin-password": password,
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+
         const res = await fetch("/api/documents/generate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-admin-password": password,
-          },
+          headers,
           body: JSON.stringify({
             kind,
             title,
@@ -1246,12 +1298,17 @@ export function useGeminiLive({
         const formData = new FormData();
         formData.append("file", file);
         const password = getStoredAuthPassword() || "admin";
+        const token = getStoredAuthToken();
+        const headers: Record<string, string> = {
+          "x-admin-password": password,
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
 
         const res = await fetch("/api/documents/read", {
           method: "POST",
-          headers: {
-            "x-admin-password": password,
-          },
+          headers,
           body: formData,
         });
 
@@ -1287,8 +1344,9 @@ export function useGeminiLive({
           }
         } else {
           sendMessageRef.current({
-            type: "text",
+            type: "doc_context",
             text: systemContent,
+            fileName: doc.fileName,
           });
         }
 
@@ -1326,6 +1384,8 @@ export function useGeminiLive({
     lookAt,
     transcripts,
     activeDocuments,
+    jobs,
+    dismissJob,
     isUploadingDoc,
     isGeneratingDoc,
     docStatusMessage,

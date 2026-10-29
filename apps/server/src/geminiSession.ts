@@ -3,6 +3,9 @@ import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { config } from "./config.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
 import { memoryService } from "./services/MemoryService.js";
+import { researchService } from "./services/ResearchService.js";
+import { jobService } from "./services/JobService.js";
+import { documentService } from "./services/DocumentService.js";
 import {
   ClientMessage,
   ServerMessage,
@@ -17,6 +20,7 @@ import {
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
   extractIndonesianSentences,
+  RESEARCH_STATUS_TEXT,
 } from "@celyn/shared";
 
 export type SessionState = "DISCONNECTED" | "CONNECTING" | "ACTIVE" | "CLOSING" | "CLOSED";
@@ -193,6 +197,43 @@ export class GeminiSession {
                     required: ["kind", "title"],
                   },
                 },
+                {
+                  name: "process_document",
+                  description:
+                    "Proses dokumen yang sudah diunggah: summarize (meringkas), translate (menerjemahkan), paraphrase (parafrase), edit (mengubah isi dengan menjaga format), atau custom (analisis bebas).",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      docId: { type: Type.STRING, description: "Nama file atau ID dokumen" },
+                      operation: {
+                        type: Type.STRING,
+                        enum: ["summarize", "translate", "paraphrase", "edit", "custom"],
+                        description: "Operasi dokumen",
+                      },
+                      targetLanguage: {
+                        type: Type.STRING,
+                        description: "Bahasa tujuan khusus untuk translate. TANYAKAN dulu jika belum diketahui.",
+                      },
+                      instruction: {
+                        type: Type.STRING,
+                        description: "Instruksi spesifik pengeditan atau analisis",
+                      },
+                    },
+                    required: ["docId", "operation"],
+                  },
+                },
+                {
+                  name: "research",
+                  description:
+                    "Lakukan riset mendalam atau pencarian fakta dan informasi terkini di web. Kembalikan temuan beserta link/tautan sumber rujukan.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      query: { type: Type.STRING, description: "Topik atau kueri pencarian riset" },
+                    },
+                    required: ["query"],
+                  },
+                },
               ],
             },
           ],
@@ -200,10 +241,10 @@ export class GeminiSession {
         callbacks: {
           onmessage: (data: any) => this.handleGeminiMessage(data),
           onerror: (err: any) => {
-            console.error("Gemini SDK Error:", err);
+            console.error("Celyn Live Error:", err);
             this.sendToClient({
               type: "error",
-              message: `Koneksi Gemini Error: ${err?.message || "Terjadi kesalahan"}`,
+              message: `Koneksi Celyn mengalami kendala: ${err?.message || "Terjadi kesalahan koneksi"}`,
             });
           },
           onclose: (e: any) => {
@@ -680,13 +721,106 @@ export class GeminiSession {
         } else if (fc.name === "create_document") {
           const kind = String(sanitizedArgs.kind || "pdf").toLowerCase();
           const title = String(sanitizedArgs.title || "Dokumen Celyn").trim();
+          const instruction = String(sanitizedArgs.instruction || "").trim();
           console.log(`📄 [Tool create_document] Menghasilkan dokumen ${kind.toUpperCase()}: "${title}"`);
+          const job = jobService.createJob("create", `${title}.${kind}`, `Membuat dokumen ${kind.toUpperCase()}...`);
+
+          this.sendToClient({
+            type: "job",
+            jobId: job.id,
+            kind: "create",
+            stage: "running",
+            progress: 0.25,
+            message: `Menyusun dokumen ${kind.toUpperCase()} '${title}'...`,
+            fileName: `${title}.${kind}`,
+          });
+
           toolResponseOutput = {
-            status: "ready",
+            status: "started",
+            jobId: job.id,
             kind,
             title,
-            instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' telah siap diproses dan tombol unduh otomatis dimunculkan di layar pengguna. Sekarang sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa dokumennya sudah dibuatkan dan bisa langsung diunduh!`,
+            instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' sedang dibuatkan di latar belakang. Sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa kamu sedang menyiapkannya dan pengguna tetap bisa lanjut ngobrol!`,
           };
+
+          (async () => {
+            try {
+              const res = await documentService.generateDocument({
+                kind: kind as any,
+                title,
+                instruction,
+              });
+              jobService.updateJob(job.id, {
+                stage: "done",
+                progress: 1.0,
+                message: "Dokumen berhasil dibuat!",
+                resultBuffer: res.buffer,
+                downloadUrl: `/api/documents/download?id=${job.id}`,
+              });
+              this.sendToClient({
+                type: "job",
+                jobId: job.id,
+                kind: "create",
+                stage: "done",
+                progress: 1.0,
+                message: "Dokumen berhasil dibuat dan siap diunduh!",
+                fileName: res.fileName,
+                downloadUrl: `/api/documents/download?id=${job.id}`,
+              });
+            } catch (err: any) {
+              jobService.updateJob(job.id, {
+                stage: "error",
+                message: err?.message || "Gagal membuat dokumen",
+              });
+              this.sendToClient({
+                type: "job",
+                jobId: job.id,
+                kind: "create",
+                stage: "error",
+                progress: 1.0,
+                message: err?.message || "Gagal membuat dokumen",
+              });
+            }
+          })();
+        } else if (fc.name === "research") {
+          const query = String(sanitizedArgs.query || "").trim();
+          console.log(`🔍 [Tool research] Melakukan riset topik: "${query}"`);
+
+          // Sinyal aktivitas riset ke avatar (animasi buka laptop & status text)
+          this.sendToClient({
+            type: "status",
+            status: "researching",
+            message: RESEARCH_STATUS_TEXT,
+          });
+
+          const researchResult = await researchService.conductResearch(query);
+
+          toolResponseOutput = {
+            status: "done",
+            query,
+            summary: researchResult.summary,
+            sources: researchResult.sources,
+            instruction: `Hasil riset untuk '${query}' berhasil didapatkan. Sekarang sampaikan penjelasannya secara lisan dengan cerdas, hangat, santai, dan sebutkan tingkat keyakinanmu secara jujur. Jangan lupa berikan tautan / sumber rujukan dalam format markdown [Judul](URL) agar pengguna dapat memeriksa langsung!`,
+          };
+        } else if (fc.name === "process_document") {
+          const { docId, operation, targetLanguage, instruction } = sanitizedArgs;
+          if (operation === "translate" && !targetLanguage) {
+            toolResponseOutput = {
+              status: "needs_input",
+              operation: "translate",
+              ask: "Mau diterjemahkan ke bahasa apa? (Misalnya: Bahasa Inggris, Bahasa Jepang, Bahasa Mandarin, dll.)",
+              instruction:
+                "Tanyakan terlebih dahulu ke pengguna secara langsung dan santai bahasa tujuan yang diinginkan untuk terjemahan dokumen ini.",
+            };
+          } else {
+            const job = jobService.createJob(operation as any, String(docId), `Memproses ${operation} dokumen...`);
+            toolResponseOutput = {
+              status: "started",
+              jobId: job.id,
+              operation,
+              instruction: `Dokumen '${docId}' sedang diproses untuk operasi '${operation}' di latar belakang. Beritahu pengguna dengan santai bahwa proses sedang berjalan dan kalian tetap bisa lanjut ngobrol!`,
+            };
+          }
         }
 
         this.sendToClient({
@@ -759,8 +893,21 @@ export class GeminiSession {
             data: msg.data,
           },
         });
+      } else if (msg.type === "doc_context") {
+        console.log(`📄 [Doc Context] Menyuntikkan konteks dokumen '${msg.fileName || "dokumen"}'`);
+        const safeText = msg.text.replace(/<\/document_context>/gi, "&lt;/document_context&gt;");
+        await this.session.sendClientContent({
+          turns: [
+            {
+              role: "user",
+              parts: [{ text: safeText }],
+            },
+          ],
+          turnComplete: false,
+        });
       } else if (msg.type === "text") {
-        console.log(`👤 [User Text]: "${msg.text}"`);
+        const preview = msg.text.length > 50 ? `${msg.text.slice(0, 50)}...` : msg.text;
+        console.log(`👤 [User Text]: "${preview}"`);
         if (this.authMode === "jocelyn") {
           memoryService.recordTurn(this.sessionId, "user", msg.text);
         }
