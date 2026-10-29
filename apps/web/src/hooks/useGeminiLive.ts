@@ -19,6 +19,7 @@ import {
   DocumentKind,
   RESEARCH_STATUS_TEXT,
 } from "@celyn/shared";
+import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
 
 interface UseGeminiLiveOptions {
   onAudioReceived: (b64Audio: string, mimeType?: string) => void;
@@ -1314,91 +1315,26 @@ export function useGeminiLive({
           headers["Authorization"] = `Bearer ${token}`;
         }
 
-        let doc: ParsedDocument;
+        let doc: ParsedDocument | null = null;
 
         if (isLargeFile) {
-          // --- JALUR CEPAT & BEBAS LIMIT GOOGLE RESUMABLE UPLOAD (UNTUK FILE 4.5 MB S.D 500 MB) ---
-          setDocStatusMessage(`Menyiapkan jalur unggah langsung Google AI (${fileSizeMb} MB)...`);
+          // --- JALUR EKSTRAKSI SISI KLIEN INSTAN (UNTUK FILE BESAR S.D 500 MB) ---
+          const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 
-          const mimeType = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream");
-          const initRes = await fetch("/api/documents/upload-url", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              fileName: file.name,
-              mimeType,
-              fileSize: file.size,
-            }),
-          });
+          if (isPdf) {
+            setDocStatusMessage(`Mengekstrak teks dokumen PDF besar (${fileSizeMb} MB) langsung di peramban...`);
+            doc = await extractPdfClientSide(file);
 
-          if (!initRes.ok) {
-            const errData = await initRes.json().catch(() => ({}));
-            throw new Error(errData?.error || `Gagal membuat sesi unggah Google (HTTP ${initRes.status})`);
+            if (!doc.characterCount || doc.characterCount < 10) {
+              throw new Error(
+                `Dokumen PDF '${file.name}' (${fileSizeMb} MB) adalah dokumen hasil scan murni tanpa teks digital. Untuk dokumen scan gambar, silakan perkecil atau kompres di bawah 4.5 MB agar dapat diproses oleh AI Vision OCR.`
+              );
+            }
+          } else {
+            throw new Error(
+              `File '${file.name}' berukuran ${fileSizeMb} MB (melebihi 4.5 MB). File di atas 4.5 MB didukung penuh hingga 500 MB untuk format PDF. Harap simpan ulang sebagai PDF atau kompres file Word/Excel di bawah 4.5 MB.`
+            );
           }
-
-          const { uploadUrl } = await initRes.json();
-          if (!uploadUrl) {
-            throw new Error("URL upload langsung Google tidak diterima.");
-          }
-
-          // Unggah langsung dari browser ke Google Cloud CDN tanpa melewati proxy Vercel
-          setDocStatusMessage(`Mengunggah ${fileSizeMb} MB langsung ke server Google (0%)...`);
-
-          const uploadResult = await new Promise<any>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open("POST", uploadUrl);
-            xhr.setRequestHeader("X-Goog-Upload-Offset", "0");
-            xhr.setRequestHeader("X-Goog-Upload-Command", "upload, finalize");
-            xhr.setRequestHeader("Content-Length", String(file.size));
-
-            xhr.upload.onprogress = (ev) => {
-              if (ev.lengthComputable) {
-                const percent = Math.round((ev.loaded / ev.total) * 100);
-                setDocStatusMessage(`Mengunggah ${fileSizeMb} MB langsung ke server Google (${percent}%)...`);
-              }
-            };
-
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                  const parsed = JSON.parse(xhr.responseText || "{}");
-                  resolve(parsed);
-                } catch {
-                  resolve({});
-                }
-              } else {
-                reject(new Error(`Unggah langsung ke Google gagal (HTTP ${xhr.status}): ${xhr.responseText}`));
-              }
-            };
-
-            xhr.onerror = () => reject(new Error("Koneksi jaringan terputus saat mengunggah ke Google."));
-            xhr.send(file);
-          });
-
-          const fileUri = uploadResult?.file?.uri || uploadResult?.file?.name;
-          if (!fileUri) {
-            throw new Error("Google tidak mengembalikan URI file setelah unggahan selesai.");
-          }
-
-          setDocStatusMessage(`Mengekstrak dan menganalisis ${fileSizeMb} MB dengan Gemini AI...`);
-
-          const extractRes = await fetch("/api/documents/extract-file", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              fileUri: uploadResult.file.uri,
-              fileName: file.name,
-              mimeType,
-            }),
-          });
-
-          if (!extractRes.ok) {
-            const errData = await extractRes.json().catch(() => ({}));
-            throw new Error(errData?.error || `Gagal menganalisis dokumen via Gemini (HTTP ${extractRes.status})`);
-          }
-
-          const extractData = await extractRes.json();
-          doc = extractData.document;
         } else {
           // --- JALUR STANDAR VERCEL SERVERLESS (UNTUK FILE <= 4.5 MB) ---
           setDocStatusMessage(`Membaca dokumen '${file.name}' (Hybrid OCR)...`);
@@ -1412,22 +1348,39 @@ export function useGeminiLive({
             uploadHeaders["Authorization"] = `Bearer ${token}`;
           }
 
-          const res = await fetch("/api/documents/read", {
-            method: "POST",
-            headers: uploadHeaders,
-            body: formData,
-          });
-
-          if (!res.ok) {
-            if (res.status === 413) {
-              throw new Error(`Ukuran file '${file.name}' melebihi batas serverless.`);
+          let res: Response | null = null;
+          try {
+            res = await fetch("/api/documents/read", {
+              method: "POST",
+              headers: uploadHeaders,
+              body: formData,
+            });
+          } catch (netErr: any) {
+            // Fallback instan ke peramban jika PDF
+            if (file.name.toLowerCase().endsWith(".pdf")) {
+              setDocStatusMessage(`Membaca dokumen '${file.name}' langsung di peramban...`);
+              doc = await extractPdfClientSide(file);
+            } else {
+              throw netErr;
             }
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData?.error || `Gagal membaca dokumen (HTTP ${res.status})`);
           }
 
-          const data = await res.json();
-          doc = data.document;
+          if (res && !res.ok) {
+            if (res.status === 413 && file.name.toLowerCase().endsWith(".pdf")) {
+              setDocStatusMessage(`Membaca dokumen '${file.name}' langsung di peramban...`);
+              doc = await extractPdfClientSide(file);
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData?.error || `Gagal membaca dokumen (HTTP ${res.status})`);
+            }
+          } else if (res && !doc) {
+            const data = await res.json();
+            doc = data.document;
+          }
+        }
+
+        if (!doc) {
+          throw new Error("Gagal mengekstrak isi dokumen.");
         }
 
         setActiveDocuments((prev) => [

@@ -7,19 +7,20 @@ import { z } from "zod";
 export const DocumentSectionSchema = z.object({
   heading: z.string().describe("Subjudul bagian dokumen"),
   paragraphs: z.array(z.string()).describe("Daftar paragraf penjelasan"),
-  bulletPoints: z.array(z.string()).optional().describe("Poin-poin penting (opsional)"),
+  bulletPoints: z.array(z.string()).nullable().optional().describe("Poin-poin penting (opsional)"),
   table: z
     .object({
       headers: z.array(z.string()),
       rows: z.array(z.array(z.string())),
     })
+    .nullable()
     .optional()
     .describe("Tabel data pendukung jika ada"),
 });
 
 export const ReportPayloadSchema = z.object({
   title: z.string().describe("Judul utama dokumen"),
-  subtitle: z.string().optional().describe("Subjudul atau keterangan tambahan"),
+  subtitle: z.string().nullable().optional().describe("Subjudul atau keterangan tambahan"),
   sections: z.array(DocumentSectionSchema).min(1).describe("Daftar bab/bagian isi dokumen"),
 });
 
