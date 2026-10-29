@@ -299,7 +299,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   type={showKey ? "text" : "password"}
                   value={customKey}
                   onChange={(e) => setCustomKey(e.target.value)}
-                  placeholder="AIzaSy... (Kunci API Google AI)"
+                  placeholder="Tempel kunci API (AIzaSy... atau AQ...)"
                   className="w-full px-3 py-1.5 pr-8 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400/50"
                 />
                 <button

@@ -32,12 +32,46 @@ export interface ProcessDocumentInPlaceParams {
 }
 
 export class DocumentService {
-  private ai: GoogleGenAI | null = null;
+  constructor() {}
 
-  constructor() {
-    if (config.geminiApiKey) {
-      this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+  /**
+   * Pemanggilan model Gemini dengan otomatisasi multi-key failover jika terjadi 429 Quota Exceeded
+   */
+  private async callGeminiJson(model: string, prompt: string): Promise<any> {
+    const keys =
+      config.geminiApiKeys && config.geminiApiKeys.length > 0
+        ? config.geminiApiKeys
+        : [config.geminiApiKey];
+
+    let lastErr: any;
+    for (const key of keys) {
+      if (!key) continue;
+      const ai = new GoogleGenAI({ apiKey: key });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (res?.text) return res;
+        } catch (err: any) {
+          lastErr = err;
+          const isRate =
+            err?.status === 429 ||
+            err?.status === 503 ||
+            /quota|resource_exhausted/i.test(String(err?.message || ""));
+          if (isRate) {
+            console.warn("[DocumentService] Kunci mencapai kuota, mencoba kunci berikutnya di pool...");
+            break; // Lanjut ke kunci berikutnya di pool
+          }
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
+      }
     }
+    throw lastErr || new Error("Gagal memanggil model Gemini: seluruh kunci mencapai batas kuota");
   }
 
   /**
@@ -45,10 +79,6 @@ export class DocumentService {
    * dan langsung mengembalikan raw binary Buffer (stateless tanpa penyimpanan sementara).
    */
   async generateDocument(params: GenerateDocumentParams): Promise<GeneratedDocumentResult> {
-    if (!this.ai) {
-      throw new Error("GEMINI_API_KEY belum dikonfigurasi di server.");
-    }
-
     const { kind, title, instruction, context } = params;
     const model = config.docGenerateModel || "gemini-3-flash-preview";
     const safeTitle = (title || "Dokumen")
@@ -85,26 +115,7 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
   ]
 }`;
 
-      let res: any;
-      let lastErr: any;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          res = await this.ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: "application/json" },
-          });
-          if (res?.text) break;
-        } catch (err: any) {
-          lastErr = err;
-          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-            continue;
-          }
-          throw err;
-        }
-      }
-
+      const res = await this.callGeminiJson(model, prompt);
       const parsed = JSON.parse(res.text || "{}");
       const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
 
@@ -150,26 +161,7 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
   ]
 }`;
 
-      let res: any;
-      let lastErr: any;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          res = await this.ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: "application/json" },
-          });
-          if (res?.text) break;
-        } catch (err: any) {
-          lastErr = err;
-          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-            continue;
-          }
-          throw err;
-        }
-      }
-
+      const res = await this.callGeminiJson(model, prompt);
       const parsed = JSON.parse(res.text || "{}");
       const validated: ReportPayload = ReportPayloadSchema.parse(parsed);
 
@@ -200,7 +192,7 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
    * PDF tetap menghasilkan PDF, Word tetap Word, Excel tetap Excel.
    */
   async processDocumentInPlace(params: ProcessDocumentInPlaceParams): Promise<GeneratedDocumentResult> {
-    if (!this.ai) {
+    if (!config.geminiApiKey && (!config.geminiApiKeys || config.geminiApiKeys.length === 0)) {
       throw new Error("GEMINI_API_KEY belum dikonfigurasi di server.");
     }
 
@@ -248,26 +240,7 @@ PETUNJUK:
   ]
 }`;
 
-      let res: any;
-      let lastErr: any;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          res = await this.ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: "application/json" },
-          });
-          if (res?.text) break;
-        } catch (err: any) {
-          lastErr = err;
-          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-            continue;
-          }
-          throw err;
-        }
-      }
-
+      const res = await this.callGeminiJson(model, prompt);
       const parsed = JSON.parse(res.text || "{}");
       const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
       const buffer = await documentWriterService.createExcel(validated);
@@ -317,26 +290,7 @@ KEMBALIKAN HANYA JSON VALID SESUAI SKEMA REPORTPAYLOAD:
   ]
 }`;
 
-      let res: any;
-      let lastErr: any;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          res = await this.ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: "application/json" },
-          });
-          if (res?.text) break;
-        } catch (err: any) {
-          lastErr = err;
-          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-            continue;
-          }
-          throw err;
-        }
-      }
-
+      const res = await this.callGeminiJson(model, prompt);
       const parsed = JSON.parse(res.text || "{}");
       const validated: ReportPayload = ReportPayloadSchema.parse(parsed);
 
