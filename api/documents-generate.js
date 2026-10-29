@@ -385,6 +385,34 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
   throw lastErr || new Error("Semua API key Gemini gagal menghasilkan dokumen.");
 }
 
+function isRateLimitError(err) {
+  const msg = String(err?.message || err || "");
+  return err?.status === 429 || err?.code === 429 || /429|quota|resource_exhausted|rate.?limit/i.test(msg);
+}
+
+function parseRetryDelayMs(err) {
+  const msg = String(err?.message || err || "");
+  const m1 = msg.match(/retry in ([\d.]+)\s*s/i);
+  const m2 = msg.match(/retryDelay"?\s*:\s*"?(\d+)s/i);
+  const sec = m1 ? parseFloat(m1[1]) : m2 ? parseFloat(m2[1]) : NaN;
+  if (!isFinite(sec)) return 30000;
+  return Math.min(Math.max(Math.ceil(sec * 1000) + 1000, 2000), 45000);
+}
+
+function friendlyError(err) {
+  if (isRateLimitError(err)) {
+    return "Celyn sedang sibuk karena dokumennya cukup besar. Coba lagi sebentar lagi ya.";
+  }
+  const msg = String(err?.message || err || "");
+  if (/timeout|timed out|504|aborted/i.test(msg)) {
+    return "Pembuatan dokumen memakan waktu terlalu lama. Coba lagi ya.";
+  }
+  if (/401|403|api.?key|permission/i.test(msg)) {
+    return "Layanan Celyn sedang bermasalah dengan konfigurasi. Hubungi administrator.";
+  }
+  return "Celyn belum berhasil membuat dokumen ini. Coba lagi sebentar lagi ya.";
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -515,6 +543,9 @@ KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
     }
   } catch (err) {
     console.error("[Vercel /api/documents-generate] Error:", err);
-    return res.status(500).json({ error: `Gagal membuat dokumen: ${err?.message || "Unknown error"}` });
+    if (isRateLimitError(err)) {
+      return res.status(429).json({ error: friendlyError(err), retryAfterMs: parseRetryDelayMs(err) });
+    }
+    return res.status(500).json({ error: friendlyError(err) });
   }
 }

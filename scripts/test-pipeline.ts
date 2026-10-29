@@ -1433,6 +1433,58 @@ async function runTtsTests() {
     assert(syntaxOk, `Sintaks api/${apiFile} valid (dapat dimuat oleh Vercel tanpa HTTP 500)`);
   }
 
+  // F. Uji handler serverless: render PDF tahap akhir & pesan error generate yang ramah
+  console.log("  -> Menguji handler serverless render PDF & error generate...");
+  {
+    const mockRes = () => {
+      const r: any = { headers: {}, code: 0, body: undefined };
+      r.setHeader = (k: string, v: any) => { r.headers[k] = v; };
+      r.status = (c: number) => { r.code = c; return r; };
+      r.json = (o: any) => { r.body = o; return r; };
+      r.send = (b: any) => { r.body = b; return r; };
+      r.end = () => r;
+      return r;
+    };
+    const procMod: any = await import("../api/documents-process.js");
+    const prevKeys = process.env.GEMINI_API_KEYS;
+    const prevKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEYS = "uji-kunci-palsu";
+    const renderRes = mockRes();
+    await procMod.default(
+      {
+        method: "POST",
+        headers: { "x-admin-password": "admin" },
+        query: {},
+        body: {
+          stage: "render",
+          fileName: "Ringkasan Uji.pdf",
+          operation: "summarize",
+          sections: [{ heading: "Bagian 1", paragraphs: ["Isi paragraf uji."], bulletPoints: ["Poin A"] }],
+        },
+      },
+      renderRes
+    );
+    assert(
+      renderRes.code === 200 && Buffer.isBuffer(renderRes.body) && renderRes.body.subarray(0, 4).toString() === "%PDF",
+      "Tahap render handler serverless menghasilkan file PDF valid (%PDF)"
+    );
+
+    delete process.env.GEMINI_API_KEYS;
+    delete process.env.GEMINI_API_KEY;
+    const genMod: any = await import("../api/documents-generate.js");
+    const genRes = mockRes();
+    await genMod.default(
+      { method: "POST", headers: { "x-admin-password": "admin" }, query: {}, body: { kind: "pdf", title: "t", instruction: "i" } },
+      genRes
+    );
+    assert(
+      genRes.code === 500 && typeof genRes.body?.error === "string",
+      "Handler generate dapat dimuat dan mengembalikan JSON error terstruktur (bukan crash HTTP 500 kosong)"
+    );
+    if (prevKeys !== undefined) process.env.GEMINI_API_KEYS = prevKeys;
+    if (prevKey !== undefined) process.env.GEMINI_API_KEY = prevKey;
+  }
+
   // 24. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

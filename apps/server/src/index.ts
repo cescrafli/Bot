@@ -795,10 +795,11 @@ const server = http.createServer((req, res) => {
         res.end(result.buffer);
       } catch (genErr: any) {
         console.error("[Index /api/documents/generate] Error:", genErr);
-        res.writeHead(500, { "Content-Type": "application/json" });
+        res.writeHead(isRateLimitError(genErr) ? 429 : 500, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
-            error: `Gagal menghasilkan dokumen: ${genErr?.message || "Unknown error"}`,
+            error: friendlyDocumentError(genErr),
+            retryAfterMs: isRateLimitError(genErr) ? parseRetryDelayMs(genErr) : undefined,
           })
         );
       }

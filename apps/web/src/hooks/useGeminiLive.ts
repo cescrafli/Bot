@@ -31,6 +31,33 @@ interface UseGeminiLiveOptions {
   onInterrupted: () => void;
 }
 
+/**
+ * Mengirim permintaan ke endpoint pemrosesan dokumen dengan tunggu otomatis saat batas kuota (HTTP 429).
+ */
+async function postDocWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  payload: Record<string, unknown>,
+  onWait?: () => void
+): Promise<Response> {
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+    if (r.status !== 429) return r;
+    lastStatus = r.status;
+    const info = await r.json().catch(() => ({}));
+    const waitMs = Math.min(Math.max(Number(info?.retryAfterMs) || 30000, 3000), 45000);
+    onWait?.();
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  throw new Error(`RATE_LIMIT_${lastStatus}`);
+}
+
+async function readDocError(res: Response): Promise<Error> {
+  const errData = await res.json().catch(() => ({}));
+  return new Error(errData?.error || friendlyDocumentError(new Error(`HTTP ${res.status}`)));
+}
+
 export function useGeminiLive({
   onAudioReceived,
   onInterrupted,
@@ -931,7 +958,7 @@ export function useGeminiLive({
                     status: "ready",
                     kind,
                     title,
-                    instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' telah siap diproses dan tombol unduh otomatis dimunculkan di layar pengguna. Sekarang sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa dokumennya sudah dibuatkan dan bisa langsung diunduh!`,
+                    instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' sedang dibuat di latar belakang (dokumen besar dikerjakan per bagian, bisa beberapa menit). Sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa kamu sudah mulai membuatnya dan akan memberi kabar begitu selesai dan terunduh. JANGAN bilang sudah selesai sekarang.`,
                   };
                 } else if (fc.name === "process_document") {
                   const docId = String((fc.args as any)?.docId || "").trim();
@@ -1417,10 +1444,37 @@ export function useGeminiLive({
     setTranscripts([]);
   }, []);
 
+  const lastGenRef = useRef<{ key: string; at: number; running: boolean }>({
+    key: "",
+    at: 0,
+    running: false,
+  });
+
   const generateDocument = useCallback(
     async (kind: DocumentKind, title: string, instruction: string, context?: string) => {
+      // Cegah pemanggilan ganda untuk permintaan yang sama (mis. dari dua jalur tool call)
+      const genKey = `${kind}|${title}`;
+      const nowTs = Date.now();
+      if (
+        lastGenRef.current.key === genKey &&
+        (lastGenRef.current.running || nowTs - lastGenRef.current.at < 15000)
+      ) {
+        console.warn("[generateDocument] Permintaan ganda diabaikan:", genKey);
+        return;
+      }
+      lastGenRef.current = { key: genKey, at: nowTs, running: true };
+
       setIsGeneratingDoc(true);
       setDocStatusMessage(`Celyn sedang membuat dokumen ${kind.toUpperCase()}...`);
+
+      const notifyCelyn = (text: string) => {
+        try {
+          sendMessageRef.current({ type: "text", text });
+        } catch (e) {
+          console.warn("[generateDocument] Gagal memberi tahu Celyn:", e);
+        }
+      };
+
       try {
         const password = getStoredAuthPassword() || "admin";
         const token = getStoredAuthToken();
@@ -1436,52 +1490,110 @@ export function useGeminiLive({
           headers["x-gemini-key"] = customKey;
         }
 
-        // Jika konteks belum diisi secara eksplisit, gunakan teks aman dari activeDocuments (maksimal 1.500.000 karakter)
-        const effectiveContext =
+        const docsForContext = activeDocumentsRef.current;
+        const fullText =
           context ||
-          (activeDocumentsRef.current.length > 0
-            ? buildSafeDocumentGenerationContext(activeDocumentsRef.current, 1500000)
-            : undefined);
+          (docsForContext.length > 0
+            ? docsForContext
+                .map((d) => `# Dokumen: ${d.fileName}\n\n${d.markdownContent}`)
+                .join("\n\n---\n\n")
+            : "");
+        const chunks = kind !== "xlsx" ? splitTextIntoChunks(fullText) : [fullText];
+        const waitNote = () =>
+          setDocStatusMessage("Celyn menunggu giliran kapasitas sebentar, lalu lanjut memproses...");
 
-        let res = await fetch("/api/documents/generate", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            kind,
-            title,
-            instruction,
-            context: effectiveContext,
-            password,
-          }),
-        });
+        let blob: Blob;
+        if (chunks.length > 1) {
+          // Dokumen besar: proses per bagian di latar belakang lalu gabungkan
+          const isSummary = /ringkas|rangkum|summar/i.test(`${title} ${instruction}`);
+          const operation = isSummary ? "summarize" : "custom";
+          const fileNameForRender = `${title || "Dokumen_Celyn"}.${kind}`;
+          const collected: any[] = [];
+          for (let i = 0; i < chunks.length; i++) {
+            setDocStatusMessage(`Celyn memproses bagian ${i + 1} dari ${chunks.length}...`);
+            const res = await postDocWithRetry(
+              "/api/documents/process",
+              headers,
+              {
+                stage: "chunk",
+                fileName: fileNameForRender,
+                operation,
+                originalContent: chunks[i],
+                instruction: instruction || `Buat dokumen berjudul '${title}' dari isi dokumen ini.`,
+                chunkIndex: i,
+                totalChunks: chunks.length,
+                password,
+              },
+              waitNote
+            );
+            if (!res.ok) throw await readDocError(res);
+            const data = await res.json();
+            collected.push(...(Array.isArray(data?.sections) ? data.sections : []));
+          }
 
-        // Jika gateway/proxy serverless membatasi ukuran request (HTTP 413), coba otomatis dengan ringkasan konteks
-        if (res.status === 413 && effectiveContext && effectiveContext.length > 250000) {
-          console.warn("⚠️ [generateDocument] Payload melebihi batas gateway (HTTP 413), mencoba ulang otomatis dengan konteks teringkas 250k karakter...");
-          const condensedContext =
-            activeDocumentsRef.current.length > 0
-              ? buildSafeDocumentGenerationContext(activeDocumentsRef.current, 250000)
-              : effectiveContext.slice(0, 250000);
+          let finalSections = collected;
+          if (isSummary) {
+            setDocStatusMessage("Celyn menyusun ringkasan keseluruhan...");
+            const digest = collected
+              .map((sec: any) => `${sec.heading || ""}\n${(sec.paragraphs || []).join("\n")}`)
+              .join("\n\n")
+              .slice(0, 100000);
+            const resReduce = await postDocWithRetry(
+              "/api/documents/process",
+              headers,
+              {
+                stage: "chunk",
+                reduce: true,
+                fileName: fileNameForRender,
+                operation,
+                originalContent: digest,
+                instruction,
+                chunkIndex: 0,
+                totalChunks: 1,
+                password,
+              },
+              waitNote
+            );
+            if (resReduce.ok) {
+              const dataReduce = await resReduce.json();
+              const overall = Array.isArray(dataReduce?.sections) ? dataReduce.sections : [];
+              finalSections = [...overall, ...collected];
+            }
+          }
 
-          res = await fetch("/api/documents/generate", {
-            method: "POST",
+          setDocStatusMessage("Celyn menyusun file hasil akhir...");
+          const resRender = await postDocWithRetry(
+            "/api/documents/process",
             headers,
-            body: JSON.stringify({
+            {
+              stage: "render",
+              fileName: fileNameForRender,
+              operation,
+              sections: finalSections,
+              password,
+            },
+            waitNote
+          );
+          if (!resRender.ok) throw await readDocError(resRender);
+          blob = await resRender.blob();
+        } else {
+          // Dokumen kecil / tanpa dokumen: satu kali pemanggilan
+          const res = await postDocWithRetry(
+            "/api/documents/generate",
+            headers,
+            {
               kind,
               title,
               instruction,
-              context: condensedContext,
+              context: fullText || undefined,
               password,
-            }),
-          });
+            },
+            waitNote
+          );
+          if (!res.ok) throw await readDocError(res);
+          blob = await res.blob();
         }
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData?.error || `Gagal membuat dokumen (HTTP ${res.status})`);
-        }
-
-        const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -1494,10 +1606,24 @@ export function useGeminiLive({
 
         setDocStatusMessage(`Dokumen ${kind.toUpperCase()} berhasil dibuat & diunduh!`);
         setTimeout(() => setDocStatusMessage(null), 5000);
+        notifyCelyn(
+          `[INFO SISTEM] Dokumen ${kind.toUpperCase()} berjudul '${title}' sudah SELESAI dibuat dan terunduh otomatis. Sampaikan secara lisan dengan ceria dan singkat dalam Bahasa Indonesia bahwa dokumennya sudah jadi dan bisa dibuka di folder unduhan.`
+        );
       } catch (err: any) {
         console.error("Gagal generate dokumen:", err);
-        setDocStatusMessage(`Gagal membuat dokumen: ${err?.message || "Error"}`);
+        const rawMsg = String(err?.message || "");
+        const friendly = /^RATE_LIMIT_/.test(rawMsg)
+          ? friendlyDocumentError({ status: 429 })
+          : /^Celyn /.test(rawMsg)
+          ? rawMsg
+          : friendlyDocumentError(err);
+        setDocStatusMessage(friendly);
+        setTimeout(() => setDocStatusMessage(null), 8000);
+        notifyCelyn(
+          `[INFO SISTEM] Pembuatan dokumen gagal: ${friendly} Sampaikan secara lisan dengan ramah dan singkat dalam Bahasa Indonesia, tawarkan untuk mencoba lagi nanti. Jangan sebut nama penyedia layanan atau detail teknis.`
+        );
       } finally {
+        lastGenRef.current = { ...lastGenRef.current, at: Date.now(), running: false };
         setIsGeneratingDoc(false);
       }
     },
