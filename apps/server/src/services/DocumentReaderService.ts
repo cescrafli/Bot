@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
 // @ts-expect-error word-extractor has no bundled types
 import WordExtractor from "word-extractor";
 import { GoogleGenAI } from "@google/genai";
-import { ParsedDocument, detectDocumentProtection } from "@celyn/shared";
+import { ParsedDocument, detectDocumentProtection, decodeTextBuffer } from "@celyn/shared";
 import { config } from "../config.js";
 
 export class DocumentReaderService {
@@ -370,7 +370,7 @@ export class DocumentReaderService {
    * 6. BACA CSV / TSV via delimiter parser
    */
   private readDelimited(buffer: Buffer, fileName: string, ext: string): ParsedDocument {
-    const text = buffer.toString("utf8");
+    const text = decodeTextBuffer(buffer);
     const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length === 0) {
       return { fileName, mimeType: "text/plain", markdownContent: "(File kosong)", usedOcr: false, truncated: false, characterCount: 0 };
@@ -438,7 +438,7 @@ export class DocumentReaderService {
    * 7. BACA TXT / MD / RTF (plaintext)
    */
   private readPlainText(buffer: Buffer, fileName: string, ext: string): ParsedDocument {
-    let text = buffer.toString("utf8").trim();
+    let text = decodeTextBuffer(buffer).trim();
     if (ext === "rtf") {
       text = text
         .replace(/\\[a-z*]+[-]?[0-9]*/gi, " ")

@@ -1514,6 +1514,20 @@ async function runTtsTests() {
     "Semua token jeda & aksi prosodi {pause}, [sigh], {breath} dibersihkan sempurna"
   );
 
+  const dirtyEmotion1 = "{emotion:happy}Eh Rafli! Halo, seneng banget bisa ngobrol lagi sama kamu.";
+  const cleanEmotion1 = stripVoiceMetadataTags(dirtyEmotion1);
+  assert(
+    cleanEmotion1 === "Eh Rafli! Halo, seneng banget bisa ngobrol lagi sama kamu.",
+    "Tag {emotion:happy} terhapus bersih dari teks pembicaraan Celyn tanpa meninggalkan artefak"
+  );
+
+  const dirtyEmotion2 = "{emotion: happy} [emotion:surprised] (emotion: thinking) Halo!";
+  const cleanEmotion2 = stripVoiceMetadataTags(dirtyEmotion2);
+  assert(
+    cleanEmotion2 === "Halo!",
+    "Seluruh variasi tag emosi {emotion: happy}, [emotion:...], (emotion:...) terhapus tuntas"
+  );
+
   const docReadMod = await import("../api/documents-read.js");
   assert(
     docReadMod.config?.api?.bodyParser === false,
@@ -1570,12 +1584,28 @@ async function runTtsTests() {
     "validateDocumentMagicBytes menerima file XLSM (ZIP/OOXML magic) sebagai valid"
   );
 
-  // Plaintext with null bytes → should be INVALID
-  const nullBuf = new Uint8Array([0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x74, 0x65]);
-  const nullResult = validateDocumentMagicBytes(nullBuf, "fake.csv");
+  // CSV dengan UTF-16 LE BOM (FF FE) — seperti file griyadjayasentosa.csv
+  const utf16leBuf = new Uint8Array([0xFF, 0xFE, 0x22, 0x00, 0x50, 0x00, 0x52, 0x00, 0x22, 0x00, 0x09, 0x00]);
+  const utf16Result = validateDocumentMagicBytes(utf16leBuf, "griyadjayasentosa.csv");
   assert(
-    nullResult.valid === false,
-    "validateDocumentMagicBytes menolak file CSV palsu yang mengandung null byte"
+    utf16Result.valid === true && utf16Result.kind === "csv",
+    "validateDocumentMagicBytes menerima file CSV dengan encoding UTF-16 LE (BOM FF FE) sebagai file valid"
+  );
+
+  // Uji decodeTextBuffer
+  const { decodeTextBuffer } = await import("../packages/shared/src/documentSecurity.js");
+  const decodedSample = decodeTextBuffer(utf16leBuf);
+  assert(
+    decodedSample.includes('"PR"'),
+    "decodeTextBuffer berhasil membaca teks UTF-16 LE dengan benar"
+  );
+
+  // Executable palsu menyamar sebagai CSV (MZ header)
+  const fakeExeBuf = new Uint8Array([0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00]);
+  const fakeExeResult = validateDocumentMagicBytes(fakeExeBuf, "fake.csv");
+  assert(
+    fakeExeResult.valid === false,
+    "validateDocumentMagicBytes menolak file executable PE (MZ) yang menyamar sebagai file CSV"
   );
 
   // Unsupported extension

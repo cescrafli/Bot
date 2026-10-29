@@ -62,12 +62,87 @@ const OOXML_EXTS = new Set(["docx", "xlsx", "xlsm", "xlsb", "docm", "dotx"]);
 // Legacy CFB binary extensions that are parsed by word-extractor / XLSX
 const CFB_EXTS = new Set(["doc", "xls"]);
 
-function hasNullBytes(data: Uint8Array, checkLen = 512): boolean {
-  const end = Math.min(data.length, checkLen);
-  for (let i = 0; i < end; i++) {
-    if (data[i] === 0x00) return true;
+// Executable signatures to reject even if disguised with .csv/.txt extension
+const PE_MAGIC = new Uint8Array([0x4d, 0x5a]); // MZ (Windows EXE / DLL)
+const ELF_MAGIC = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // \x7FELF (Linux Executable)
+
+/**
+ * Checks whether a text file is valid encoded text (handles UTF-16 LE/BE with/without BOM, UTF-8 BOM)
+ * and ensures disguised executables (EXE, ELF) are rejected.
+ */
+function isValidTextBuffer(data: Uint8Array): boolean {
+  if (!data || data.length === 0) return true;
+
+  // 1. Explicitly reject Windows PE or Linux ELF executables disguised as text
+  if (matchesPrefix(data, PE_MAGIC) || matchesPrefix(data, ELF_MAGIC)) {
+    return false;
   }
-  return false;
+
+  // 2. Recognized BOMs (UTF-16 LE, UTF-16 BE, UTF-8)
+  if (data.length >= 2 && data[0] === 0xff && data[1] === 0xfe) return true; // UTF-16 LE BOM
+  if (data.length >= 2 && data[0] === 0xfe && data[1] === 0xff) return true; // UTF-16 BE BOM
+  if (data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf) return true; // UTF-8 BOM
+
+  // 3. Heuristic for UTF-16 LE without BOM (alternating null bytes in ASCII range)
+  if (data.length >= 4 && data[1] === 0x00 && data[3] === 0x00) return true;
+
+  // 4. For standard text, reject if there are 4+ consecutive null bytes (indicates binary file)
+  let consecutiveNulls = 0;
+  const checkLen = Math.min(data.length, 512);
+  for (let i = 0; i < checkLen; i++) {
+    if (data[i] === 0x00) {
+      consecutiveNulls++;
+      if (consecutiveNulls >= 4) return false;
+    } else {
+      consecutiveNulls = 0;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Decodes a text buffer (Uint8Array or Buffer) to string, automatically handling
+ * UTF-16 LE with BOM, UTF-16 BE with BOM, UTF-8 BOM, UTF-16 LE without BOM, and standard UTF-8.
+ */
+export function decodeTextBuffer(buffer: Uint8Array): string {
+  if (!buffer || buffer.length === 0) return "";
+  const len = buffer.length;
+
+  // 1. UTF-16 LE BOM (0xFF, 0xFE)
+  if (len >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer?.(buffer)) {
+      return buffer.subarray(2).toString("utf16le");
+    }
+    return new TextDecoder("utf-16le").decode(buffer.subarray(2));
+  }
+
+  // 2. UTF-16 BE BOM (0xFE, 0xFF)
+  if (len >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(buffer.subarray(2));
+  }
+
+  // 3. UTF-8 BOM (0xEF, 0xBB, 0xBF)
+  if (len >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer?.(buffer)) {
+      return buffer.subarray(3).toString("utf8");
+    }
+    return new TextDecoder("utf-8").decode(buffer.subarray(3));
+  }
+
+  // 4. Heuristic for UTF-16 LE without BOM (e.g. alternating nulls in ASCII range)
+  if (len >= 4 && buffer[1] === 0x00 && buffer[3] === 0x00) {
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer?.(buffer)) {
+      return buffer.toString("utf16le");
+    }
+    return new TextDecoder("utf-16le").decode(buffer);
+  }
+
+  // 5. Default: UTF-8 (strip any stray null characters)
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer?.(buffer)) {
+    return buffer.toString("utf8").replace(/\0/g, "");
+  }
+  return new TextDecoder("utf-8").decode(buffer).replace(/\0/g, "");
 }
 
 /**
@@ -140,11 +215,11 @@ export function validateDocumentMagicBytes(head: Uint8Array, fileName: string): 
 
   // 4. Plaintext / delimited: csv, tsv, txt, md, rtf
   if (TEXT_EXTS.has(ext)) {
-    if (hasNullBytes(head)) {
+    if (!isValidTextBuffer(head)) {
       return {
         valid: false,
         kind: "unknown",
-        error: "File teks mengandung byte null — kemungkinan file biner yang salah ekstensi.",
+        error: "File teks tidak valid atau merupakan file biner/executable yang salah ekstensi.",
       };
     }
     return {

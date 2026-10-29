@@ -406,8 +406,28 @@ function inferIndonesianProsody(text, emotion) {
   return { rate, pitch, volume };
 }
 
+function stripVoiceMetadataTags(raw) {
+  if (!raw) return "";
+  return String(raw)
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think[^>]*>/gi, "")
+    .replace(/<\/?speaker_audio[^>]*>/gi, "")
+    .replace(/<\/?speaker[^>]*>/gi, "")
+    .replace(/<\/?audio[^>]*>/gi, "")
+    .replace(/\{[a-zA-Z_-]+\s*:[^}]*\}/gi, "")
+    .replace(/\[[a-zA-Z_-]+\s*:[^\]]*\]/gi, "")
+    .replace(/\((?:emotion|expression|mood|tone)\s*:[^)]*\)/gi, "")
+    .replace(/\{pause\}|\{sigh\}|\{laughter\}|\{giggle\}|\{chuckle\}|\{breath\}|\{whisper\}|\{gasp\}/gi, "")
+    .replace(/\[pause\]|\[sigh\]|\[laughter\]|\[giggle\]|\[chuckle\]|\[breath\]|\[whisper\]/gi, "")
+    .replace(/\{[a-zA-Z0-9_-]+\}/g, "")
+    .replace(/^[ \t]+|[ \t]+$/gm, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/^\s+/, "");
+}
+
 function cleanAndEscapeForSsml(rawText) {
-  const normalized = normalizeSpokenIndonesian(rawText);
+  const stripped = stripVoiceMetadataTags(rawText);
+  const normalized = normalizeSpokenIndonesian(stripped);
   const cleaned = String(normalized || "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [teks link](url) -> teks link
     .replace(/```[\s\S]*?```/g, " ")

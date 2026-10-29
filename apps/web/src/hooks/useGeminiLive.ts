@@ -729,6 +729,16 @@ export function useGeminiLive({
 
               if (!bargeInMutedRef.current) {
                 const rawCelynText = msg.serverContent.outputTranscription.text;
+                const emotionMatch = rawCelynText.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
+                if (emotionMatch) {
+                  const detectedEmotion = normalizeEmotion(emotionMatch[1]);
+                  if (detectedEmotion && detectedEmotion !== "neutral") {
+                    console.log("🎭 Mengubah emosi avatar dari inline tag ke:", detectedEmotion);
+                    directExplicitEmotionRef.current = true;
+                    directCurrentEmotionRef.current = detectedEmotion;
+                    setEmotion(detectedEmotion);
+                  }
+                }
                 const celynText = stripVoiceMetadataTags(rawCelynText);
                 if (celynText) {
                   directTurnCelynTextRef.current += celynText;
@@ -784,6 +794,16 @@ export function useGeminiLive({
                 }
                 if (part.text && !msg.serverContent?.outputTranscription?.text) {
                   if (bargeInMutedRef.current) continue;
+                  const emotionMatch = part.text.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
+                  if (emotionMatch) {
+                    const detectedEmotion = normalizeEmotion(emotionMatch[1]);
+                    if (detectedEmotion && detectedEmotion !== "neutral") {
+                      console.log("🎭 Mengubah emosi avatar dari inline tag ke:", detectedEmotion);
+                      directExplicitEmotionRef.current = true;
+                      directCurrentEmotionRef.current = detectedEmotion;
+                      setEmotion(detectedEmotion);
+                    }
+                  }
                   const cleanPart = stripVoiceMetadataTags(part.text);
                   if (!cleanPart) continue;
                   directTurnCelynTextRef.current += cleanPart;
@@ -825,14 +845,14 @@ export function useGeminiLive({
               directExplicitEmotionRef.current = false;
               activeTurnSpeakerRef.current = null;
 
-              // Rapikan spasi akhir bubble chat yang baru saja selesai
+              // Rapikan spasi akhir bubble chat yang baru saja selesai dan bersihkan tag
               setTranscripts((prev) => {
                 if (prev.length === 0) return prev;
                 const last = prev[prev.length - 1];
-                const trimmed = last.text.trim();
-                if (trimmed === last.text) return prev;
+                const cleaned = stripVoiceMetadataTags(last.text).trim();
+                if (cleaned === last.text) return prev;
                 const updated = [...prev];
-                updated[updated.length - 1] = { ...last, text: trimmed };
+                updated[updated.length - 1] = { ...last, text: cleaned };
                 return updated;
               });
 

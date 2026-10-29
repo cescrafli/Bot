@@ -22,6 +22,7 @@ import {
   resolveVoiceId,
   extractIndonesianSentences,
   RESEARCH_STATUS_TEXT,
+  stripVoiceMetadataTags,
 } from "@celyn/shared";
 
 export type SessionState = "DISCONNECTED" | "CONNECTING" | "ACTIVE" | "CLOSING" | "CLOSED";
@@ -535,7 +536,22 @@ export class GeminiSession {
           }
         }
 
-        const celynText = data.serverContent.outputTranscription.text;
+        const rawCelynText = data.serverContent.outputTranscription.text;
+        const emotionMatch = rawCelynText.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
+        if (emotionMatch) {
+          const detected = normalizeEmotion(emotionMatch[1]);
+          if (detected && detected !== "neutral") {
+            this.explicitEmotionUsedInTurn = true;
+            this.currentEmotion = detected;
+            this.sendToClient({
+              type: "tool_call",
+              id: `inline_emotion_${Date.now()}`,
+              name: "set_expression",
+              args: { emotion: detected },
+            });
+          }
+        }
+        const celynText = stripVoiceMetadataTags(rawCelynText);
         if (celynText) {
           this.currentTurnCelynText += celynText;
           this.sendToClient({
@@ -589,15 +605,31 @@ export class GeminiSession {
         }
         if (part.text && !data.serverContent?.outputTranscription?.text) {
           if (this.isBargeInMuted) continue;
-          this.currentTurnCelynText += part.text;
-          console.log(`💬 [Celyn AI]: ${part.text}`);
+          const emotionMatch = part.text.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
+          if (emotionMatch) {
+            const detected = normalizeEmotion(emotionMatch[1]);
+            if (detected && detected !== "neutral") {
+              this.explicitEmotionUsedInTurn = true;
+              this.currentEmotion = detected;
+              this.sendToClient({
+                type: "tool_call",
+                id: `inline_emotion_${Date.now()}`,
+                name: "set_expression",
+                args: { emotion: detected },
+              });
+            }
+          }
+          const cleanPart = stripVoiceMetadataTags(part.text);
+          if (!cleanPart) continue;
+          this.currentTurnCelynText += cleanPart;
+          console.log(`💬 [Celyn AI]: ${cleanPart}`);
           this.sendToClient({
             type: "transcript",
             speaker: "celyn",
-            text: part.text,
+            text: cleanPart,
           });
           if (this.useEdgeTts) {
-            this.ttsBuffer += part.text;
+            this.ttsBuffer += cleanPart;
             this.flushCompleteSentences(false);
           }
         }

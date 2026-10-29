@@ -466,6 +466,7 @@ export function inferIndonesianProsody(
 /**
  * Membersihkan artefak tag suara & prosodi internal model AI:
  * - <speaker_audio>, <speaker>, <audio>, <think>
+ * - Tag metadata emosi/aksi inline: {emotion:happy}, {emotion: happy}, [emotion:happy], (emotion: happy), {expression:neutral}
  * - Token jeda lisan: {pause}, [pause], {sigh}, {laughter}, {breath}, dll.
  * Menghindari teks kontrol tersebut bocor ke audio TTS maupun tampilan transkrip.
  */
@@ -477,9 +478,18 @@ export function stripVoiceMetadataTags(raw: string): string {
     .replace(/<\/?speaker_audio[^>]*>/gi, "")
     .replace(/<\/?speaker[^>]*>/gi, "")
     .replace(/<\/?audio[^>]*>/gi, "")
+    // 1. Tag pasangan kunci-nilai dalam kurung kurawal/siku, misal: {emotion:happy}, {emotion: happy}, {expression:...}, {pause:200ms}
+    .replace(/\{[a-zA-Z_-]+\s*:[^}]*\}/gi, "")
+    .replace(/\[[a-zA-Z_-]+\s*:[^\]]*\]/gi, "")
+    .replace(/\((?:emotion|expression|mood|tone)\s*:[^)]*\)/gi, "")
+    // 2. Token suara lisan eksplisit tanpa titik dua
     .replace(/\{pause\}|\{sigh\}|\{laughter\}|\{giggle\}|\{chuckle\}|\{breath\}|\{whisper\}|\{gasp\}/gi, "")
     .replace(/\[pause\]|\[sigh\]|\[laughter\]|\[giggle\]|\[chuckle\]|\[breath\]|\[whisper\]/gi, "")
-    .replace(/\{[a-zA-Z_-]+\}/g, "")
+    // 3. Token aksi atau emosi kata tunggal dalam kurung kurawal, misal: {happy}, {smile}, {tertawa}
+    .replace(/\{[a-zA-Z0-9_-]+\}/g, "")
+    // 4. Bersihkan spasi berlebih atau baris kosong yang tercipta akibat penghapusan tag
+    .replace(/^[ \t]+|[ \t]+$/gm, "")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/^\s+/, "");
 }
 

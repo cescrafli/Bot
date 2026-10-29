@@ -60,12 +60,56 @@ const OOXML_EXTS = new Set(["docx", "xlsx", "xlsm", "xlsb", "docm", "dotx"]);
 // Legacy CFB binary extensions
 const CFB_EXTS = new Set(["doc", "xls"]);
 
-function hasNullBytes(buffer, checkLen = 512) {
-  const end = Math.min(buffer.length, checkLen);
-  for (let i = 0; i < end; i++) {
-    if (buffer[i] === 0x00) return true;
+const PE_MAGIC = Buffer.from([0x4d, 0x5a]); // MZ executable
+const ELF_MAGIC = Buffer.from([0x7f, 0x45, 0x4c, 0x46]); // ELF executable
+
+function isValidTextBuffer(buffer) {
+  if (!buffer || buffer.length === 0) return true;
+  // Reject executables
+  if (buffer.length >= 2 && buffer.subarray(0, 2).equals(PE_MAGIC)) return false;
+  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ELF_MAGIC)) return false;
+
+  // Accept valid BOMs (UTF-16 LE, UTF-16 BE, UTF-8)
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) return true; // UTF-16 LE BOM
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) return true; // UTF-16 BE BOM
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) return true; // UTF-8 BOM
+
+  // Heuristic for UTF-16 LE without BOM
+  if (buffer.length >= 4 && buffer[1] === 0x00 && buffer[3] === 0x00) return true;
+
+  // Check for 4+ consecutive null bytes
+  let consecutiveNulls = 0;
+  const checkLen = Math.min(buffer.length, 512);
+  for (let i = 0; i < checkLen; i++) {
+    if (buffer[i] === 0x00) {
+      consecutiveNulls++;
+      if (consecutiveNulls >= 4) return false;
+    } else {
+      consecutiveNulls = 0;
+    }
   }
-  return false;
+  return true;
+}
+
+function decodeTextBuffer(buffer) {
+  if (!buffer || buffer.length === 0) return "";
+  // UTF-16 LE BOM
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return Buffer.from(buffer.subarray(2)).toString("utf16le");
+  }
+  // UTF-16 BE BOM
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(buffer.subarray(2));
+  }
+  // UTF-8 BOM
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return Buffer.from(buffer.subarray(3)).toString("utf8");
+  }
+  // UTF-16 LE without BOM
+  if (buffer.length >= 4 && buffer[1] === 0x00 && buffer[3] === 0x00) {
+    return Buffer.from(buffer).toString("utf16le");
+  }
+  return Buffer.from(buffer).toString("utf8").replace(/\0/g, "");
 }
 
 function validateMagicBytes(buffer, fileName) {
@@ -113,8 +157,8 @@ function validateMagicBytes(buffer, fileName) {
 
   // Plaintext / delimited (CSV, TSV, TXT, MD, RTF)
   if (TEXT_EXTS.has(ext)) {
-    if (hasNullBytes(buffer)) {
-      return { valid: false, error: "File teks mengandung byte null — kemungkinan file biner yang salah ekstensi." };
+    if (!isValidTextBuffer(buffer)) {
+      return { valid: false, error: "File teks tidak valid atau merupakan file biner/executable yang salah ekstensi." };
     }
     return { valid: true, kind: ext, mime: "text/plain" };
   }
@@ -332,7 +376,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
 
   // ── Helper: Parse delimited text (CSV / TSV) → Markdown ───────────────────
   function delimitedToMarkdown(buffer, ext) {
-    const text = buffer.toString("utf8");
+    const text = decodeTextBuffer(buffer);
     const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length === 0) return "(File kosong)";
 
@@ -479,13 +523,13 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
 
   // ── TXT / MD ─────────────────────────────────────────────────────────────────
   if (isTxt) {
-    const text = buffer.toString("utf8").trim();
+    const text = decodeTextBuffer(buffer).trim();
     return { fileName, mimeType: "text/plain", markdownContent: text || "(File kosong)", usedOcr: false, truncated: false, characterCount: text.length };
   }
 
   // ── RTF (strip control codes) ────────────────────────────────────────────────
   if (isRtf) {
-    const raw = buffer.toString("utf8");
+    const raw = decodeTextBuffer(buffer);
     // Strip RTF control words, groups, and binary blobs
     const plain = raw
       .replace(/\\[a-z*]+[-]?[0-9]*/gi, " ")   // control words
