@@ -2,6 +2,8 @@ import Busboy from "busboy";
 import { getDocumentProxy, extractText } from "unpdf";
 import ExcelJS from "exceljs";
 import mammoth from "mammoth";
+import * as XLSX from "xlsx";
+import WordExtractor from "word-extractor";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 import { GoogleGenAI } from "@google/genai";
@@ -51,6 +53,21 @@ function verifyAuth(req) {
   return { valid: false };
 }
 
+// Text/plaintext extensions that need no magic-byte check
+const TEXT_EXTS = new Set(["csv", "tsv", "txt", "md", "rtf"]);
+// OOXML-family extensions treated as ZIP (macro-enabled / template are still ZIP containers)
+const OOXML_EXTS = new Set(["docx", "xlsx", "xlsm", "xlsb", "docm", "dotx"]);
+// Legacy CFB binary extensions
+const CFB_EXTS = new Set(["doc", "xls"]);
+
+function hasNullBytes(buffer, checkLen = 512) {
+  const end = Math.min(buffer.length, checkLen);
+  for (let i = 0; i < end; i++) {
+    if (buffer[i] === 0x00) return true;
+  }
+  return false;
+}
+
 function validateMagicBytes(buffer, fileName) {
   if (!buffer || buffer.length < 4) {
     return { valid: false, error: "File kosong" };
@@ -58,6 +75,7 @@ function validateMagicBytes(buffer, fileName) {
   const ext = (fileName.toLowerCase().split(".").pop() || "");
   const head = buffer.subarray(0, Math.min(buffer.length, 8192));
 
+  // PDF
   if (ext === "pdf") {
     const idx = head.indexOf(PDF_MAGIC);
     if (idx !== -1 && idx <= 1024) {
@@ -66,21 +84,39 @@ function validateMagicBytes(buffer, fileName) {
     return { valid: false, error: "Bukan file PDF yang valid" };
   }
 
-  if (ext === "docx" || ext === "xlsx") {
+  // OOXML family (ZIP container)
+  if (OOXML_EXTS.has(ext)) {
     if (head.subarray(0, 4).equals(ZIP_MAGIC)) {
-      return { valid: true, kind: ext, mime: ext === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
+      const isWord = ext === "docx" || ext === "docm" || ext === "dotx";
+      return {
+        valid: true,
+        kind: ext,
+        mime: isWord
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      };
     }
+    // Encrypted OOXML wrapped in CFB
     if (head.length >= 8 && head.subarray(0, 8).equals(CFB_MAGIC)) {
       return { valid: true, kind: "cfb_encrypted", mime: "application/x-cfb" };
     }
     return { valid: false, error: `Bukan file .${ext} yang valid` };
   }
 
-  if (ext === "doc" || ext === "xls") {
+  // Legacy CFB binary (doc, xls)
+  if (CFB_EXTS.has(ext)) {
     if (head.length >= 8 && head.subarray(0, 8).equals(CFB_MAGIC)) {
-      return { valid: true, kind: "legacy_binary", mime: "application/x-cfb" };
+      return { valid: true, kind: `legacy_${ext}`, mime: "application/x-cfb" };
     }
     return { valid: false, error: `Bukan file .${ext} yang valid` };
+  }
+
+  // Plaintext / delimited (CSV, TSV, TXT, MD, RTF)
+  if (TEXT_EXTS.has(ext)) {
+    if (hasNullBytes(buffer)) {
+      return { valid: false, error: "File teks mengandung byte null — kemungkinan file biner yang salah ekstensi." };
+    }
+    return { valid: true, kind: ext, mime: "text/plain" };
   }
 
   return { valid: false, error: "Ekstensi tidak didukung" };
@@ -129,9 +165,7 @@ async function parseMultipart(req) {
       if (magicCheck.kind === "cfb_encrypted") {
         return reject(new Error("PASSWORD_REQUIRED"));
       }
-      if (magicCheck.kind === "legacy_binary") {
-        return reject(new Error("LEGACY_FORMAT"));
-      }
+      // legacy_doc and legacy_xls are now parsed by word-extractor / XLSX — let them through
 
       resolve({
         buffer: fileBuffer,
@@ -146,13 +180,19 @@ async function parseMultipart(req) {
 }
 
 async function extractDoc(buffer, fileName, mimeType, apiKey) {
-  const isPdf = mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
-  const isExcel =
-    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-    fileName.toLowerCase().endsWith(".xlsx");
-  const isWord =
-    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    fileName.toLowerCase().endsWith(".docx");
+  const lowerName = fileName.toLowerCase();
+  const ext = (lowerName.split(".").pop() || "");
+  const isPdf = ext === "pdf" || mimeType === "application/pdf";
+  const isExcel = ["xlsx", "xlsm", "xlsb"].includes(ext) ||
+    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const isXls = ext === "xls";
+  const isWord = ["docx", "docm", "dotx"].includes(ext) ||
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const isDoc = ext === "doc";
+  const isCsv = ext === "csv";
+  const isTsv = ext === "tsv";
+  const isTxt = ext === "txt" || ext === "md";
+  const isRtf = ext === "rtf";
 
   if (isPdf) {
     let pdf;
@@ -221,14 +261,12 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
     };
   }
 
-  if (isExcel) {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+  // ── Helper: ExcelJS sheet → Markdown ──────────────────────────────────────
+  async function excelJsToMarkdown(wb) {
     const lines = [];
-
-    workbook.eachSheet((worksheet) => {
-      const isHidden = worksheet.state === "hidden";
-      lines.push(`### Sheet: ${worksheet.name}${isHidden ? " [TERSEMBUNYI]" : ""}\n`);
+    wb.eachSheet((worksheet) => {
+      const hidden = worksheet.state === "hidden";
+      lines.push(`### Sheet: ${worksheet.name}${hidden ? " [TERSEMBUNYI]" : ""}\n`);
       const rows = [];
       worksheet.eachRow({ includeEmpty: false }, (row) => {
         const rowVals = [];
@@ -246,29 +284,141 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
               val = JSON.stringify(val);
             }
           }
-          if (cell.note) {
-            val = `${val ?? ""} [Komentar: ${cell.note}]`;
-          }
+          if (cell.note) val = `${val ?? ""} [Komentar: ${cell.note}]`;
           rowVals.push(String(val ?? "").replace(/\|/g, "\\|").trim());
         });
         rows.push(rowVals);
       });
-
       if (rows.length > 0) {
         const header = rows[0];
         lines.push(`| ${header.join(" | ")} |`);
         lines.push(`| ${header.map(() => "---").join(" | ")} |`);
-        for (let i = 1; i < rows.length; i++) {
-          lines.push(`| ${rows[i].join(" | ")} |`);
-        }
+        for (let i = 1; i < rows.length; i++) lines.push(`| ${rows[i].join(" | ")} |`);
       }
       lines.push("");
     });
+    return lines.join("\n").trim();
+  }
 
-    const fullContent = lines.join("\n").trim();
+  // ── Helper: SheetJS → Markdown (for legacy XLS / XLSM / XLSB) ─────────────
+  function sheetJsToMarkdown(xlsxBuf) {
+    const wb = XLSX.read(xlsxBuf, { type: "buffer", cellDates: true });
+    const lines = [];
+    for (const sheetName of wb.SheetNames) {
+      lines.push(`### Sheet: ${sheetName}\n`);
+      const ws = wb.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      if (data.length > 0) {
+        const maxCols = Math.max(...data.map((r) => r.length));
+        const pad = (row) => {
+          const r = [...row];
+          while (r.length < maxCols) r.push("");
+          return r.map((v) => {
+            if (v instanceof Date) return v.toISOString().slice(0, 10);
+            return String(v ?? "").replace(/\|/g, "\\|").trim();
+          });
+        };
+        const header = pad(data[0]);
+        lines.push(`| ${header.join(" | ")} |`);
+        lines.push(`| ${header.map(() => "---").join(" | ")} |`);
+        const displayRows = data.slice(1, 251);
+        for (const row of displayRows) lines.push(`| ${pad(row).join(" | ")} |`);
+        if (data.length > 251) lines.push(`\n*(Menampilkan 250 dari ${data.length - 1} baris data)*`);
+      }
+      lines.push("");
+    }
+    return lines.join("\n").trim();
+  }
+
+  // ── Helper: Parse delimited text (CSV / TSV) → Markdown ───────────────────
+  function delimitedToMarkdown(buffer, ext) {
+    const text = buffer.toString("utf8");
+    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length === 0) return "(File kosong)";
+
+    // Detect delimiter
+    const firstLine = lines[0];
+    let delim = ",";
+    if (ext === "tsv") {
+      delim = "\t";
+    } else {
+      const tabCount = (firstLine.match(/\t/g) || []).length;
+      const semiCount = (firstLine.match(/;/g) || []).length;
+      const commaCount = (firstLine.match(/,/g) || []).length;
+      if (tabCount > commaCount && tabCount > semiCount) delim = "\t";
+      else if (semiCount > commaCount) delim = ";";
+    }
+
+    // Simple CSV parser (handles quoted fields)
+    function parseRow(line) {
+      const cells = [];
+      let cur = "";
+      let inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"' && !inQuote) { inQuote = true; continue; }
+        if (ch === '"' && inQuote) {
+          if (line[i + 1] === '"') { cur += '"'; i++; }
+          else { inQuote = false; }
+          continue;
+        }
+        if (!inQuote && ch === delim) { cells.push(cur.trim()); cur = ""; continue; }
+        cur += ch;
+      }
+      cells.push(cur.trim());
+      return cells;
+    }
+
+    const displayLines = lines.slice(0, 251);
+    const rows = displayLines.map(parseRow);
+    if (rows.length === 0) return "(Data kosong)";
+    const maxCols = Math.max(...rows.map((r) => r.length));
+    const pad = (row) => { const r = [...row]; while (r.length < maxCols) r.push(""); return r.map((v) => String(v).replace(/\|/g, "\\|")); };
+    const header = pad(rows[0]);
+    const mdLines = [
+      `| ${header.join(" | ")} |`,
+      `| ${header.map(() => "---").join(" | ")} |`,
+      ...rows.slice(1).map((r) => `| ${pad(r).join(" | ")} |`),
+    ];
+    if (lines.length > 251) mdLines.push(`\n*(Menampilkan 250 dari ${lines.length - 1} baris data)*`);
+    return mdLines.join("\n");
+  }
+
+  // ── XLSX / XLSM / XLSB (modern Excel via ExcelJS, fallback to SheetJS) ─────
+  if (isExcel) {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer);
+      const fullContent = await excelJsToMarkdown(workbook);
+      return {
+        fileName,
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        markdownContent: fullContent || "(Excel kosong)",
+        usedOcr: false,
+        truncated: false,
+        characterCount: fullContent.length,
+      };
+    } catch (excelJsErr) {
+      // fallback to SheetJS for xlsm/xlsb
+      console.warn("[documents-read] ExcelJS failed, falling back to SheetJS:", excelJsErr?.message);
+      const fullContent = sheetJsToMarkdown(buffer);
+      return {
+        fileName,
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        markdownContent: fullContent || "(Excel kosong)",
+        usedOcr: false,
+        truncated: false,
+        characterCount: fullContent.length,
+      };
+    }
+  }
+
+  // ── XLS legacy (SheetJS) ────────────────────────────────────────────────────
+  if (isXls) {
+    const fullContent = sheetJsToMarkdown(buffer);
     return {
       fileName,
-      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      mimeType: "application/vnd.ms-excel",
       markdownContent: fullContent || "(Excel kosong)",
       usedOcr: false,
       truncated: false,
@@ -276,14 +426,13 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
     };
   }
 
+  // ── DOCX / DOCM / DOTX (mammoth) ────────────────────────────────────────────
   if (isWord) {
     const td = new TurndownService({ headingStyle: "atx" });
     td.use(gfm);
     const res = await mammoth.convertToHtml(
       { buffer },
-      {
-        ignoreEmptyParagraphs: true,
-      }
+      { ignoreEmptyParagraphs: true }
     );
     const md = td.turndown(res.value || "").trim();
     return {
@@ -294,6 +443,58 @@ async function extractDoc(buffer, fileName, mimeType, apiKey) {
       truncated: false,
       characterCount: md.length,
     };
+  }
+
+  // ── DOC legacy (word-extractor) ─────────────────────────────────────────────
+  if (isDoc) {
+    const extractor = new WordExtractor();
+    const extracted = await extractor.extract(buffer);
+    const body = (extracted.getBody() || "").trim();
+    const footnotes = (extracted.getFootnotes() || "").trim();
+    const endnotes = (extracted.getEndnotes() || "").trim();
+    const parts = [body, footnotes && `---\n**Catatan Kaki:**\n${footnotes}`, endnotes && `---\n**Catatan Akhir:**\n${endnotes}`]
+      .filter(Boolean)
+      .join("\n\n");
+    return {
+      fileName,
+      mimeType: "application/msword",
+      markdownContent: parts || "(Dokumen Word lama kosong)",
+      usedOcr: false,
+      truncated: false,
+      characterCount: parts.length,
+    };
+  }
+
+  // ── CSV ─────────────────────────────────────────────────────────────────────
+  if (isCsv) {
+    const md = delimitedToMarkdown(buffer, "csv");
+    return { fileName, mimeType: "text/csv", markdownContent: md, usedOcr: false, truncated: false, characterCount: md.length };
+  }
+
+  // ── TSV ─────────────────────────────────────────────────────────────────────
+  if (isTsv) {
+    const md = delimitedToMarkdown(buffer, "tsv");
+    return { fileName, mimeType: "text/tab-separated-values", markdownContent: md, usedOcr: false, truncated: false, characterCount: md.length };
+  }
+
+  // ── TXT / MD ─────────────────────────────────────────────────────────────────
+  if (isTxt) {
+    const text = buffer.toString("utf8").trim();
+    return { fileName, mimeType: "text/plain", markdownContent: text || "(File kosong)", usedOcr: false, truncated: false, characterCount: text.length };
+  }
+
+  // ── RTF (strip control codes) ────────────────────────────────────────────────
+  if (isRtf) {
+    const raw = buffer.toString("utf8");
+    // Strip RTF control words, groups, and binary blobs
+    const plain = raw
+      .replace(/\\[a-z*]+[-]?[0-9]*/gi, " ")   // control words
+      .replace(/\{[^{}]*\}/g, "")               // groups
+      .replace(/\\/g, "")                         // escaped chars
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    return { fileName, mimeType: "application/rtf", markdownContent: plain || "(RTF kosong)", usedOcr: false, truncated: false, characterCount: plain.length };
   }
 
   throw new Error("Format dokumen tidak didukung");
@@ -333,14 +534,14 @@ export default async function handler(req, res) {
     if (err.message === "LEGACY_FORMAT") {
       return res.status(422).json({
         code: "LEGACY_FORMAT",
-        error: "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi.",
+        error: "Format biner lama tidak dapat dibaca.",
       });
     }
     if (err.message === "FILE_TOO_LARGE") {
       return res.status(413).json({ error: "Ukuran file melebihi batas maksimum di lingkungan serverless." });
     }
     if (err.message === "INVALID_FILE_TYPE") {
-      return res.status(415).json({ error: "Format file tidak didukung atau isi file tidak valid. Celyn mendukung PDF, Excel (.xlsx), atau Word (.docx)." });
+      return res.status(415).json({ error: "Format file tidak didukung. Celyn mendukung: PDF, Excel (.xlsx, .xls, .xlsm, .xlsb, .csv), Word (.docx, .doc), dan Teks (.txt, .md, .rtf)." });
     }
     return res.status(400).json({ error: err?.message || "Gagal memproses file dokumen" });
   }

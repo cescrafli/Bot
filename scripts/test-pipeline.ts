@@ -1520,7 +1520,72 @@ async function runTtsTests() {
     "api/documents-read.js mengekspor config bodyParser: false untuk streaming multipart Busboy Vercel"
   );
 
-  // 24. Ringkasan
+  // 24. Universal Document Format Support (validateDocumentMagicBytes & document parsing)
+  console.log("-> Menguji Universal Document Support (CSV, TXT, DOC, XLS magic bytes)...");
+
+  // CSV — plaintext, no magic bytes (just no null bytes)
+  const csvBuf = new Uint8Array(Buffer.from("nama,umur,kota\nAli,25,Jakarta\nBudi,30,Bandung"));
+  const csvResult = validateDocumentMagicBytes(csvBuf, "data.csv");
+  assert(
+    csvResult.valid === true && csvResult.kind === "csv",
+    "validateDocumentMagicBytes menerima file CSV plaintext sebagai valid"
+  );
+
+  // TXT — plaintext
+  const txtBuf = new Uint8Array(Buffer.from("Ini adalah file teks biasa."));
+  const txtResult = validateDocumentMagicBytes(txtBuf, "catatan.txt");
+  assert(
+    txtResult.valid === true && txtResult.kind === "txt",
+    "validateDocumentMagicBytes menerima file TXT plaintext sebagai valid"
+  );
+
+  // MD — markdown
+  const mdBuf = new Uint8Array(Buffer.from("# Judul\n\nIsi dokumen markdown."));
+  const mdResult = validateDocumentMagicBytes(mdBuf, "README.md");
+  assert(
+    mdResult.valid === true && mdResult.kind === "md",
+    "validateDocumentMagicBytes menerima file MD markdown sebagai valid"
+  );
+
+  // XLS — legacy CFB magic bytes (D0 CF 11 E0)
+  const xlsMagic = new Uint8Array([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0x00, 0x00]);
+  const xlsResult = validateDocumentMagicBytes(xlsMagic, "laporan.xls");
+  assert(
+    xlsResult.valid === true && xlsResult.kind === "xls",
+    "validateDocumentMagicBytes menerima file XLS legacy (CFB magic) sebagai valid"
+  );
+
+  // DOC — legacy CFB magic bytes
+  const docResult = validateDocumentMagicBytes(xlsMagic, "dokumen.doc");
+  assert(
+    docResult.valid === true && docResult.kind === "doc",
+    "validateDocumentMagicBytes menerima file DOC legacy (CFB magic) sebagai valid"
+  );
+
+  // XLSM — OOXML ZIP magic bytes
+  const zipMagic = new Uint8Array([0x50, 0x4B, 0x03, 0x04, 0x00, 0x00]);
+  const xlsmResult = validateDocumentMagicBytes(zipMagic, "data.xlsm");
+  assert(
+    xlsmResult.valid === true && xlsmResult.kind === "xlsm",
+    "validateDocumentMagicBytes menerima file XLSM (ZIP/OOXML magic) sebagai valid"
+  );
+
+  // Plaintext with null bytes → should be INVALID
+  const nullBuf = new Uint8Array([0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x74, 0x65]);
+  const nullResult = validateDocumentMagicBytes(nullBuf, "fake.csv");
+  assert(
+    nullResult.valid === false,
+    "validateDocumentMagicBytes menolak file CSV palsu yang mengandung null byte"
+  );
+
+  // Unsupported extension
+  const exeResult = validateDocumentMagicBytes(new Uint8Array([0x4D, 0x5A, 0x00, 0x00]), "virus.exe");
+  assert(
+    exeResult.valid === false,
+    "validateDocumentMagicBytes menolak ekstensi tidak didukung (.exe)"
+  );
+
+  // 25. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

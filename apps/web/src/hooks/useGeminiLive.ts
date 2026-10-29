@@ -1884,6 +1884,18 @@ export function useGeminiLive({
                 `Dokumen PDF '${file.name}' (${fileSizeMb} MB) adalah dokumen hasil scan murni tanpa teks digital. Untuk dokumen scan gambar, silakan perkecil atau kompres di bawah 4.5 MB agar dapat diproses oleh AI Vision OCR.`
               );
             }
+          } else if (file.name.match(/\.(csv|tsv|txt|md)$/i)) {
+            // Client-side instant fallback for plaintext files (no size limit)
+            setDocStatusMessage(`Membaca file teks '${file.name}'...`);
+            const text = await file.text();
+            doc = {
+              fileName: file.name,
+              mimeType: "text/plain",
+              markdownContent: text.trim() || "(File kosong)",
+              usedOcr: false,
+              truncated: false,
+              characterCount: text.length,
+            };
           } else {
             throw new Error(
               `File '${file.name}' berukuran ${fileSizeMb} MB (melebihi 4.5 MB). File di atas 4.5 MB didukung penuh hingga 500 MB untuk format PDF. Harap simpan ulang sebagai PDF atau kompres file Word/Excel di bawah 4.5 MB.`

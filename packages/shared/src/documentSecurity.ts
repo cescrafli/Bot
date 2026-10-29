@@ -33,12 +33,12 @@ function findSequence(data: Uint8Array, seq: Uint8Array, maxOffset = 1024): numb
   return -1;
 }
 
-export type SupportedDocKind = "pdf" | "docx" | "xlsx";
+export type SupportedDocKind = "pdf" | "docx" | "xlsx" | "xlsm" | "xlsb" | "xls" | "doc" | "docm" | "dotx" | "csv" | "tsv" | "txt" | "md" | "rtf";
 export type ProtectionKind = "none" | "pdf-password" | "ooxml-encrypted" | "legacy-binary";
 
 export interface MagicByteValidationResult {
   valid: boolean;
-  kind: "pdf" | "docx" | "xlsx" | "cfb" | "unknown";
+  kind: "pdf" | "docx" | "xlsx" | "xlsm" | "xlsb" | "xls" | "doc" | "docm" | "dotx" | "csv" | "tsv" | "txt" | "md" | "rtf" | "cfb" | "unknown";
   detectedMime?: string;
   error?: string;
 }
@@ -54,6 +54,21 @@ export const PASSWORD_REQUIRED_MESSAGE =
 
 export const LEGACY_FORMAT_MESSAGE =
   "Format biner lama (.doc/.xls) ini tidak dapat diproses secara langsung. Silakan buka file tersebut di aplikasi Office lalu 'Simpan Sebagai' format modern (.docx atau .xlsx).";
+
+// Text extensions that require no magic-byte check (just null-byte validation)
+const TEXT_EXTS = new Set(["csv", "tsv", "txt", "md", "rtf"]);
+// OOXML ZIP-container extensions (macro-enabled and template variants are still ZIP)
+const OOXML_EXTS = new Set(["docx", "xlsx", "xlsm", "xlsb", "docm", "dotx"]);
+// Legacy CFB binary extensions that are parsed by word-extractor / XLSX
+const CFB_EXTS = new Set(["doc", "xls"]);
+
+function hasNullBytes(data: Uint8Array, checkLen = 512): boolean {
+  const end = Math.min(data.length, checkLen);
+  for (let i = 0; i < end; i++) {
+    if (data[i] === 0x00) return true;
+  }
+  return false;
+}
 
 /**
  * Validates document magic bytes strictly against its extension
@@ -73,7 +88,6 @@ export function validateDocumentMagicBytes(head: Uint8Array, fileName: string): 
 
   // 1. PDF Check
   if (ext === "pdf") {
-    // PDF must start with %PDF- within the first 1024 bytes (typically offset 0)
     const pdfIndex = findSequence(head, PDF_MAGIC, 1024);
     if (pdfIndex !== -1) {
       return { valid: true, kind: "pdf", detectedMime: "application/pdf" };
@@ -85,29 +99,22 @@ export function validateDocumentMagicBytes(head: Uint8Array, fileName: string): 
     };
   }
 
-  // 2. OOXML (DOCX, XLSX) Check
-  if (ext === "docx" || ext === "xlsx") {
-    // Case A: Standard unencrypted OOXML is a ZIP archive (starts with PK\x03\x04)
+  // 2. OOXML family (ZIP container): docx, xlsx, xlsm, xlsb, docm, dotx
+  if (OOXML_EXTS.has(ext)) {
     if (matchesPrefix(head, ZIP_MAGIC)) {
+      const isWordFamily = ext === "docx" || ext === "docm" || ext === "dotx";
       return {
         valid: true,
-        kind: ext as "docx" | "xlsx",
-        detectedMime:
-          ext === "docx"
-            ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        kind: ext as MagicByteValidationResult["kind"],
+        detectedMime: isWordFamily
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       };
     }
-
-    // Case B: Password-protected/encrypted OOXML is wrapped in a CFB (Compound File Binary) container!
+    // Encrypted OOXML wrapped in CFB
     if (matchesPrefix(head, CFB_MAGIC)) {
-      return {
-        valid: true,
-        kind: "cfb",
-        detectedMime: "application/x-cfb",
-      };
+      return { valid: true, kind: "cfb", detectedMime: "application/x-cfb" };
     }
-
     return {
       valid: false,
       kind: "unknown",
@@ -115,12 +122,12 @@ export function validateDocumentMagicBytes(head: Uint8Array, fileName: string): 
     };
   }
 
-  // 3. Legacy extensions (.doc, .xls)
-  if (ext === "doc" || ext === "xls") {
+  // 3. Legacy CFB binary: doc, xls — now supported via word-extractor / SheetJS
+  if (CFB_EXTS.has(ext)) {
     if (matchesPrefix(head, CFB_MAGIC)) {
       return {
         valid: true,
-        kind: "cfb",
+        kind: ext as MagicByteValidationResult["kind"],
         detectedMime: "application/x-cfb",
       };
     }
@@ -131,10 +138,26 @@ export function validateDocumentMagicBytes(head: Uint8Array, fileName: string): 
     };
   }
 
+  // 4. Plaintext / delimited: csv, tsv, txt, md, rtf
+  if (TEXT_EXTS.has(ext)) {
+    if (hasNullBytes(head)) {
+      return {
+        valid: false,
+        kind: "unknown",
+        error: "File teks mengandung byte null — kemungkinan file biner yang salah ekstensi.",
+      };
+    }
+    return {
+      valid: true,
+      kind: ext as MagicByteValidationResult["kind"],
+      detectedMime: "text/plain",
+    };
+  }
+
   return {
     valid: false,
     kind: "unknown",
-    error: `Ekstensi .${ext} tidak didukung. Celyn AI hanya mendukung PDF (.pdf), Excel (.xlsx), dan Word (.docx).`,
+    error: `Ekstensi .${ext} tidak didukung. Celyn AI mendukung: PDF, Excel (.xlsx, .xls, .xlsm, .xlsb, .csv), Word (.docx, .doc), dan Teks (.txt, .md, .rtf).`,
   };
 }
 
@@ -162,10 +185,12 @@ export async function detectDocumentProtection(
   }
 
   if ((ext === "doc" || ext === "xls") && isCfb) {
+    // Legacy CFB binary — now parseable by word-extractor / SheetJS; only treat as protected
+    // if the CFB contains an EncryptedPackage stream (i.e. it was password-protected legacy Office)
+    // For simplicity, pass through — the parser will throw if truly encrypted.
     return {
-      isProtected: true,
-      kind: "legacy-binary",
-      userMessage: LEGACY_FORMAT_MESSAGE,
+      isProtected: false,
+      kind: "none",
     };
   }
 

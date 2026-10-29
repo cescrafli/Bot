@@ -4,6 +4,9 @@ import mammoth from "mammoth";
 import TurndownService from "turndown";
 // @ts-expect-error turndown-plugin-gfm does not have bundled TS types in some versions
 import { gfm } from "turndown-plugin-gfm";
+import * as XLSX from "xlsx";
+// @ts-expect-error word-extractor has no bundled types
+import WordExtractor from "word-extractor";
 import { GoogleGenAI } from "@google/genai";
 import { ParsedDocument, detectDocumentProtection } from "@celyn/shared";
 import { config } from "../config.js";
@@ -33,29 +36,33 @@ export class DocumentReaderService {
   }
 
   /**
-   * Router Utama Pembaca Dokumen (PDF, Excel, Word)
+   * Router Utama Pembaca Dokumen (Universal)
    */
   async readDocument(
     buffer: Buffer,
     fileName: string,
     mimeType: string
   ): Promise<ParsedDocument> {
-    // 0. Deteksi proteksi password & format lama
+    // 0. Deteksi proteksi password
     const protection = await detectDocumentProtection(buffer, fileName);
     if (protection.isProtected) {
-      if (protection.kind === "legacy-binary") {
-        throw new Error("LEGACY_FORMAT");
-      }
       throw new Error("PASSWORD_REQUIRED");
     }
 
-    const isPdf = mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
-    const isExcel =
-      mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-      fileName.toLowerCase().endsWith(".xlsx");
-    const isWord =
-      mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      fileName.toLowerCase().endsWith(".docx");
+    const lowerName = fileName.toLowerCase();
+    const ext = (lowerName.split(".").pop() || "") as string;
+
+    const isPdf = ext === "pdf" || mimeType === "application/pdf";
+    const isExcel = ["xlsx", "xlsm", "xlsb"].includes(ext) ||
+      mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const isXls = ext === "xls";
+    const isWord = ["docx", "docm", "dotx"].includes(ext) ||
+      mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const isDoc = ext === "doc";
+    const isCsv = ext === "csv";
+    const isTsv = ext === "tsv";
+    const isTxt = ext === "txt" || ext === "md";
+    const isRtf = ext === "rtf";
 
     let result: ParsedDocument;
 
@@ -63,8 +70,16 @@ export class DocumentReaderService {
       result = await this.readPdfHybrid(buffer, fileName);
     } else if (isExcel) {
       result = await this.readExcel(buffer, fileName);
+    } else if (isXls) {
+      result = await this.readSpreadsheetLegacy(buffer, fileName);
     } else if (isWord) {
       result = await this.readWord(buffer, fileName);
+    } else if (isDoc) {
+      result = await this.readWordLegacy(buffer, fileName);
+    } else if (isCsv || isTsv) {
+      result = this.readDelimited(buffer, fileName, ext);
+    } else if (isTxt || isRtf) {
+      result = this.readPlainText(buffer, fileName, ext);
     } else {
       throw new Error(`Format dokumen tidak didukung (${mimeType || fileName})`);
     }
@@ -279,6 +294,167 @@ export class DocumentReaderService {
       usedOcr: false,
       truncated: false,
       characterCount: markdown.length,
+    };
+  }
+
+  /**
+   * 4. BACA XLS legacy (.xls) via SheetJS
+   */
+  private async readSpreadsheetLegacy(buffer: Buffer, fileName: string): Promise<ParsedDocument> {
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    const lines: string[] = [];
+
+    for (const sheetName of wb.SheetNames) {
+      lines.push(`### Sheet: ${sheetName}\n`);
+      const ws = wb.Sheets[sheetName];
+      const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      if (data.length > 0) {
+        const maxCols = Math.max(...data.map((r) => r.length));
+        const pad = (row: any[]) => {
+          const r = [...row];
+          while (r.length < maxCols) r.push("");
+          return r.map((v) => {
+            if (v instanceof Date) return v.toISOString().slice(0, 10);
+            return String(v ?? "").replace(/\|/g, "\\|").trim();
+          });
+        };
+        const header = pad(data[0]);
+        lines.push(`| ${header.join(" | ")} |`);
+        lines.push(`| ${header.map(() => "---").join(" | ")} |`);
+        const displayRows = data.slice(1, 251);
+        for (const row of displayRows) lines.push(`| ${pad(row).join(" | ")} |`);
+        if (data.length > 251) lines.push(`\n*(Menampilkan 250 dari ${data.length - 1} baris data)*`);
+      }
+      lines.push("");
+    }
+
+    const fullContent = lines.join("\n").trim();
+    return {
+      fileName,
+      mimeType: "application/vnd.ms-excel",
+      markdownContent: fullContent || "(Excel kosong)",
+      usedOcr: false,
+      truncated: false,
+      characterCount: fullContent.length,
+    };
+  }
+
+  /**
+   * 5. BACA DOC legacy (.doc) via word-extractor
+   */
+  private async readWordLegacy(buffer: Buffer, fileName: string): Promise<ParsedDocument> {
+    const extractor = new WordExtractor();
+    const extracted = await extractor.extract(buffer);
+    const body = (extracted.getBody() || "").trim();
+    const footnotes = (extracted.getFootnotes() || "").trim();
+    const endnotes = (extracted.getEndnotes() || "").trim();
+    const parts = [
+      body,
+      footnotes && `---\n**Catatan Kaki:**\n${footnotes}`,
+      endnotes && `---\n**Catatan Akhir:**\n${endnotes}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    return {
+      fileName,
+      mimeType: "application/msword",
+      markdownContent: parts || "(Dokumen Word lama kosong)",
+      usedOcr: false,
+      truncated: false,
+      characterCount: parts.length,
+    };
+  }
+
+  /**
+   * 6. BACA CSV / TSV via delimiter parser
+   */
+  private readDelimited(buffer: Buffer, fileName: string, ext: string): ParsedDocument {
+    const text = buffer.toString("utf8");
+    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length === 0) {
+      return { fileName, mimeType: "text/plain", markdownContent: "(File kosong)", usedOcr: false, truncated: false, characterCount: 0 };
+    }
+
+    const firstLine = lines[0];
+    let delim = ",";
+    if (ext === "tsv") {
+      delim = "\t";
+    } else {
+      const tabCount = (firstLine.match(/\t/g) || []).length;
+      const semiCount = (firstLine.match(/;/g) || []).length;
+      const commaCount = (firstLine.match(/,/g) || []).length;
+      if (tabCount > commaCount && tabCount > semiCount) delim = "\t";
+      else if (semiCount > commaCount) delim = ";";
+    }
+
+    const parseRow = (line: string): string[] => {
+      const cells: string[] = [];
+      let cur = "";
+      let inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"' && !inQuote) { inQuote = true; continue; }
+        if (ch === '"' && inQuote) {
+          if (line[i + 1] === '"') { cur += '"'; i++; }
+          else { inQuote = false; }
+          continue;
+        }
+        if (!inQuote && ch === delim) { cells.push(cur.trim()); cur = ""; continue; }
+        cur += ch;
+      }
+      cells.push(cur.trim());
+      return cells;
+    };
+
+    const displayLines = lines.slice(0, 251);
+    const rows = displayLines.map(parseRow);
+    const maxCols = Math.max(...rows.map((r) => r.length));
+    const pad = (row: string[]) => {
+      const r = [...row];
+      while (r.length < maxCols) r.push("");
+      return r.map((v) => String(v).replace(/\|/g, "\\|"));
+    };
+    const header = pad(rows[0]);
+    const mdLines = [
+      `| ${header.join(" | ")} |`,
+      `| ${header.map(() => "---").join(" | ")} |`,
+      ...rows.slice(1).map((r) => `| ${pad(r).join(" | ")} |`),
+    ];
+    if (lines.length > 251) mdLines.push(`\n*(Menampilkan 250 dari ${lines.length - 1} baris data)*`);
+    const md = mdLines.join("\n");
+
+    return {
+      fileName,
+      mimeType: ext === "tsv" ? "text/tab-separated-values" : "text/csv",
+      markdownContent: md,
+      usedOcr: false,
+      truncated: false,
+      characterCount: md.length,
+    };
+  }
+
+  /**
+   * 7. BACA TXT / MD / RTF (plaintext)
+   */
+  private readPlainText(buffer: Buffer, fileName: string, ext: string): ParsedDocument {
+    let text = buffer.toString("utf8").trim();
+    if (ext === "rtf") {
+      text = text
+        .replace(/\\[a-z*]+[-]?[0-9]*/gi, " ")
+        .replace(/\{[^{}]*\}/g, "")
+        .replace(/\\/g, "")
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+    }
+    return {
+      fileName,
+      mimeType: "text/plain",
+      markdownContent: text || "(File kosong)",
+      usedOcr: false,
+      truncated: false,
+      characterCount: text.length,
     };
   }
 }

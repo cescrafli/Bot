@@ -78,7 +78,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         );
       } else if (msg.includes("LEGACY_FORMAT") || msg.toLowerCase().includes(".doc") || msg.toLowerCase().includes(".xls")) {
         setErrorMessage(
-          "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi."
+          "Format file ini tidak dapat dibaca. Coba konversi ke format modern (.docx atau .xlsx) lalu kirim lagi."
         );
       } else if (msg.includes("413") || msg.toLowerCase().includes("too large") || msg.toLowerCase().includes("melebihi batas")) {
         setErrorMessage(
@@ -272,7 +272,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.xlsx,.xls,.docx,.doc"
+                accept=".pdf,.xlsx,.xls,.xlsm,.xlsb,.csv,.tsv,.docx,.doc,.docm,.dotx,.txt,.md,.rtf"
                 onChange={handleFileChange}
                 className="hidden"
                 disabled={isUploading}
@@ -288,7 +288,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 {isUploading ? "Memproses Dokumen (Hybrid OCR)..." : "Klik untuk pilih file dokumen (Bisa banyak file)"}
               </p>
               <p className="text-[11px] text-slate-400">
-                Mendukung PDF (Edit In-Place, Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) tanpa batas kuantitas (hingga 500 MB/file)
+                Mendukung semua format: PDF, Excel (.xlsx, .xls, .xlsm, .csv), Word (.docx, .doc), dan Teks (.txt, .md, .rtf) — hingga 500 MB/file
               </p>
             </div>
 
