@@ -1292,41 +1292,143 @@ export function useGeminiLive({
 
   const uploadDocument = useCallback(
     async (file: File): Promise<ParsedDocument> => {
-      if (file.size > 4.5 * 1024 * 1024) {
+      const maxAllowedBytes = 500 * 1024 * 1024; // 500 MB
+      if (file.size > maxAllowedBytes) {
         throw new Error(
-          `Ukuran file '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)} MB) melebihi batas upload serverless (maksimal 4.5 MB).`
+          `Ukuran file '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimum 500 MB.`
         );
       }
+
       setIsUploadingDoc(true);
-      setDocStatusMessage(`Membaca dokumen '${file.name}' (Hybrid OCR)...`);
+      const isLargeFile = file.size > 4.5 * 1024 * 1024;
+      const fileSizeMb = (file.size / (1024 * 1024)).toFixed(1);
+
       try {
-        const formData = new FormData();
-        formData.append("file", file);
         const password = getStoredAuthPassword() || "admin";
         const token = getStoredAuthToken();
         const headers: Record<string, string> = {
           "x-admin-password": password,
+          "Content-Type": "application/json",
         };
         if (token) {
           headers["Authorization"] = `Bearer ${token}`;
         }
 
-        const res = await fetch("/api/documents/read", {
-          method: "POST",
-          headers,
-          body: formData,
-        });
+        let doc: ParsedDocument;
 
-        if (!res.ok) {
-          if (res.status === 413) {
-            throw new Error(`Ukuran file '${file.name}' melebihi batas upload serverless (maksimal 4.5 MB).`);
+        if (isLargeFile) {
+          // --- JALUR CEPAT & BEBAS LIMIT GOOGLE RESUMABLE UPLOAD (UNTUK FILE 4.5 MB S.D 500 MB) ---
+          setDocStatusMessage(`Menyiapkan jalur unggah langsung Google AI (${fileSizeMb} MB)...`);
+
+          const mimeType = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream");
+          const initRes = await fetch("/api/documents/upload-url", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              fileName: file.name,
+              mimeType,
+              fileSize: file.size,
+            }),
+          });
+
+          if (!initRes.ok) {
+            const errData = await initRes.json().catch(() => ({}));
+            throw new Error(errData?.error || `Gagal membuat sesi unggah Google (HTTP ${initRes.status})`);
           }
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData?.error || `Gagal membaca dokumen (HTTP ${res.status})`);
-        }
 
-        const data = await res.json();
-        const doc: ParsedDocument = data.document;
+          const { uploadUrl } = await initRes.json();
+          if (!uploadUrl) {
+            throw new Error("URL upload langsung Google tidak diterima.");
+          }
+
+          // Unggah langsung dari browser ke Google Cloud CDN tanpa melewati proxy Vercel
+          setDocStatusMessage(`Mengunggah ${fileSizeMb} MB langsung ke server Google (0%)...`);
+
+          const uploadResult = await new Promise<any>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", uploadUrl);
+            xhr.setRequestHeader("X-Goog-Upload-Offset", "0");
+            xhr.setRequestHeader("X-Goog-Upload-Command", "upload, finalize");
+            xhr.setRequestHeader("Content-Length", String(file.size));
+
+            xhr.upload.onprogress = (ev) => {
+              if (ev.lengthComputable) {
+                const percent = Math.round((ev.loaded / ev.total) * 100);
+                setDocStatusMessage(`Mengunggah ${fileSizeMb} MB langsung ke server Google (${percent}%)...`);
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                  const parsed = JSON.parse(xhr.responseText || "{}");
+                  resolve(parsed);
+                } catch {
+                  resolve({});
+                }
+              } else {
+                reject(new Error(`Unggah langsung ke Google gagal (HTTP ${xhr.status}): ${xhr.responseText}`));
+              }
+            };
+
+            xhr.onerror = () => reject(new Error("Koneksi jaringan terputus saat mengunggah ke Google."));
+            xhr.send(file);
+          });
+
+          const fileUri = uploadResult?.file?.uri || uploadResult?.file?.name;
+          if (!fileUri) {
+            throw new Error("Google tidak mengembalikan URI file setelah unggahan selesai.");
+          }
+
+          setDocStatusMessage(`Mengekstrak dan menganalisis ${fileSizeMb} MB dengan Gemini AI...`);
+
+          const extractRes = await fetch("/api/documents/extract-file", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              fileUri: uploadResult.file.uri,
+              fileName: file.name,
+              mimeType,
+            }),
+          });
+
+          if (!extractRes.ok) {
+            const errData = await extractRes.json().catch(() => ({}));
+            throw new Error(errData?.error || `Gagal menganalisis dokumen via Gemini (HTTP ${extractRes.status})`);
+          }
+
+          const extractData = await extractRes.json();
+          doc = extractData.document;
+        } else {
+          // --- JALUR STANDAR VERCEL SERVERLESS (UNTUK FILE <= 4.5 MB) ---
+          setDocStatusMessage(`Membaca dokumen '${file.name}' (Hybrid OCR)...`);
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const uploadHeaders: Record<string, string> = {
+            "x-admin-password": password,
+          };
+          if (token) {
+            uploadHeaders["Authorization"] = `Bearer ${token}`;
+          }
+
+          const res = await fetch("/api/documents/read", {
+            method: "POST",
+            headers: uploadHeaders,
+            body: formData,
+          });
+
+          if (!res.ok) {
+            if (res.status === 413) {
+              throw new Error(`Ukuran file '${file.name}' melebihi batas serverless.`);
+            }
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData?.error || `Gagal membaca dokumen (HTTP ${res.status})`);
+          }
+
+          const data = await res.json();
+          doc = data.document;
+        }
 
         setActiveDocuments((prev) => [
           ...prev.filter((d) => d.fileName !== doc.fileName),

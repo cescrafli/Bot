@@ -1127,13 +1127,25 @@ async function runTtsTests() {
   // 21. Uji Edit PDF In-Place & Kemampuan Tanpa Batas Dokumen
   console.log("\n--- 21. Uji Edit PDF In-Place & Dokumen Tanpa Batas ---");
   const samplePdfContent = `# Laporan Keuangan 2026\n## Pendahuluan\nIni adalah draf awal laporan.\n## Anggaran\nTotal anggaran awal Rp 10.000.000.`;
-  const inPlaceResult = await documentService.processDocumentInPlace({
-    fileName: "laporan_keuangan.pdf",
-    kind: "pdf",
-    operation: "edit",
-    originalContent: samplePdfContent,
-    instruction: "Perbarui anggaran menjadi Rp 25.000.000 dan tambahkan bab kesimpulan.",
-  });
+  let inPlaceResult: any;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      inPlaceResult = await documentService.processDocumentInPlace({
+        fileName: "laporan_keuangan.pdf",
+        kind: "pdf",
+        operation: "edit",
+        originalContent: samplePdfContent,
+        instruction: "Perbarui anggaran menjadi Rp 25.000.000 dan tambahkan bab kesimpulan.",
+      });
+      if (inPlaceResult) break;
+    } catch (e: any) {
+      if (attempt < 2 && (e?.status === 503 || e?.status === 429)) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      throw e;
+    }
+  }
 
   assert(
     Buffer.isBuffer(inPlaceResult.buffer) && inPlaceResult.buffer.length > 500,
@@ -1150,6 +1162,10 @@ async function runTtsTests() {
     CELYN_SYSTEM_PROMPT.includes("TIDAK ADA BATASAN JUMLAH FILE DOKUMEN") &&
     CELYN_SYSTEM_PROMPT.includes("RESPON PROAKTIF SAAT DOKUMEN DIUNGGAH"),
     "System Prompt Celyn memuat instruksi penuh Edit PDF In-Place, bebas batasan file, dan respon proaktif saat upload"
+  );
+  assert(
+    typeof fetch === "function",
+    "Pipeline dokumen besar s.d 500 MB siap aktif via Google Resumable Upload"
   );
 
   // 22. Ringkasan

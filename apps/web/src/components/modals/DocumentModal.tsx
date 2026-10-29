@@ -63,9 +63,9 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setErrorMessage(null);
     try {
       for (const file of files) {
-        if (file.size > 4.5 * 1024 * 1024) {
+        if (file.size > 500 * 1024 * 1024) {
           throw new Error(
-            `Ukuran file '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)} MB) melebihi batas upload (maksimal 4.5 MB). Silakan pilih file dokumen di bawah 4.5 MB atau kompres file terlebih dahulu.`
+            `Ukuran file '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)} MB) melebihi batas upload maksimal 500 MB.`
           );
         }
         await onUploadDocument(file);
@@ -288,7 +288,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 {isUploading ? "Memproses Dokumen (Hybrid OCR)..." : "Klik untuk pilih file dokumen (Bisa banyak file)"}
               </p>
               <p className="text-[11px] text-slate-400">
-                Mendukung PDF (Edit In-Place, Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) tanpa batas kuantitas (maks 4.5 MB/file)
+                Mendukung PDF (Edit In-Place, Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) tanpa batas kuantitas (hingga 500 MB/file)
               </p>
             </div>
 

@@ -431,6 +431,158 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Endpoint Buat Resumable Upload URL Google Files API (Dukungan File Besar s.d 500 MB)
+  if (req.url === "/api/documents/upload-url" && req.method === "POST") {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
+    if (!config.geminiApiKey) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "GEMINI_API_KEY belum dikonfigurasi di server." }));
+      return;
+    }
+
+    let rawBody = "";
+    req.on("data", (chunk) => {
+      rawBody += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        const body = JSON.parse(rawBody || "{}");
+        const fileName = String(body.fileName || "dokumen.pdf").trim();
+        const mimeType = String(body.mimeType || "application/pdf").trim();
+        const fileSize = parseInt(body.fileSize || "0", 10);
+
+        if (fileSize > 500 * 1024 * 1024) {
+          res.writeHead(413, { "Content-Type": "application/json" });
+          return res.end(
+            JSON.stringify({
+              error: `Ukuran file melebihi batas maksimum 500 MB (Ukuran: ${(fileSize / (1024 * 1024)).toFixed(1)} MB)`,
+            })
+          );
+        }
+
+        const initHeaders = {
+          "X-Goog-Upload-Protocol": "resumable",
+          "X-Goog-Upload-Command": "start",
+          "X-Goog-Upload-Header-Content-Length": String(fileSize),
+          "X-Goog-Upload-Header-Content-Type": mimeType,
+          "Content-Type": "application/json",
+        };
+
+        const googleResp = await fetch(
+          `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${config.geminiApiKey}`,
+          {
+            method: "POST",
+            headers: initHeaders,
+            body: JSON.stringify({ file: { display_name: fileName } }),
+          }
+        );
+
+        if (!googleResp.ok) {
+          const errText = await googleResp.text();
+          res.writeHead(googleResp.status, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: `Gagal membuat sesi upload Google: ${errText}` }));
+        }
+
+        const uploadUrl = googleResp.headers.get("x-goog-upload-url");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, uploadUrl, fileName, mimeType, fileSize }));
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message || "Gagal memproses sesi unggah" }));
+      }
+    });
+    return;
+  }
+
+  // Endpoint Ekstraksi Dokumen dari Google Files API
+  if (req.url === "/api/documents/extract-file" && req.method === "POST") {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
+    if (!config.geminiApiKey) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "GEMINI_API_KEY belum dikonfigurasi di server." }));
+      return;
+    }
+
+    let rawBody = "";
+    req.on("data", (chunk) => {
+      rawBody += chunk.toString();
+    });
+    req.on("end", async () => {
+      try {
+        const body = JSON.parse(rawBody || "{}");
+        const fileUri = String(body.fileUri || "").trim();
+        const fileName = String(body.fileName || "dokumen.pdf").trim();
+        const mimeType = String(body.mimeType || "application/pdf").trim();
+
+        if (!fileUri) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Parameter 'fileUri' wajib disertakan." }));
+        }
+
+        const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+        const fileNameKey = fileUri.split("/").pop();
+        if (fileNameKey) {
+          try {
+            let fileStatus = await ai.files.get({ name: `files/${fileNameKey}` });
+            let attempts = 0;
+            while (fileStatus.state === "PROCESSING" && attempts < 15) {
+              await new Promise((r) => setTimeout(r, 2000));
+              fileStatus = await ai.files.get({ name: `files/${fileNameKey}` });
+              attempts++;
+            }
+          } catch {}
+        }
+
+        const prompt =
+          "Tolong ekstrak seluruh isi dokumen ini menjadi Markdown terstruktur yang rapi dan lengkap. Sertakan judul utama (#), sub-heading (##, ###), poin-poin penting, dan tabel markdown jika ada. Pertahankan urutan bab dan nilai data asli secara presisi. Jangan lewatkan informasi penting.";
+
+        const response = await ai.models.generateContent({
+          model: config.docOcrModel || "gemini-3-flash-preview",
+          contents: [
+            {
+              role: "user",
+              parts: [{ fileData: { fileUri, mimeType } }, { text: prompt }],
+            },
+          ],
+        });
+
+        const markdownContent = (response.text || "").trim();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            document: {
+              fileName,
+              mimeType,
+              markdownContent,
+              usedOcr: true,
+              pages: 0,
+              truncated: false,
+              characterCount: markdownContent.length,
+              fileUri,
+            },
+          })
+        );
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message || "Gagal mengekstrak dokumen" }));
+      }
+    });
+    return;
+  }
+
   // Endpoint Unggah & Baca Dokumen (PDF, Excel, Word dengan Hybrid OCR)
   if (
     (req.url === "/api/documents/read" ||

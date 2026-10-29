@@ -85,11 +85,25 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
   ]
 }`;
 
-      const res = await this.ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
+      let res: any;
+      let lastErr: any;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          res = await this.ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (res?.text) break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+            continue;
+          }
+          throw err;
+        }
+      }
 
       const parsed = JSON.parse(res.text || "{}");
       const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
@@ -136,11 +150,25 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
   ]
 }`;
 
-      const res = await this.ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
+      let res: any;
+      let lastErr: any;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          res = await this.ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (res?.text) break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+            continue;
+          }
+          throw err;
+        }
+      }
 
       const parsed = JSON.parse(res.text || "{}");
       const validated: ReportPayload = ReportPayloadSchema.parse(parsed);
@@ -220,11 +248,25 @@ PETUNJUK:
   ]
 }`;
 
-      const res = await this.ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
+      let res: any;
+      let lastErr: any;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          res = await this.ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (res?.text) break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+            continue;
+          }
+          throw err;
+        }
+      }
 
       const parsed = JSON.parse(res.text || "{}");
       const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
@@ -275,11 +317,25 @@ KEMBALIKAN HANYA JSON VALID SESUAI SKEMA REPORTPAYLOAD:
   ]
 }`;
 
-      const res = await this.ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
+      let res: any;
+      let lastErr: any;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          res = await this.ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (res?.text) break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < 2 && (err?.status === 503 || err?.status === 429)) {
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+            continue;
+          }
+          throw err;
+        }
+      }
 
       const parsed = JSON.parse(res.text || "{}");
       const validated: ReportPayload = ReportPayloadSchema.parse(parsed);

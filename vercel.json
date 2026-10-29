@@ -14,6 +14,12 @@
     },
     "api/documents-process.js": {
       "maxDuration": 60
+    },
+    "api/documents-upload-url.js": {
+      "maxDuration": 60
+    },
+    "api/documents-extract-file.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
@@ -24,6 +30,14 @@
     {
       "source": "/api/memory/remember",
       "destination": "/api/remember"
+    },
+    {
+      "source": "/api/documents/upload-url",
+      "destination": "/api/documents-upload-url"
+    },
+    {
+      "source": "/api/documents/extract-file",
+      "destination": "/api/documents-extract-file"
     },
     {
       "source": "/api/documents/read",
