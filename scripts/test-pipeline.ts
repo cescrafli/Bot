@@ -2136,6 +2136,15 @@ async function runTtsTests() {
     "apps/server/package.json menggunakan file-type versi mutakhir (^22.2.0)"
   );
 
+  // E. Verifikasi Konfigurasi allowScripts di Root package.json
+  const rootPkg = JSON.parse(
+    fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8")
+  );
+  assert(
+    rootPkg.allowScripts && Object.keys(rootPkg.allowScripts).length > 0,
+    "package.json mengonfigurasi allowScripts untuk mengeliminasi warning install-scripts Vercel"
+  );
+
   // 30. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

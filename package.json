@@ -48,5 +48,11 @@
     "@types/busboy": "^1.5.5",
     "@types/pdfmake": "^0.2.11",
     "@types/turndown": "^5.0.6"
+  },
+  "allowScripts": {
+    "@google/genai@2.31.0": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true,
+    "protobufjs@7.6.6": true
   }
 }
