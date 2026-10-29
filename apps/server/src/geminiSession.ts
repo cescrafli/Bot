@@ -863,9 +863,11 @@ export class GeminiSession {
           toolResponseOutput = {
             status: "done",
             query,
+            expertPersona: researchResult.expertPersona,
+            fieldLabel: researchResult.fieldLabel,
             summary: researchResult.summary,
             sources: researchResult.sources,
-            instruction: `Hasil riset untuk '${query}' berhasil didapatkan. Sekarang sampaikan penjelasannya secara lisan dengan cerdas, hangat, santai, dan sebutkan tingkat keyakinanmu secara jujur. Jangan lupa berikan tautan / sumber rujukan dalam format markdown [Judul](URL) agar pengguna dapat memeriksa langsung!`,
+            instruction: `Hasil riset untuk '${query}' berhasil didapatkan. Sekarang kamu WAJIB BERPERAN sebagai '${researchResult.expertPersona}' di bidang '${researchResult.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, tajam (bukan riset ngasal), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, risiko, dan rekomendasimu. Jangan lupa cantumkan sumber rujukan markdown [Judul](URL). Terakhir, TAWARKAN SECARA PROAKTIF apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
           };
         } else if (fc.name === "process_document") {
           const { docId, operation, targetLanguage, instruction } = sanitizedArgs;

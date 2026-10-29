@@ -46,6 +46,7 @@ import {
   friendlyDocumentError,
   stripVoiceMetadataTags,
   buildDocumentChunkPrompt,
+  inferExpertPersona,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1156,6 +1157,65 @@ async function runTtsTests() {
   const citationLinks = testCitations.map((c) => `[${c.title}](${c.url})`).join("\n");
   assert(citationLinks.includes("[Dokumentasi Resmi](https://example.com/docs)"), "Format sitasi markdown link terverifikasi [Judul](URL)");
   assert(citationLinks.includes("[Portal Berita](https://example.com/news)"), "Tautan markdown sumber riset valid dan dapat diklik");
+
+  // Uji Inferensi Persona Pakar Profesional Otomatis (inferExpertPersona)
+  const financeExpert = inferExpertPersona("Coba kamu teliti saham BBCA dan rasio dividen perbankan");
+  assert(
+    financeExpert.domain === "finance" &&
+      financeExpert.persona.includes("CFA") &&
+      financeExpert.fieldLabel.includes("Saham"),
+    "Riset saham & perbankan otomatis mengadopsi persona Analis Senior Pasar Modal / CFA"
+  );
+
+  const legalExpert = inferExpertPersona("Tolong riset pasal undang-undang tentang sengketa kontrak kerja");
+  assert(
+    legalExpert.domain === "legal" &&
+      legalExpert.persona.includes("Hukum") &&
+      legalExpert.fieldLabel.includes("Hukum"),
+    "Riset hukum & kontrak otomatis mengadopsi persona Konsultan Hukum Senior / Advokat"
+  );
+
+  const medicalExpert = inferExpertPersona("Riset obat dan pedoman klinis terapi diabetes melitus");
+  assert(
+    medicalExpert.domain === "medical" &&
+      medicalExpert.persona.includes("Dokter Spesialis"),
+    "Riset medis & obat klinis otomatis mengadopsi persona Dokter Spesialis Klinis Senior"
+  );
+
+  const techExpert = inferExpertPersona("Bandingkan arsitektur microservices dan efisiensi cloud kubernetes");
+  assert(
+    techExpert.domain === "tech" &&
+      techExpert.persona.includes("Principal Systems Architect"),
+    "Riset arsitektur software & cloud otomatis mengadopsi persona Principal Systems Architect"
+  );
+
+  const econExpert = inferExpertPersona("Bagaimana proyeksi inflasi dan suku bunga bank sentral tahun depan");
+  assert(
+    econExpert.domain === "economics" &&
+      econExpert.persona.includes("Ekonom"),
+    "Riset inflasi & moneter otomatis mengadopsi persona Kepala Peneliti Ekonomi Makro"
+  );
+
+  const businessExpert = inferExpertPersona("Analisis strategi pemasaran startup dan unit economics CAC LTV");
+  assert(
+    businessExpert.domain === "business" &&
+      businessExpert.persona.includes("Konsultan Manajemen"),
+    "Riset strategi bisnis otomatis mengadopsi persona Partner Konsultan Manajemen Strategis"
+  );
+
+  // Uji Direktif Roleplay Pakar Profesional & Ekspor Dokumen pada System Prompt Celyn
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("ROLEPLAY PAKAR PROFESIONAL SAAT RISET"),
+    "System prompt memuat direktif mutlak Roleplay Pakar Profesional saat melakukan riset"
+  );
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("KEMAMPUAN & INISIATIF EKSPOR LAPORAN KE PDF ATAU WORD"),
+    "System prompt memuat instruksi inisiatif pembuatan laporan dokumen PDF/Word"
+  );
+  assert(
+    CELYN_CORE_TOOLS.find((t) => t.name === "research")?.description.includes("PDF (.pdf) atau Word (.docx)") === true,
+    "Deklarasi tool research menegaskan kesiapan ekspor dokumen PDF dan Word"
+  );
 
   // 20. Uji Zero-Branding UI (Celyn AI Pure Brand Integrity)
   console.log("\n--- 20. Uji Zero-Branding UI (Celyn AI Pure Brand Integrity) ---");

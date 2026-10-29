@@ -25,6 +25,7 @@ import {
   splitTextIntoChunks,
   friendlyDocumentError,
   stripVoiceMetadataTags,
+  inferExpertPersona,
 } from "@celyn/shared";
 import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
 
@@ -1048,10 +1049,13 @@ export function useGeminiLive({
                   };
                 } else if (fc.name === "research") {
                   const query = String((fc.args as any)?.query || "").trim();
+                  const expert = inferExpertPersona(query);
                   toolOutput = {
                     status: "applied",
                     query,
-                    instruction: `Riset tentang '${query}' telah diselesaikan. Sampaikan intisari temuanmu secara lisan dalam Bahasa Indonesia secara padat dan ramah!`,
+                    expertPersona: expert.persona,
+                    fieldLabel: expert.fieldLabel,
+                    instruction: `Riset mendalam untuk '${query}' telah diselesaikan. Kamu sekarang WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Sampaikan analisis tingkat profesional yang berbobot, terstruktur, berbasis data riil (bukan riset asal-asalan), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, potensi risiko, dan rekomendasi strategismu. Lalu tawarkan secara proaktif apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
                   };
                 }
 
