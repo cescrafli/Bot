@@ -2096,7 +2096,47 @@ async function runTtsTests() {
     "vercel.json mengalokasikan maxDuration 60 detik untuk api/research.js"
   );
 
-  // 29. Ringkasan
+  // 29. PENGUJIAN OPTIMASI BUILD VERCEL & ELIMINASI WARNING BUNDLER
+  console.log("\n🧪 --- SECTION 29: Vercel Build Optimization & Bundle Hardening ---");
+
+  // A. Verifikasi Dynamic Import unpdf di ClientDocumentReader
+  const clientDocReaderCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/services/ClientDocumentReader.ts"),
+    "utf8"
+  );
+  assert(
+    clientDocReaderCode.includes('await import("unpdf")') || clientDocReaderCode.includes("await import('unpdf')"),
+    "ClientDocumentReader.ts menggunakan dynamic import unpdf on-demand untuk menghemat initial bundle"
+  );
+
+  // B. Verifikasi Vite Config Alias node:crypto & chunkSizeWarningLimit
+  const viteConfigCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/vite.config.ts"),
+    "utf8"
+  );
+  assert(
+    viteConfigCode.includes("emptyCrypto.ts") && viteConfigCode.includes('"node:crypto"'),
+    "vite.config.ts mengonfigurasi alias browser shim node:crypto untuk mengeliminasi warning externalization"
+  );
+  assert(
+    viteConfigCode.includes("chunkSizeWarningLimit: 1800"),
+    "vite.config.ts mengatur chunkSizeWarningLimit: 1800 untuk mengakomodasi 3D VRM & PDF.js"
+  );
+
+  // C. Verifikasi Keberadaan Shim File emptyCrypto.ts
+  const shimPath = path.resolve(process.cwd(), "apps/web/src/shims/emptyCrypto.ts");
+  assert(fs.existsSync(shimPath), "File shim apps/web/src/shims/emptyCrypto.ts tersedia untuk bundler Vite");
+
+  // D. Verifikasi Konsistensi Dependensi file-type di Server
+  const serverPkg = JSON.parse(
+    fs.readFileSync(path.resolve(process.cwd(), "apps/server/package.json"), "utf8")
+  );
+  assert(
+    serverPkg.dependencies && serverPkg.dependencies["file-type"] === "^22.2.0",
+    "apps/server/package.json menggunakan file-type versi mutakhir (^22.2.0)"
+  );
+
+  // 30. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");
