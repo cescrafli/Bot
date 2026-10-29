@@ -2190,7 +2190,42 @@ async function runTtsTests() {
   const npmrcContent = fs.readFileSync(npmrcPath, "utf8");
   assert(npmrcContent.includes("cache="), ".npmrc memuat konfigurasi cache yang valid");
 
-  // 31. Ringkasan
+  console.log("\n🧪 --- SECTION 31: Vercel Hobby Plan Serverless Function Optimization ---");
+
+  // A. Verifikasi Batas Maksimal 12 Serverless Functions untuk Vercel Hobby Plan
+  const apiDir = path.resolve(process.cwd(), "api");
+  const apiFiles = fs.readdirSync(apiDir).filter((file: string) => file.endsWith(".js"));
+  assert(
+    apiFiles.length <= 12,
+    `Jumlah Serverless Function di api/ (${apiFiles.length}) mematuhi batas mutlak Vercel Hobby Plan (maksimal 12)`
+  );
+
+  // B. Verifikasi api/auth-verify.js tidak ada sebagai file mandiri (telah digabung ke health.js)
+  assert(
+    !fs.existsSync(path.resolve(apiDir, "auth-verify.js")),
+    "api/auth-verify.js tidak lagi berdiri sebagai file terpisah (mencegah kelebihan kuota fungsi)"
+  );
+
+  // C. Verifikasi api/health.js memiliki handler terpadu untuk auth-verify
+  const healthCode = fs.readFileSync(path.resolve(apiDir, "health.js"), "utf8");
+  assert(
+    healthCode.includes("handleAuthVerify") && healthCode.includes("signToken"),
+    "api/health.js mengintegrasikan endpoint verifikasi otentikasi secara efisien"
+  );
+
+  // D. Verifikasi vercel.json mengarahkan rute /api/auth/verify ke /api/health
+  const vercelConfig = JSON.parse(
+    fs.readFileSync(path.resolve(process.cwd(), "vercel.json"), "utf8")
+  );
+  const authRewrite = vercelConfig.rewrites?.find(
+    (rw: any) => rw.source === "/api/auth/verify" && rw.destination === "/api/health"
+  );
+  assert(
+    Boolean(authRewrite),
+    "vercel.json mengalihkan rute /api/auth/verify langsung ke /api/health"
+  );
+
+  // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");
