@@ -5,10 +5,30 @@
   "buildCommand": "npm --workspace=packages/shared run build && npm --workspace=apps/web run build",
   "outputDirectory": "apps/web/dist",
   "framework": null,
+  "functions": {
+    "api/documents-read.js": {
+      "maxDuration": 60
+    },
+    "api/documents-generate.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/api/memory/remember",
       "destination": "/api/remember"
+    },
+    {
+      "source": "/api/documents/read",
+      "destination": "/api/documents-read"
+    },
+    {
+      "source": "/api/documents/upload",
+      "destination": "/api/documents-read"
+    },
+    {
+      "source": "/api/documents/generate",
+      "destination": "/api/documents-generate"
     },
     {
       "source": "/api/(.*)",

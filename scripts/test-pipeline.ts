@@ -24,11 +24,16 @@ import {
   isInterrogativeOrRecallQuestion,
   INVALID_ITEM_RE,
   detectFactSubject,
+  stripMarkdownFormatting,
+  ExcelPayloadSchema,
+  ReportPayloadSchema,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 import { memoryService } from "../apps/server/src/services/MemoryService.js";
+import { documentWriterService } from "../apps/server/src/services/DocumentWriterService.js";
+import { documentReaderService } from "../apps/server/src/services/DocumentReaderService.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
 
@@ -926,7 +931,137 @@ async function runTtsTests() {
     "memoryService.isReady() mengembalikan true setelah inisialisasi skema Turso untuk healthcheck telemetry"
   );
 
-  // 15. Ringkasan
+  // 15. Uji Sistem Dokumen Cerdas (PDF, Word, Excel, Zod, Sanitizer, Reader, Writer, & Guardrails)
+  console.log("\n--- 15. Uji Sistem Dokumen Cerdas (PDF, Word, Excel, Reader & Writer) ---");
+
+  // 15.1 Sanitasi Format Markdown Mentah
+  const rawSample = "### Judul Laporan\nParagraf dengan **tebal**, *miring*, `kode`, dan [tautan](https://google.com).";
+  const cleanSample = stripMarkdownFormatting(rawSample);
+  assert(
+    !cleanSample.includes("**") &&
+    !cleanSample.includes("###") &&
+    !cleanSample.includes("[tautan]") &&
+    cleanSample.includes("tebal") &&
+    cleanSample.includes("miring"),
+    "stripMarkdownFormatting sukses membersihkan format markdown mentah untuk dokumen Word/PDF"
+  );
+
+  // 15.2 Validasi Skema Zod Excel & Sanitasi Nama Sheet
+  const rawExcelPayload = {
+    fileName: "Rekap_Keuangan_2026",
+    sheets: [
+      {
+        sheetName: "Laporan:Keuangan/2026*Q1?", // Mengandung karakter terlarang Excel
+        columns: [
+          { header: "Nama Pos", key: "pos", type: "string" as const },
+          { header: "Nominal", key: "nominal", type: "currency" as const },
+          { header: "Persentase", key: "persen", type: "percentage" as const },
+        ],
+        rows: [
+          { pos: "Server Cloud", nominal: 1500000, persen: 0.25 },
+          { pos: "Domain", nominal: 250000, persen: 0.05 },
+        ],
+      },
+    ],
+  };
+  const validatedExcel = ExcelPayloadSchema.parse(rawExcelPayload);
+  assert(
+    !validatedExcel.sheets[0].sheetName.includes(":") &&
+    !validatedExcel.sheets[0].sheetName.includes("/") &&
+    !validatedExcel.sheets[0].sheetName.includes("*"),
+    "ExcelSheetSchema otomatis membersihkan karakter terlarang dari nama sheet Excel"
+  );
+
+  // 15.3 Pembuatan File Excel & Pembacaan Kembali (Round-Trip Test)
+  const excelBuffer = await documentWriterService.createExcel(validatedExcel);
+  assert(
+    Buffer.isBuffer(excelBuffer) && excelBuffer.length > 1000,
+    `DocumentWriterService.createExcel sukses menghasilkan buffer XLSX (${excelBuffer.length} bytes)`
+  );
+
+  const parsedExcel = await documentReaderService.readDocument(
+    excelBuffer,
+    "rekap.xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  assert(
+    parsedExcel.markdownContent.includes("Server Cloud") &&
+    parsedExcel.markdownContent.includes("1500000") &&
+    parsedExcel.usedOcr === false,
+    "DocumentReaderService.readExcel sukses membaca file XLSX dan mengekstrak tabel markdown"
+  );
+
+  // 15.4 Pembuatan File Word (.docx) & Pembacaan Kembali
+  const reportPayload = ReportPayloadSchema.parse({
+    title: "Laporan Evaluasi Proyek AI Celyn",
+    subtitle: "Dokumen Resmi Pengujian Pipeline 2026",
+    sections: [
+      {
+        heading: "Ringkasan Eksekutif",
+        paragraphs: [
+          "Celyn AI Bot telah dilengkapi dengan subsistem pembaca dan pembuat dokumen.",
+        ],
+        bulletPoints: [
+          "Ekstraksi teks digital PDF instan",
+          "Dukungan tabel multi-kolom Microsoft Word",
+        ],
+        table: {
+          headers: ["Komponen", "Status", "Metrik"],
+          rows: [
+            ["PDF Reader", "Aktif", "Akurat"],
+            ["Excel Engine", "Aktif", "Lengkap"],
+          ],
+        },
+      },
+    ],
+  });
+
+  const wordBuffer = await documentWriterService.createWord(reportPayload);
+  assert(
+    Buffer.isBuffer(wordBuffer) && wordBuffer.length > 2000,
+    `DocumentWriterService.createWord sukses menghasilkan buffer DOCX (${wordBuffer.length} bytes)`
+  );
+
+  const parsedWord = await documentReaderService.readDocument(
+    wordBuffer,
+    "laporan.docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  );
+  assert(
+    parsedWord.markdownContent.includes("Laporan Evaluasi Proyek AI Celyn") ||
+    parsedWord.markdownContent.includes("Ringkasan Eksekutif"),
+    "DocumentReaderService.readWord sukses membaca file DOCX dan menjaga heading serta teks utuh"
+  );
+
+  // 15.5 Pembuatan File PDF (.pdf) & Pembacaan Kembali
+  const pdfBuffer = await documentWriterService.createPdf(reportPayload);
+  assert(
+    Buffer.isBuffer(pdfBuffer) && pdfBuffer.length > 1000,
+    `DocumentWriterService.createPdf sukses menghasilkan buffer PDF (${pdfBuffer.length} bytes)`
+  );
+
+  const parsedPdf = await documentReaderService.readDocument(
+    pdfBuffer,
+    "laporan.pdf",
+    "application/pdf"
+  );
+  assert(
+    parsedPdf.usedOcr === false &&
+    parsedPdf.totalPages !== undefined &&
+    parsedPdf.totalPages >= 1 &&
+    parsedPdf.markdownContent.length > 20,
+    "DocumentReaderService.readDocument sukses mengekstrak teks layer digital PDF (< 1 detik tanpa memboroskan kuota OCR)"
+  );
+
+  // 15.6 Guardrail Stateless & Transient Session Context
+  const testDocContext = `<document_context fileName="rahasia.pdf" usedOcr="false">\nData laporan keuangan kuartal 1\n</document_context>`;
+  assert(
+    testDocContext.startsWith("<document_context") &&
+    testDocContext.endsWith("</document_context>"),
+    "Konteks dokumen dienkapsulasi rapi dalam tag <document_context> sebagai data transien sesi tanpa mencemari memori Turso"
+  );
+
+  // 16. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

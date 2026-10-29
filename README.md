@@ -16,7 +16,11 @@ Teman ngobrol visual AI interaktif yang bisa berbicara dua arah lewat suara lang
   - *Smart Context Update*: Jika konteks topik sudah pernah dicatat, data lama otomatis diperbarui tanpa membuat baris duplikat.
   - Mengingat hingga 200 putaran riwayat percakapan terakhir (*cross-session topic recall*).
 - 🖥️ **Screen Share Aware**: Celyn bisa melihat layarmu saat koding, browsing, atau membaca tugas dengan algoritma *change detection* hemat token.
-- 🌐 **Deployment Fleksibel**: Siap dijalankan di komputer lokal (Node.js + Express) maupun dideploy langsung ke cloud via Vercel Serverless.
+- 📄 **Dokumen Cerdas (PDF, Word, Excel)**:
+  - **Membaca Dokumen**: Ekstraksi digital super cepat untuk PDF, Word (.docx), dan Excel (.xlsx) menjadi tabel/teks Markdown, dilengkapi *Hybrid OCR* via Gemini Vision jika PDF berupa hasil scan/foto.
+  - **Membuat Dokumen**: Celyn dapat diminta menyusun dan mengekspor dokumen laporan PDF (font Unicode), Word (.docx berpenomoran halaman), atau lembar kerja Excel (.xlsx berpola zebra, header beku, dan format angka/Rupiah) yang langsung diunduh secara *stateless*.
+  - **Konteks Transien**: Isi dokumen dijadikan referensi obrolan sesi tanpa mencemari memori profil jangka panjang di Turso.
+- 🌐 **Deployment Fleksibel**: Siap dijalankan di komputer lokal (Node.js) maupun dideploy langsung ke cloud via Vercel Serverless.
 
 ---
 
@@ -25,9 +29,9 @@ Teman ngobrol visual AI interaktif yang bisa berbicara dua arah lewat suara lang
 Monorepo berbasis npm workspaces:
 
 - **`apps/web`**: Frontend React, Vite, Tailwind CSS, Three.js (VRM 3D), dan Web Audio API.
-- **`apps/server`**: Server backend Node.js, Express, WebSocket, dan Edge TTS proxy.
-- **`packages/shared`**: Modul bersama berisi aturan persona Celyn, ekstraktor memori, prosodi suara, dan tipedata.
-- **`api/`**: Serverless functions untuk Vercel (`token`, `record`, `remember`, `summarize`, `health`).
+- **`apps/server`**: Server backend Node.js, WebSocket, engine dokumen (Reader & Writer), dan Edge TTS proxy.
+- **`packages/shared`**: Modul bersama berisi aturan persona Celyn, ekstraktor memori, skema Zod dokumen, dan tipedata.
+- **`api/`**: Serverless functions untuk Vercel (`token`, `record`, `remember`, `summarize`, `documents-read`, `documents-generate`, `health`).
 - **`scripts/`**: Kumpulan script uji pipeline otomatis (`test-pipeline.ts`) dan pemeliharaan database.
 
 ---

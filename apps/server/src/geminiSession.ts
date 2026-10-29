@@ -170,6 +170,29 @@ export class GeminiSession {
                     required: ["fact"],
                   },
                 },
+                {
+                  name: "create_document",
+                  description: "Buat atau ekspor dokumen laporan, ringkasan, atau lembar kerja ke format PDF (.pdf), Word (.docx), atau Excel (.xlsx) saat diminta pengguna.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      kind: {
+                        type: Type.STRING,
+                        enum: ["pdf", "docx", "xlsx"],
+                        description: "Format dokumen: 'pdf', 'docx', atau 'xlsx'",
+                      },
+                      title: {
+                        type: Type.STRING,
+                        description: "Judul dokumen yang relevan",
+                      },
+                      instruction: {
+                        type: Type.STRING,
+                        description: "Instruksi rincian isi, topik, atau data yang harus dimuat dalam dokumen",
+                      },
+                    },
+                    required: ["kind", "title"],
+                  },
+                },
               ],
             },
           ],
@@ -654,6 +677,16 @@ export class GeminiSession {
               instruction: "Penyimpanan memori ke database sedang mengalami kendala. Sampaikan dengan santai dan jujur bahwa kamu sedang mencatatnya di ingatan sesi ini dulu.",
             };
           }
+        } else if (fc.name === "create_document") {
+          const kind = String(sanitizedArgs.kind || "pdf").toLowerCase();
+          const title = String(sanitizedArgs.title || "Dokumen Celyn").trim();
+          console.log(`📄 [Tool create_document] Menghasilkan dokumen ${kind.toUpperCase()}: "${title}"`);
+          toolResponseOutput = {
+            status: "ready",
+            kind,
+            title,
+            instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' telah siap diproses dan tombol unduh otomatis dimunculkan di layar pengguna. Sekarang sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa dokumennya sudah dibuatkan dan bisa langsung diunduh!`,
+          };
         }
 
         this.sendToClient({

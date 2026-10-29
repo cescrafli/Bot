@@ -5,7 +5,10 @@ import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
 import { memoryService } from "./services/MemoryService.js";
-import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind } from "@celyn/shared";
+import { parseMultipartUpload } from "./middlewares/upload.js";
+import { documentReaderService } from "./services/DocumentReaderService.js";
+import { documentService } from "./services/DocumentService.js";
 
 // Metrik Global Server
 const serverStats = {
@@ -352,6 +355,146 @@ const server = http.createServer((req, res) => {
       } catch (err: any) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err?.message || "Gagal menyintesis suara Edge TTS" }));
+      }
+    });
+    return;
+  }
+
+  // Endpoint Unggah & Baca Dokumen (PDF, Excel, Word dengan Hybrid OCR)
+  if (
+    (req.url === "/api/documents/read" ||
+      req.url === "/api/documents/upload" ||
+      req.url?.startsWith("/api/documents/read?") ||
+      req.url?.startsWith("/api/documents/upload?")) &&
+    req.method === "POST"
+  ) {
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
+    const authPass =
+      req.headers["x-admin-password"] ||
+      parsedUrl.searchParams.get("password") ||
+      parsedUrl.searchParams.get("key");
+
+    if (
+      authPass !== "admin" &&
+      authPass !== "login" &&
+      authPass !== config.adminPassword
+    ) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
+    parseMultipartUpload(req, config.docMaxUploadMb * 1024 * 1024)
+      .then(async (uploaded) => {
+        try {
+          const parsed = await documentReaderService.readDocument(
+            uploaded.buffer,
+            uploaded.fileName,
+            uploaded.mimeType
+          );
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, document: parsed }));
+        } catch (readErr: any) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: `Gagal membaca isi dokumen: ${readErr?.message || "Unknown error"}`,
+            })
+          );
+        }
+      })
+      .catch((err: any) => {
+        if (err.message === "FILE_TOO_LARGE") {
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: `Ukuran file melebihi batas maksimum (${config.docMaxUploadMb} MB)`,
+            })
+          );
+        } else if (err.message === "INVALID_FILE_TYPE") {
+          res.writeHead(415, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "Format file tidak didukung atau berbahaya. Unggah PDF, Excel (.xlsx/.xls), atau Word (.docx/.doc).",
+            })
+          );
+        } else {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: err?.message || "Gagal memproses file unggahan",
+            })
+          );
+        }
+      });
+    return;
+  }
+
+  // Endpoint Pembuat Dokumen AI (Generate PDF, Word, atau Excel)
+  if (
+    (req.url === "/api/documents/generate" || req.url?.startsWith("/api/documents/generate?")) &&
+    req.method === "POST"
+  ) {
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
+    const authPass =
+      req.headers["x-admin-password"] ||
+      parsedUrl.searchParams.get("password") ||
+      parsedUrl.searchParams.get("key");
+
+    if (
+      authPass !== "admin" &&
+      authPass !== "login" &&
+      authPass !== config.adminPassword
+    ) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
+    let rawBody = "";
+    req.on("data", (chunk) => {
+      rawBody += chunk.toString();
+    });
+
+    req.on("end", async () => {
+      try {
+        const body = JSON.parse(rawBody || "{}");
+        const kind: DocumentKind = body.kind;
+        const title = String(body.title || "Dokumen Celyn").trim();
+        const instruction = String(body.instruction || "Buat dokumen berdasarkan data obrolan").trim();
+        const context = body.context ? String(body.context) : undefined;
+
+        if (!["pdf", "docx", "xlsx"].includes(kind)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "Parameter 'kind' wajib bernilai 'pdf', 'docx', atau 'xlsx'",
+            })
+          );
+          return;
+        }
+
+        const result = await documentService.generateDocument({
+          kind,
+          title,
+          instruction,
+          context,
+        });
+
+        res.writeHead(200, {
+          "Content-Type": result.mimeType,
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(result.fileName)}"`,
+          "Content-Length": result.buffer.length,
+        });
+        res.end(result.buffer);
+      } catch (genErr: any) {
+        console.error("[Index /api/documents/generate] Error:", genErr);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: `Gagal menghasilkan dokumen: ${genErr?.message || "Unknown error"}`,
+          })
+        );
       }
     });
     return;

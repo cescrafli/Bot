@@ -7,6 +7,7 @@ import { TranscriptDrawer } from "./components/chat/TranscriptDrawer";
 import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { VoiceSelectorModal } from "./components/modals/VoiceSelectorModal";
 import { SettingsModal } from "./components/modals/SettingsModal";
+import { DocumentModal } from "./components/modals/DocumentModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
 import { useScreenCapture } from "./hooks/useScreenCapture";
@@ -44,6 +45,7 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRigPanelOpen, setIsRigPanelOpen] = useState(false);
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);
+  const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
   const [inputText, setInputText] = useState("");
   const [selectedVoice, setSelectedVoice] = useState<string>(() => {
     return localStorage.getItem("celyn_selected_voice") || "Aoede";
@@ -501,6 +503,8 @@ export function App() {
             onToggleVoiceSelector={() => setIsVoiceModalOpen(true)}
             onToggleTextInput={() => setIsTextInputOpen((prev) => !prev)}
             onToggleHistory={() => setIsHistoryOpen(true)}
+            activeDocumentsCount={live.activeDocuments.length}
+            onToggleDocumentModal={() => setIsDocumentModalOpen(true)}
             onPttHoldStart={() => {
               if (!audioEngine.isMicActive) audioEngine.startMic();
             }}
@@ -523,6 +527,19 @@ export function App() {
       <ShortcutsModal
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
+      />
+
+      {/* Modal Manajemen Dokumen (PDF, Word, Excel) */}
+      <DocumentModal
+        isOpen={isDocumentModalOpen}
+        onClose={() => setIsDocumentModalOpen(false)}
+        activeDocuments={live.activeDocuments}
+        onUploadDocument={live.uploadDocument}
+        onRemoveDocument={live.removeDocument}
+        onGenerateDocument={live.generateDocument}
+        isUploading={live.isUploadingDoc}
+        isGenerating={live.isGeneratingDoc}
+        statusMessage={live.docStatusMessage}
       />
 
       {/* Modal Pemilih Suara Multi-Voice */}

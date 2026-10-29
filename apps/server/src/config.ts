@@ -24,6 +24,10 @@ export const config = {
   heartbeatIntervalMs: 25_000, // 25 detik ping/pong
   sessionMaxDurationMs: 30 * 60 * 1000, // 30 menit durasi maksimal sesi Gemini Live
   sessionWarningDurationMs: 25 * 60 * 1000, // 25 menit peringatan durasi
+  docMaxUploadMb: parseInt(process.env.DOC_MAX_UPLOAD_MB || "4", 10),
+  docOcrModel: process.env.DOC_OCR_MODEL || "gemini-3-flash-preview",
+  docGenerateModel: process.env.DOC_GENERATE_MODEL || "gemini-3-flash-preview",
+  docMaxContextChars: parseInt(process.env.DOC_MAX_CONTEXT_CHARS || "60000", 10),
 };
 
 if (!config.geminiApiKey) {

@@ -7,6 +7,7 @@ import {
   Monitor,
   MonitorOff,
   History,
+  FileText,
 } from "lucide-react";
 
 interface ControlBarProps {
@@ -16,12 +17,14 @@ interface ControlBarProps {
   isPushToTalk: boolean;
   isTextInputOpen: boolean;
   volume?: number; // 0..1
+  activeDocumentsCount?: number;
   onToggleConnection: () => void;
   onToggleMic: () => void;
   onToggleScreenShare: () => void;
   onToggleVoiceSelector: () => void;
   onToggleTextInput: () => void;
   onToggleHistory: () => void;
+  onToggleDocumentModal?: () => void;
   onPttHoldStart?: () => void;
   onPttHoldEnd?: () => void;
 }
@@ -32,12 +35,14 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   isScreenSharing,
   isPushToTalk,
   isTextInputOpen,
+  activeDocumentsCount,
   onToggleConnection,
   onToggleMic,
   onToggleScreenShare,
   onToggleVoiceSelector,
   onToggleTextInput,
   onToggleHistory,
+  onToggleDocumentModal,
   onPttHoldStart,
   onPttHoldEnd,
 }) => {
@@ -145,7 +150,21 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         )}
       </button>
 
-      {/* 5. Riwayat Percakapan / Transkrip Drawer */}
+      {/* 5. Dokumen PDF / Word / Excel */}
+      <button
+        onClick={onToggleDocumentModal}
+        className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 transition-all cursor-pointer relative"
+        title="Dokumen (PDF, Word, Excel)"
+      >
+        <FileText className="w-4 h-4 text-slate-300" />
+        {activeDocumentsCount !== undefined && activeDocumentsCount > 0 && (
+          <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center shadow">
+            {activeDocumentsCount}
+          </span>
+        )}
+      </button>
+
+      {/* 6. Riwayat Percakapan / Transkrip Drawer */}
       <button
         onClick={onToggleHistory}
         className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
