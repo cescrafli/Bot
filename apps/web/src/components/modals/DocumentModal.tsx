@@ -63,6 +63,11 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setErrorMessage(null);
     try {
       for (const file of files) {
+        if (file.size > 4.5 * 1024 * 1024) {
+          throw new Error(
+            `Ukuran file '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)} MB) melebihi batas upload (maksimal 4.5 MB). Silakan pilih file dokumen di bawah 4.5 MB atau kompres file terlebih dahulu.`
+          );
+        }
         await onUploadDocument(file);
       }
     } catch (err: any) {
@@ -74,6 +79,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       } else if (msg.includes("LEGACY_FORMAT") || msg.toLowerCase().includes(".doc") || msg.toLowerCase().includes(".xls")) {
         setErrorMessage(
           "Format biner lama (.doc/.xls) ini belum bisa dibaca langsung. Simpan ulang sebagai .docx atau .xlsx lalu kirim lagi."
+        );
+      } else if (msg.includes("413") || msg.toLowerCase().includes("too large") || msg.toLowerCase().includes("melebihi batas")) {
+        setErrorMessage(
+          msg.includes("melebihi batas")
+            ? msg
+            : "Ukuran file terlalu besar untuk diproses serverless (maksimal 4.5 MB per file). Harap gunakan file dokumen di bawah 4.5 MB."
         );
       } else {
         setErrorMessage(msg);
@@ -277,7 +288,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 {isUploading ? "Memproses Dokumen (Hybrid OCR)..." : "Klik untuk pilih file dokumen (Bisa banyak file)"}
               </p>
               <p className="text-[11px] text-slate-400">
-                Mendukung PDF (Edit In-Place, Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) tanpa batas kuantitas
+                Mendukung PDF (Edit In-Place, Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) tanpa batas kuantitas (maks 4.5 MB/file)
               </p>
             </div>
 

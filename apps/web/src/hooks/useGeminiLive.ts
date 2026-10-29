@@ -1292,6 +1292,11 @@ export function useGeminiLive({
 
   const uploadDocument = useCallback(
     async (file: File): Promise<ParsedDocument> => {
+      if (file.size > 4.5 * 1024 * 1024) {
+        throw new Error(
+          `Ukuran file '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)} MB) melebihi batas upload serverless (maksimal 4.5 MB).`
+        );
+      }
       setIsUploadingDoc(true);
       setDocStatusMessage(`Membaca dokumen '${file.name}' (Hybrid OCR)...`);
       try {
@@ -1313,6 +1318,9 @@ export function useGeminiLive({
         });
 
         if (!res.ok) {
+          if (res.status === 413) {
+            throw new Error(`Ukuran file '${file.name}' melebihi batas upload serverless (maksimal 4.5 MB).`);
+          }
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData?.error || `Gagal membaca dokumen (HTTP ${res.status})`);
         }
