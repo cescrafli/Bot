@@ -21,8 +21,10 @@ export const MESSAGES = {
   // Operations
   NEEDS_TARGET_LANGUAGE:
     "Mau diterjemahkan ke bahasa apa? (Misalnya: Bahasa Inggris, Bahasa Jepang, Bahasa Mandarin, dll.)",
+  PDF_EDIT_IN_PLACE:
+    "Celyn dapat mengedit dokumen PDF kamu secara langsung (in-place) dengan mempertahankan format PDF asli dan struktur rapi.",
   PDF_LAYOUT_EDIT_UNSUPPORTED:
-    "Format PDF dirancang sebagai tata letak tetap. Celyn dapat mengekstrak isinya, menyunting dan menyimpannya sebagai Word (.docx) yang rapi, atau membuat PDF ringkasan baru. Kamu ingin opsi yang mana?",
+    "Celyn dapat mengedit dokumen PDF kamu secara langsung (in-place) dengan mempertahankan format PDF asli dan struktur rapi.",
 
   // Background Processing & Research
   RESEARCH_STATUS_TEXT: "Tunggu sebentar ya, saya sedang research...",

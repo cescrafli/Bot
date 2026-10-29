@@ -42,6 +42,7 @@ import fs from "node:fs";
 import { synthesizeEdgeTTS, generateSecMsGecV2 } from "../apps/server/src/edgeTts.js";
 import { memoryService } from "../apps/server/src/services/MemoryService.js";
 import { documentWriterService } from "../apps/server/src/services/DocumentWriterService.js";
+import { documentService } from "../apps/server/src/services/DocumentService.js";
 import { researchService } from "../apps/server/src/services/ResearchService.js";
 import { documentReaderService } from "../apps/server/src/services/DocumentReaderService.js";
 
@@ -1123,7 +1124,34 @@ async function runTtsTests() {
   assert(!MESSAGES.ERROR_GENERIC.toLowerCase().includes("google"), "Pesan error generik bersih dari nama Google");
   assert(MESSAGES.PASSWORD_REQUIRED.includes("File ini dilindungi password"), "Pesan ramah password-protected sesuai spesifikasi");
 
-  // 21. Ringkasan
+  // 21. Uji Edit PDF In-Place & Kemampuan Tanpa Batas Dokumen
+  console.log("\n--- 21. Uji Edit PDF In-Place & Dokumen Tanpa Batas ---");
+  const samplePdfContent = `# Laporan Keuangan 2026\n## Pendahuluan\nIni adalah draf awal laporan.\n## Anggaran\nTotal anggaran awal Rp 10.000.000.`;
+  const inPlaceResult = await documentService.processDocumentInPlace({
+    fileName: "laporan_keuangan.pdf",
+    kind: "pdf",
+    operation: "edit",
+    originalContent: samplePdfContent,
+    instruction: "Perbarui anggaran menjadi Rp 25.000.000 dan tambahkan bab kesimpulan.",
+  });
+
+  assert(
+    Buffer.isBuffer(inPlaceResult.buffer) && inPlaceResult.buffer.length > 500,
+    `processDocumentInPlace sukses menghasilkan buffer PDF teredit (${inPlaceResult.buffer.length} bytes)`
+  );
+  assert(
+    inPlaceResult.mimeType === "application/pdf" && inPlaceResult.fileName.endsWith(".pdf"),
+    "Output dokumen teredit in-place tetap murni berformat PDF (.pdf)"
+  );
+
+  // Verifikasi Prompt Directive Celyn memuat instruksi in-place edit & tanpa batas file
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("EDIT PDF IN-PLACE") &&
+    CELYN_SYSTEM_PROMPT.includes("TIDAK ADA BATASAN JUMLAH FILE DOKUMEN"),
+    "System Prompt Celyn memuat instruksi penuh Edit PDF In-Place dan bebas batasan jumlah file"
+  );
+
+  // 22. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
   console.log("=======================================================\n");

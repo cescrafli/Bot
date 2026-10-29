@@ -10,6 +10,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Edit3,
+  Globe,
 } from "lucide-react";
 import { ParsedDocument, DocumentKind } from "@celyn/shared";
 
@@ -45,17 +47,24 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [docTitle, setDocTitle] = useState("");
   const [docInstruction, setDocInstruction] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [editingDoc, setEditingDoc] = useState<ParsedDocument | null>(null);
+  const [editOperation, setEditOperation] = useState<"edit" | "translate" | "summarize" | "paraphrase">("edit");
+  const [editLanguage, setEditLanguage] = useState("English");
+  const [editInstruction, setEditInstruction] = useState("");
+  const [isProcessingInPlace, setIsProcessingInPlace] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setErrorMessage(null);
     try {
-      await onUploadDocument(file);
+      for (const file of files) {
+        await onUploadDocument(file);
+      }
     } catch (err: any) {
       const msg = err?.message || "Gagal mengunggah dokumen.";
       if (msg.includes("PASSWORD_REQUIRED") || msg.toLowerCase().includes("password")) {
@@ -71,6 +80,63 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
       }
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleProcessInPlace = async (doc: ParsedDocument) => {
+    setIsProcessingInPlace(true);
+    setErrorMessage(null);
+    try {
+      const password = localStorage.getItem("celyn_auth_password") || "admin";
+      const token = localStorage.getItem("celyn_auth_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-admin-password": password,
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/documents/process", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          fileName: doc.fileName,
+          operation: editOperation,
+          originalContent: doc.markdownContent,
+          instruction: editInstruction.trim() || `Lakukan operasi ${editOperation} pada dokumen ini`,
+          targetLanguage: editOperation === "translate" ? editLanguage : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.error || `Gagal memproses dokumen (HTTP ${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      let downloadFileName = `edited_${doc.fileName}`;
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match && match[1]) {
+          downloadFileName = decodeURIComponent(match[1].replace(/['"]/g, ""));
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = downloadFileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setEditingDoc(null);
+      setEditInstruction("");
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Gagal memproses dokumen in-place.");
+    } finally {
+      setIsProcessingInPlace(false);
     }
   };
 
@@ -194,6 +260,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept=".pdf,.xlsx,.xls,.docx,.doc"
                 onChange={handleFileChange}
                 className="hidden"
@@ -207,10 +274,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 )}
               </div>
               <p className="text-xs sm:text-sm font-semibold text-white mb-1">
-                {isUploading ? "Memproses Dokumen (Hybrid OCR)..." : "Klik untuk pilih file dokumen"}
+                {isUploading ? "Memproses Dokumen (Hybrid OCR)..." : "Klik untuk pilih file dokumen (Bisa banyak file)"}
               </p>
               <p className="text-[11px] text-slate-400">
-                Mendukung PDF (Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) maks 4 MB
+                Mendukung PDF (Edit In-Place, Teks & Scan OCR), Excel (.xlsx), dan Word (.docx) tanpa batas kuantitas
               </p>
             </div>
 
@@ -222,46 +289,166 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
 
               {activeDocuments.length === 0 ? (
                 <div className="p-4 rounded-xl bg-slate-900/40 border border-white/5 text-center text-xs text-slate-400">
-                  Belum ada dokumen yang diunggah untuk sesi ini. Dokumen yang diunggah akan otomatis dipahami Celyn selama sesi berjalan.
+                  Belum ada dokumen yang diunggah untuk sesi ini. Anda dapat mengunggah file PDF sebanyak apa pun tanpa batasan.
                 </div>
               ) : (
                 <div className="space-y-2">
                   {activeDocuments.map((doc, idx) => (
                     <div
                       key={idx}
-                      className="p-3 rounded-xl bg-slate-900/60 border border-white/5 flex items-center justify-between gap-3"
+                      className="p-3 rounded-xl bg-slate-900/60 border border-white/5 flex flex-col gap-2.5 transition-all"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="p-2 rounded-lg bg-slate-800/60 shrink-0">
-                          {getDocIcon(doc.fileName, doc.mimeType)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-white truncate">
-                            {doc.fileName}
-                          </p>
-                          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400">
-                            <span>{doc.characterCount.toLocaleString()} karakter</span>
-                            {doc.usedOcr && (
-                              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                OCR Vision
-                              </span>
-                            )}
-                            {doc.truncated && (
-                              <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                                Diringkas
-                              </span>
-                            )}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="p-2 rounded-lg bg-slate-800/60 shrink-0">
+                            {getDocIcon(doc.fileName, doc.mimeType)}
                           </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-white truncate">
+                              {doc.fileName}
+                            </p>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400">
+                              <span>{doc.characterCount.toLocaleString()} karakter</span>
+                              {doc.usedOcr && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                  OCR Vision
+                                </span>
+                              )}
+                              {doc.truncated && (
+                                <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                  Diringkas
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (editingDoc?.fileName === doc.fileName) {
+                                setEditingDoc(null);
+                              } else {
+                                setEditingDoc(doc);
+                                setEditInstruction("");
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
+                              editingDoc?.fileName === doc.fileName
+                                ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                                : "text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                            title="Edit / Proses dokumen in-place"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Edit In-Place</span>
+                          </button>
+
+                          <button
+                            onClick={() => onRemoveDocument(doc.fileName)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
+                            title="Hapus dari konteks sesi"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => onRemoveDocument(doc.fileName)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
-                        title="Hapus dari konteks sesi"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {/* Inline In-Place Document Editor */}
+                      {editingDoc?.fileName === doc.fileName && (
+                        <div className="mt-1 p-3 rounded-xl bg-slate-950/70 border border-rose-500/20 space-y-3 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Proses & Edit Dokumen In-Place</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              Format: {doc.fileName.split(".").pop()?.toUpperCase()}
+                            </span>
+                          </div>
+
+                          {/* Operasi */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                            {(["edit", "translate", "summarize", "paraphrase"] as const).map((op) => (
+                              <button
+                                key={op}
+                                type="button"
+                                onClick={() => setEditOperation(op)}
+                                className={`py-1 px-2 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                                  editOperation === op
+                                    ? "bg-rose-500/30 text-rose-200 border border-rose-500/50"
+                                    : "bg-slate-900/60 text-slate-400 hover:text-white border border-white/5"
+                                }`}
+                              >
+                                {op === "edit"
+                                  ? "Edit / Revisi"
+                                  : op === "translate"
+                                  ? "Terjemahkan"
+                                  : op === "summarize"
+                                  ? "Ringkas"
+                                  : "Parafrase"}
+                              </button>
+                            ))}
+                          </div>
+
+                          {editOperation === "translate" && (
+                            <div>
+                              <label className="block text-[10px] font-medium text-slate-400 mb-1">
+                                Bahasa Tujuan
+                              </label>
+                              <input
+                                type="text"
+                                value={editLanguage}
+                                onChange={(e) => setEditLanguage(e.target.value)}
+                                placeholder="Contoh: Bahasa Inggris, Bahasa Jepang, dll."
+                                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-white/10 text-white text-xs focus:outline-none focus:border-rose-500/50"
+                              />
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block text-[10px] font-medium text-slate-400 mb-1">
+                              Instruksi Perubahan (Opsional)
+                            </label>
+                            <textarea
+                              value={editInstruction}
+                              onChange={(e) => setEditInstruction(e.target.value)}
+                              placeholder="Contoh: Ubah tanggal jadi 2026, revisi anggaran di tabel menjadi 10jt, atau perbaiki tata bahasa."
+                              rows={2}
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-rose-500/50 resize-none"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingDoc(null)}
+                              className="px-2.5 py-1 text-xs text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isProcessingInPlace}
+                              onClick={() => handleProcessInPlace(doc)}
+                              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow"
+                            >
+                              {isProcessingInPlace ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Sedang Memproses...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>Terapkan & Unduh Hasil</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

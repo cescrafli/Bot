@@ -52,6 +52,7 @@ export class GeminiSession {
   private memoryContext?: string;
   private currentTurnCelynText = "";
   private currentTurnUserSpeech = "";
+  private activeDocs: Map<string, { fileName: string; content: string }> = new Map();
 
   public stats = {
     audioChunksIn: 0,
@@ -813,13 +814,80 @@ export class GeminiSession {
                 "Tanyakan terlebih dahulu ke pengguna secara langsung dan santai bahasa tujuan yang diinginkan untuk terjemahan dokumen ini.",
             };
           } else {
-            const job = jobService.createJob(operation as any, String(docId), `Memproses ${operation} dokumen...`);
+            const opKind = (operation || "edit") as any;
+            const targetDocName = String(docId || "dokumen");
+            const job = jobService.createJob(opKind, targetDocName, `Sedang memproses ${operation} pada ${targetDocName} secara in-place...`);
             toolResponseOutput = {
               status: "started",
               jobId: job.id,
               operation,
-              instruction: `Dokumen '${docId}' sedang diproses untuk operasi '${operation}' di latar belakang. Beritahu pengguna dengan santai bahwa proses sedang berjalan dan kalian tetap bisa lanjut ngobrol!`,
+              instruction: `Dokumen '${targetDocName}' sedang diproses langsung (${operation}) di latar belakang dan hasilnya akan tetap berformat asli (in-place). Beritahu pengguna dengan santai bahwa proses sedang berjalan dan kalian tetap bisa lanjut ngobrol!`,
             };
+
+            // Jalankan background worker untuk proses dokumen in-place
+            (async () => {
+              try {
+                let matchedContent = "";
+                let matchedFileName = targetDocName;
+                for (const [key, val] of this.activeDocs.entries()) {
+                  if (key.includes(targetDocName.toLowerCase()) || targetDocName.toLowerCase().includes(key)) {
+                    matchedContent = val.content;
+                    matchedFileName = val.fileName;
+                    break;
+                  }
+                }
+
+                if (!matchedContent && this.activeDocs.size > 0) {
+                  const first = this.activeDocs.values().next().value;
+                  if (first) {
+                    matchedContent = first.content;
+                    matchedFileName = first.fileName;
+                  }
+                }
+
+                const res = await documentService.processDocumentInPlace({
+                  fileName: matchedFileName,
+                  operation: opKind,
+                  originalContent: matchedContent || `Dokumen: ${targetDocName}`,
+                  instruction: instruction || `Lakukan ${operation} pada dokumen ini`,
+                  targetLanguage,
+                });
+
+                jobService.updateJob(job.id, {
+                  stage: "done",
+                  progress: 1.0,
+                  message: `Dokumen ${res.fileName} berhasil diproses langsung!`,
+                  resultBuffer: res.buffer,
+                  fileName: res.fileName,
+                  downloadUrl: `/api/documents/download?id=${job.id}`,
+                });
+
+                this.sendToClient({
+                  type: "job",
+                  jobId: job.id,
+                  kind: opKind,
+                  stage: "done",
+                  progress: 1.0,
+                  message: `Dokumen ${res.fileName} selesai diproses dan siap diunduh!`,
+                  fileName: res.fileName,
+                  downloadUrl: `/api/documents/download?id=${job.id}`,
+                });
+              } catch (err: any) {
+                console.error("[process_document in-place error]:", err);
+                jobService.updateJob(job.id, {
+                  stage: "error",
+                  message: err?.message || "Gagal memproses dokumen in-place",
+                });
+                this.sendToClient({
+                  type: "job",
+                  jobId: job.id,
+                  kind: opKind,
+                  stage: "error",
+                  progress: 1.0,
+                  message: err?.message || "Gagal memproses dokumen in-place",
+                });
+              }
+            })();
           }
         }
 
@@ -895,6 +963,8 @@ export class GeminiSession {
         });
       } else if (msg.type === "doc_context") {
         console.log(`📄 [Doc Context] Menyuntikkan konteks dokumen '${msg.fileName || "dokumen"}'`);
+        const docName = msg.fileName || "dokumen";
+        this.activeDocs.set(docName.toLowerCase(), { fileName: docName, content: msg.text });
         const safeText = msg.text.replace(/<\/document_context>/gi, "&lt;/document_context&gt;");
         await this.session.sendClientContent({
           turns: [

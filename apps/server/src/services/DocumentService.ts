@@ -22,6 +22,15 @@ export interface GeneratedDocumentResult {
   mimeType: string;
 }
 
+export interface ProcessDocumentInPlaceParams {
+  fileName: string;
+  kind?: DocumentKind;
+  operation: "edit" | "translate" | "summarize" | "paraphrase" | "custom";
+  originalContent: string;
+  instruction?: string;
+  targetLanguage?: string;
+}
+
 export class DocumentService {
   private ai: GoogleGenAI | null = null;
 
@@ -153,6 +162,145 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
       return {
         buffer,
         fileName: `${safeTitle}.${ext}`,
+        mimeType,
+      };
+    }
+  }
+
+  /**
+   * Mengedit atau memproses dokumen yang sudah ada secara langsung (In-Place)
+   * PDF tetap menghasilkan PDF, Word tetap Word, Excel tetap Excel.
+   */
+  async processDocumentInPlace(params: ProcessDocumentInPlaceParams): Promise<GeneratedDocumentResult> {
+    if (!this.ai) {
+      throw new Error("GEMINI_API_KEY belum dikonfigurasi di server.");
+    }
+
+    const { fileName, operation, originalContent, instruction, targetLanguage } = params;
+    const model = config.docGenerateModel || "gemini-3-flash-preview";
+
+    const lowerName = (fileName || "dokumen.pdf").toLowerCase();
+    let effectiveKind: DocumentKind = params.kind || "pdf";
+    if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+      effectiveKind = "xlsx";
+    } else if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
+      effectiveKind = "docx";
+    } else {
+      effectiveKind = "pdf";
+    }
+
+    const baseName = fileName.replace(/\.[^/.]+$/, "").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 40) || "Dokumen";
+    const opLabel = operation === "translate" ? `terjemahan_${targetLanguage || "id"}` : operation;
+    const resultBaseName = `${baseName}_${opLabel}`;
+
+    if (effectiveKind === "xlsx") {
+      const prompt = `Anda adalah editor data lembar kerja Excel profesional.
+Lakukan pemrosesan (${operation.toUpperCase()}) pada data Excel berikut:
+Nama File: "${fileName}"
+${targetLanguage ? `Bahasa Tujuan: "${targetLanguage}"` : ""}
+Instruksi Pengguna: "${instruction || `Perbarui dan sesuaikan data dokumen Excel ini sesuai instruksi.`}"
+
+KONTEN / TABEL DATA ASLI:
+"""
+${originalContent}
+"""
+
+PETUNJUK:
+1. Pertahankan struktur lembar kerja (sheets), nama kolom, dan tipe data ('string', 'number', 'currency', 'percentage', 'date').
+2. Terapkan seluruh modifikasi atau perhitungan baru secara akurat.
+3. Kembalikan HANYA JSON valid sesuai skema ExcelPayload:
+{
+  "fileName": "${resultBaseName}",
+  "sheets": [
+    {
+      "sheetName": "Data",
+      "columns": [{ "header": "Nama Kolom", "key": "nama_kolom", "type": "string" }],
+      "rows": [{ "nama_kolom": "Nilai" }]
+    }
+  ]
+}`;
+
+      const res = await this.ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
+      const buffer = await documentWriterService.createExcel(validated);
+      return {
+        buffer,
+        fileName: `${resultBaseName}.xlsx`,
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      };
+    } else {
+      // PDF ATAU WORD (.docx)
+      const isPdf = effectiveKind === "pdf";
+      const docTypeLabel = isPdf ? "PDF" : "Word (.docx)";
+
+      const prompt = `Anda adalah editor dokumen ${docTypeLabel} profesional.
+Lakukan proses EDIT IN-PLACE (${operation.toUpperCase()}) pada dokumen berikut:
+Nama File: "${fileName}"
+${targetLanguage ? `Bahasa Tujuan: "${targetLanguage}"` : ""}
+Instruksi Pengguna: "${instruction || `Lakukan ${operation} pada isi dokumen dengan mempertahankan struktur aslinya.`}"
+
+KONTEN ASLI DOKUMEN:
+"""
+${originalContent}
+"""
+
+PETUNJUK EDIT DOKUMEN IN-PLACE:
+1. Pertahankan seluruh struktur asli dokumen: Judul (title), Subjudul (subtitle), dan Bagian-bagian (sections, headings, paragraphs, bullet points, dan tables).
+2. Terapkan perubahan, terjemahan, ringkasan, atau penulisan ulang sesuai instruksi pengguna secara presisi.
+3. JANGAN memasukkan format markdown mentah (seperti **, ##, _) ke dalam teks paragraphs atau headings.
+4. Pastikan teks rapi, mengalir secara profesional, dan berbobot.
+
+KEMBALIKAN HANYA JSON VALID SESUAI SKEMA REPORTPAYLOAD:
+{
+  "title": "${baseName}",
+  "subtitle": "Diperbarui oleh Celyn AI",
+  "sections": [
+    {
+      "heading": "Nama Bab",
+      "paragraphs": [
+        "Isi paragraf yang telah diperbarui atau diterjemahkan."
+      ],
+      "bulletPoints": [],
+      "table": {
+        "headers": [],
+        "rows": []
+      }
+    }
+  ]
+}`;
+
+      const res = await this.ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      const validated: ReportPayload = ReportPayloadSchema.parse(parsed);
+
+      let buffer: Buffer;
+      let mimeType: string;
+      let ext: string;
+
+      if (isPdf) {
+        buffer = await documentWriterService.createPdf(validated);
+        mimeType = "application/pdf";
+        ext = "pdf";
+      } else {
+        buffer = await documentWriterService.createWord(validated);
+        mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        ext = "docx";
+      }
+
+      return {
+        buffer,
+        fileName: `${resultBaseName}.${ext}`,
         mimeType,
       };
     }

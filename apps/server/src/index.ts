@@ -597,6 +597,77 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Endpoint Proses Dokumen In-Place (Edit, Translate, Summarize, Paraphrase)
+  if (
+    (req.url === "/api/documents/process" || req.url?.startsWith("/api/documents/process?")) &&
+    req.method === "POST"
+  ) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
+    let rawBody = "";
+    let bodyTooLarge = false;
+    req.on("data", (chunk) => {
+      rawBody += chunk.toString();
+      if (rawBody.length > 512 * 1024) {
+        bodyTooLarge = true;
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Ukuran JSON permintaan melebihi batas 512 KB." }));
+        req.destroy();
+      }
+    });
+
+    req.on("end", async () => {
+      if (bodyTooLarge) return;
+      try {
+        const body = JSON.parse(rawBody || "{}");
+        const fileName = String(body.fileName || "dokumen.pdf").trim();
+        const operation = body.operation || "edit";
+        const originalContent = String(body.originalContent || "").trim();
+        const instruction = body.instruction ? String(body.instruction).trim() : undefined;
+        const targetLanguage = body.targetLanguage ? String(body.targetLanguage).trim() : undefined;
+        const kind: DocumentKind | undefined = body.kind;
+
+        if (!originalContent) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Parameter 'originalContent' wajib disertakan untuk proses in-place." }));
+          return;
+        }
+
+        const result = await documentService.processDocumentInPlace({
+          fileName,
+          kind,
+          operation,
+          originalContent,
+          instruction,
+          targetLanguage,
+        });
+
+        const safeName = result.fileName;
+        const asciiName = safeName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        res.writeHead(200, {
+          "Content-Type": result.mimeType,
+          "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+          "Content-Length": result.buffer.length,
+        });
+        res.end(result.buffer);
+      } catch (procErr: any) {
+        console.error("[Index /api/documents/process] Error:", procErr);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: `Gagal memproses dokumen in-place: ${procErr?.message || "Unknown error"}`,
+          })
+        );
+      }
+    });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
 });
