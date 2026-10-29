@@ -276,8 +276,29 @@ async function createPdfBuffer(payload) {
     },
   };
 
-  const pdf = pdfmake.createPdf(docDef);
-  return await pdf.getBuffer();
+  if (typeof pdfmake.createPdf === "function") {
+    const pdf = pdfmake.createPdf(docDef);
+    return await pdf.getBuffer();
+  } else {
+    const PrinterClass = typeof pdfmake === "function" ? pdfmake : (pdfmake.default || pdfmake);
+    const fonts = {
+      Roboto: {
+        normal: "Helvetica",
+        bold: "Helvetica-Bold",
+        italics: "Helvetica-Oblique",
+        bolditalics: "Helvetica-BoldOblique",
+      },
+    };
+    const printer = new PrinterClass(fonts);
+    const pdfDoc = printer.createPdfKitDocument(docDef);
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      pdfDoc.on("data", (chunk) => chunks.push(chunk));
+      pdfDoc.on("end", () => resolve(Buffer.concat(chunks)));
+      pdfDoc.on("error", (err) => reject(err));
+      pdfDoc.end();
+    });
+  }
 }
 
 export default async function handler(req, res) {

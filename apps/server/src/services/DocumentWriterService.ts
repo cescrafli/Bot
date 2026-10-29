@@ -32,16 +32,17 @@ const fontDir = path.resolve(__dirname, "../../assets/fonts");
 
 // Inisialisasi konfigurasi font pdfmake secara aman
 try {
-  if (pdfmake.setUrlAccessPolicy) {
-    pdfmake.setUrlAccessPolicy(() => false);
+  const pmAny = pdfmake as any;
+  if (pmAny.setUrlAccessPolicy) {
+    pmAny.setUrlAccessPolicy(() => false);
   }
-  if (pdfmake.setLocalAccessPolicy) {
-    pdfmake.setLocalAccessPolicy(() => true);
+  if (pmAny.setLocalAccessPolicy) {
+    pmAny.setLocalAccessPolicy(() => true);
   }
 
   const robotoRegular = path.join(fontDir, "Roboto-Regular.ttf");
   if (fs.existsSync(robotoRegular)) {
-    pdfmake.fonts = {
+    pmAny.fonts = {
       Roboto: {
         normal: path.join(fontDir, "Roboto-Regular.ttf"),
         bold: path.join(fontDir, "Roboto-Medium.ttf"),
@@ -476,8 +477,29 @@ export class DocumentWriterService {
       },
     };
 
-    const pdf = pdfmake.createPdf(docDefinition);
-    return await pdf.getBuffer();
+    if (typeof (pdfmake as any).createPdf === "function") {
+      const pdf = (pdfmake as any).createPdf(docDefinition);
+      return await pdf.getBuffer();
+    } else {
+      const PrinterClass: any = typeof pdfmake === "function" ? pdfmake : ((pdfmake as any).default || pdfmake);
+      const fonts = {
+        Roboto: {
+          normal: "Helvetica",
+          bold: "Helvetica-Bold",
+          italics: "Helvetica-Oblique",
+          bolditalics: "Helvetica-BoldOblique",
+        },
+      };
+      const printer = new PrinterClass(fonts);
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      return new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        pdfDoc.on("data", (chunk: Buffer) => chunks.push(chunk));
+        pdfDoc.on("end", () => resolve(Buffer.concat(chunks)));
+        pdfDoc.on("error", (err: any) => reject(err));
+        pdfDoc.end();
+      });
+    }
   }
 }
 
