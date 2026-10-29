@@ -327,22 +327,44 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
   ].filter(Boolean);
   const uniqueModels = [...new Set(modelsToTry)];
 
+  const startTime = Date.now();
+  const MAX_TOTAL_BUDGET_MS = 28000;
+
+  const withTimeout = (promise, ms) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout setelah ${ms}ms`)), ms)),
+    ]);
+
   for (const modelToTry of uniqueModels) {
+    if (Date.now() - startTime > MAX_TOTAL_BUDGET_MS - 8000) break;
+    let allKeysRateLimited = true;
     for (const key of candidateKeys) {
+      if (Date.now() - startTime > MAX_TOTAL_BUDGET_MS - 8000) break;
       try {
         const ai = new GoogleGenAI({ apiKey: key });
-        const aiRes = await ai.models.generateContent({
-          model: modelToTry,
-          contents: prompt,
-          config: { responseMimeType: "application/json" },
-        });
+        const aiRes = await withTimeout(
+          ai.models.generateContent({
+            model: modelToTry,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          }),
+          14000
+        );
         if (aiRes?.text) {
           return JSON.parse(cleanJson(aiRes.text));
         }
       } catch (err) {
         lastErr = err;
         console.warn(`[documents-process] Gagal dengan model ${modelToTry} API key (kunci #${candidateKeys.indexOf(key) + 1}):`, err?.message || err);
+        if (!isRateLimitError(err)) {
+          allKeysRateLimited = false;
+        }
       }
+    }
+    if (allKeysRateLimited && candidateKeys.length > 0) {
+      console.warn("[documents-process] Seluruh kunci terkena batas kuota (429), menghentikan percobaan berulang...");
+      break;
     }
   }
   throw lastErr || new Error("Semua API key Gemini gagal memproses dokumen.");

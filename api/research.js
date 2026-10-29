@@ -237,9 +237,13 @@ Tautan rujukan asli dalam format markdown [Nama Sumber](https://url-sumber).`;
     }
   }
 
-  // Tahap 2: Fallback Cepat tanpa Grounding (timeout 28 detik per request)
+  // Tahap 2: Fallback Cepat tanpa Grounding (timeout 14 detik per request, max budget 22 detik)
+  const fallbackStartTime = Date.now();
   for (const modelName of uniqueModels) {
+    if (Date.now() - fallbackStartTime > 22000) break;
+    let allKeysRateLimited = true;
     for (const key of candidateKeys) {
+      if (Date.now() - fallbackStartTime > 22000) break;
       try {
         const ai = new GoogleGenAI({ apiKey: key });
         const response = await withTimeout(
@@ -247,7 +251,7 @@ Tautan rujukan asli dalam format markdown [Nama Sumber](https://url-sumber).`;
             model: modelName,
             contents: [{ role: "user", parts: [{ text: promptText }] }],
           }),
-          28000
+          14000
         );
 
         const text = (response.text || "").trim();
@@ -266,7 +270,15 @@ Tautan rujukan asli dalam format markdown [Nama Sumber](https://url-sumber).`;
       } catch (err) {
         lastError = err;
         console.warn(`[Vercel /api/research] [Fallback] Model ${modelName} key ${key.slice(0, 8)}... gagal:`, err?.message || err);
+        if (!isRateLimitError(err)) {
+          allKeysRateLimited = false;
+        }
       }
+    }
+    // Jika semua kunci terkena limit kuota 429, langsung beralih ke sintesis darurat dalam 1-2 detik
+    if (allKeysRateLimited && candidateKeys.length > 0) {
+      console.warn("[Vercel /api/research] Seluruh kunci terkena batas kuota (429), langsung beralih ke sintesis pakar darurat...");
+      break;
     }
   }
 

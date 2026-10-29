@@ -566,22 +566,50 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
   ].filter(Boolean);
   const uniqueModels = [...new Set(modelsToTry)];
 
+  const startTime = Date.now();
+  const MAX_TOTAL_BUDGET_MS = 28000; // Maksimal 28 detik agar aman di bawah limit 60 detik Vercel
+
+  const withTimeout = (promise, ms) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout setelah ${ms}ms`)), ms)),
+    ]);
+
   for (const modelToTry of uniqueModels) {
+    if (Date.now() - startTime > MAX_TOTAL_BUDGET_MS - 8000) {
+      console.warn(`[documents-generate] Waktu mendekati batas (${Date.now() - startTime}ms), beralih ke sintesis darurat.`);
+      break;
+    }
+
+    let allKeysRateLimited = true;
     for (const key of candidateKeys) {
+      if (Date.now() - startTime > MAX_TOTAL_BUDGET_MS - 8000) break;
       try {
         const ai = new GoogleGenAI({ apiKey: key });
-        const aiRes = await ai.models.generateContent({
-          model: modelToTry,
-          contents: prompt,
-          config: { responseMimeType: "application/json" },
-        });
+        const aiRes = await withTimeout(
+          ai.models.generateContent({
+            model: modelToTry,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          }),
+          14000
+        );
         if (aiRes?.text) {
           return JSON.parse(cleanJson(aiRes.text));
         }
       } catch (err) {
         lastErr = err;
         console.warn(`[documents-generate] Gagal generate model ${modelToTry} key (${key.slice(0, 8)}...):`, err?.message || err);
+        if (!isRateLimitError(err)) {
+          allKeysRateLimited = false;
+        }
       }
+    }
+
+    // Jika semua kunci terkena limit kuota 429, langsung beralih ke sintesis darurat dalam 1-2 detik
+    if (allKeysRateLimited && candidateKeys.length > 0) {
+      console.warn("[documents-generate] Seluruh kunci terkena batas kuota (429), langsung beralih ke sintesis dokumen darurat...");
+      break;
     }
   }
   throw lastErr || new Error("Semua API key Gemini gagal menghasilkan dokumen.");
@@ -760,7 +788,7 @@ PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:
    - Rekomendasi Strategis & Rencana Tindak Lanjut
    - Kesimpulan Ahli
    - Sumber Referensi & Catatan Metodologi
-3. Setiap section harus memuat 'paragraphs' mendalam (2-4 paragraf berbobot) dan/atau 'bulletPoints' tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
+3. Setiap section harus memuat 1-2 paragraf padat-berbobot dan 2-3 temuan kunci (bulletPoints) tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
 
 KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
 {

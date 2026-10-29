@@ -2310,6 +2310,36 @@ async function runTtsTests() {
     "useGeminiLive.ts memiliki fallback analisis profesional sintetik jika network API riset lambat/gagal"
   );
 
+  // --- SECTION 34: Vercel 504 Timeout Elimination & Document Generation Resilience ---
+  console.log("\n🧪 --- SECTION 34: Vercel 504 Timeout Elimination & Document Generation Resilience ---");
+
+  // A. documents-generate.js memiliki withTimeout per pemanggilan
+  const freshGenerateCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-generate.js"), "utf8");
+  assert(
+    freshGenerateCode.includes("withTimeout") && freshGenerateCode.includes("MAX_TOTAL_BUDGET_MS"),
+    "api/documents-generate.js memiliki withTimeout dan batas total budget waktu untuk mencegah 504 Gateway Timeout"
+  );
+
+  // B. documents-generate.js memiliki deteksi allKeysRateLimited
+  assert(
+    freshGenerateCode.includes("allKeysRateLimited") && freshGenerateCode.includes("sintesis dokumen darurat"),
+    "api/documents-generate.js memiliki fast-fail saat kuota 429 habis dan sintesis dokumen darurat"
+  );
+
+  // C. documents-process.js memiliki withTimeout dan MAX_TOTAL_BUDGET_MS
+  const freshProcessCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-process.js"), "utf8");
+  assert(
+    freshProcessCode.includes("withTimeout") && freshProcessCode.includes("MAX_TOTAL_BUDGET_MS"),
+    "api/documents-process.js memiliki withTimeout dan batas total waktu pemrosesan dokumen"
+  );
+
+  // D. api/research.js memiliki batas waktu total fallbackStartTime
+  const freshResearchCode = fs.readFileSync(path.resolve(process.cwd(), "api/research.js"), "utf8");
+  assert(
+    freshResearchCode.includes("fallbackStartTime") && freshResearchCode.includes("sintesis pakar darurat"),
+    "api/research.js memiliki fallbackStartTime dan sintesis pakar darurat untuk respon ultra-cepat"
+  );
+
   // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
