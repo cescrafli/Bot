@@ -588,7 +588,22 @@ export function buildExpressiveSsml(
   rawText: string,
   options: ExpressiveSsmlOptions = {}
 ): string {
-  const voice = options.voice || DEFAULT_VOICE_NAME;
+  let voice = options.voice || "id-ID-GadisNeural";
+  // Sanitasi mutlak: Dilarang keras suara laki-laki (Ardi, Puck, Charon, Fenrir, dll)
+  const lowerVoice = voice.toLowerCase();
+  if (
+    lowerVoice.includes("ardi") ||
+    lowerVoice.includes("male") ||
+    lowerVoice.includes("pria") ||
+    lowerVoice.includes("puck") ||
+    lowerVoice.includes("charon") ||
+    lowerVoice.includes("fenrir") ||
+    lowerVoice.includes("guy") ||
+    lowerVoice.includes("brian") ||
+    !lowerVoice.startsWith("id-id")
+  ) {
+    voice = "id-ID-GadisNeural";
+  }
   const prosody = inferIndonesianProsody(rawText, options.emotion);
   const rate = options.rate || prosody.rate;
   const pitch = options.pitch || prosody.pitch;

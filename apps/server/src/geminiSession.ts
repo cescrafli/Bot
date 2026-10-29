@@ -19,6 +19,7 @@ import {
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
+  resolveVoiceId,
   extractIndonesianSentences,
   RESEARCH_STATUS_TEXT,
 } from "@celyn/shared";
@@ -69,7 +70,7 @@ export class GeminiSession {
     memoryContext?: string
   ) {
     this.clientWs = clientWs;
-    this.activeVoice = customVoice || config.geminiVoice;
+    this.activeVoice = resolveVoiceId(customVoice || config.geminiVoice);
     this.authMode = authMode;
     this.sessionId =
       sessionId || `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;

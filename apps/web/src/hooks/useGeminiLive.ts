@@ -14,6 +14,7 @@ import {
   CELYN_SYSTEM_PROMPT,
   CELYN_GREETING_PROMPT,
   DEFAULT_VOICE_NAME,
+  resolveVoiceId,
   extractIndonesianSentences,
   ParsedDocument,
   DocumentKind,
@@ -300,7 +301,7 @@ export function useGeminiLive({
       }
 
       const activeModel = data.model || "gemini-3.8-live";
-      const activeVoice = voicePreference || data.voice || DEFAULT_VOICE_NAME;
+      const activeVoice = resolveVoiceId(voicePreference || data.voice || DEFAULT_VOICE_NAME);
       const useEdgeTts =
         activeVoice.includes("Neural") || activeVoice.startsWith("id-ID");
       const internalGeminiVoice = useEdgeTts ? "Aoede" : activeVoice;

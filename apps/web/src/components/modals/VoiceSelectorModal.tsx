@@ -40,7 +40,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
               </span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Pilih karakter vokal sesuai preferensi Anda (suara natural Celyn)
+              Pilih karakter vokal sesuai preferensi Anda (100% vokal perempuan muda natural Celyn)
             </p>
           </div>
         </div>

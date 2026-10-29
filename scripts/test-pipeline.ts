@@ -6,6 +6,8 @@ import {
   normalizeEmotion,
   DEFAULT_VOICE_NAME,
   VOICE_OPTIONS,
+  resolveVoiceId,
+  BANNED_MALE_VOICES,
   isNativeGeminiVoice,
   CELYN_SYSTEM_PROMPT,
   buildCelynSystemPrompt,
@@ -168,6 +170,28 @@ async function runTtsTests() {
   assert(
     CELYN_SYSTEM_PROMPT.toLowerCase().includes("100% bahasa indonesia"),
     "System prompt mengunci percakapan 100% Bahasa Indonesia"
+  );
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("PENGECUALIAN TUNGGAL (BELAJAR BAHASA)"),
+    "System prompt memuat klausul pengecualian tunggal untuk pembelajaran/latihan bahasa asing"
+  );
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("ATURAN MUTLAK SUARA PEREMPUAN MUDA"),
+    "System prompt mengunci mutlak suara perempuan muda dan melarang seluruh suara pria/laki-laki"
+  );
+  assert(
+    resolveVoiceId("Puck") === "Aoede" &&
+      resolveVoiceId("Charon") === "Aoede" &&
+      resolveVoiceId("Fenrir") === "Aoede" &&
+      resolveVoiceId("id-ID-ArdiNeural") === "Aoede" &&
+      resolveVoiceId("Brian") === "Aoede",
+    "Sanitizer resolveVoiceId memblokir mutlak seluruh suara laki-laki dan me-redirect ke 'Aoede'"
+  );
+  assert(
+    resolveVoiceId("Zephyr") === "Zephyr" &&
+      resolveVoiceId("Leda") === "Leda" &&
+      resolveVoiceId("Kore") === "Kore",
+    "Sanitizer resolveVoiceId mempertahankan pilihan suara perempuan yang sah"
   );
 
   const gecToken = generateSecMsGecV2();

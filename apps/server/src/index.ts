@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
 import { memoryService } from "./services/MemoryService.js";
-import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken, resolveVoiceId } from "@celyn/shared";
 import { parseMultipartUpload } from "./middlewares/upload.js";
 import { documentReaderService } from "./services/DocumentReaderService.js";
 import { documentService } from "./services/DocumentService.js";
@@ -332,7 +332,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    const selectedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
+    const selectedVoice = resolveVoiceId(parsedUrl.searchParams.get("voice") || config.geminiVoice);
 
     (async () => {
       try {
@@ -384,7 +384,7 @@ const server = http.createServer((req, res) => {
       try {
         const parsedUrl = new URL(req.url || "/api/tts", `http://localhost:${config.port}`);
         let text = parsedUrl.searchParams.get("text") || "";
-        let voice = parsedUrl.searchParams.get("voice") || config.geminiVoice || DEFAULT_VOICE_NAME;
+        let voice = resolveVoiceId(parsedUrl.searchParams.get("voice") || config.geminiVoice || DEFAULT_VOICE_NAME);
         let emotion = parsedUrl.searchParams.get("emotion") || "neutral";
         let rate = parsedUrl.searchParams.get("rate") || "";
         let pitch = parsedUrl.searchParams.get("pitch") || "";
@@ -394,7 +394,7 @@ const server = http.createServer((req, res) => {
           try {
             const parsedBody = JSON.parse(rawBody);
             if (parsedBody.text) text = parsedBody.text;
-            if (parsedBody.voice) voice = parsedBody.voice;
+            if (parsedBody.voice) voice = resolveVoiceId(parsedBody.voice);
             if (parsedBody.emotion) emotion = parsedBody.emotion;
             if (parsedBody.rate) rate = parsedBody.rate;
             if (parsedBody.pitch) pitch = parsedBody.pitch;
@@ -920,7 +920,7 @@ wss.on("connection", async (ws: AliveWebSocket, req) => {
     }
   }
 
-  const requestedVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice;
+  const requestedVoice = resolveVoiceId(parsedUrl.searchParams.get("voice") || config.geminiVoice);
   const requestedSessionId = parsedUrl.searchParams.get("sessionId") || undefined;
   // Memori jangka panjang Turso HANYA diakses untuk password 'admin' (mode jocelyn)
   // Mode 'login' (default) selalu mulai dari awal tanpa memori Turso (zero data leak)
