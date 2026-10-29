@@ -301,6 +301,34 @@ async function createPdfBuffer(payload) {
   }
 }
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "4.5mb",
+    },
+  },
+  maxDuration: 60,
+};
+
+async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
+  let lastErr = null;
+  for (const key of candidateKeys) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: key });
+      const aiRes = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      });
+      return JSON.parse(aiRes.text || "{}");
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[documents-process] Gagal dengan API key (${key.slice(0, 8)}...):`, err?.message || err);
+    }
+  }
+  throw lastErr || new Error("Semua API key Gemini gagal memproses dokumen.");
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -332,8 +360,13 @@ export default async function handler(req, res) {
 
   const customKey = (req.headers["x-gemini-key"] || "").trim();
   const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-  const apiKey = customKey || rawEnvKeys.split(",")[0]?.trim();
-  if (!apiKey) {
+  const envKeys = rawEnvKeys
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  const candidateKeys = customKey ? [customKey, ...envKeys] : envKeys;
+  if (candidateKeys.length === 0) {
     return res.status(500).json({ error: "Layanan Celyn belum siap: Konfigurasi API belum lengkap." });
   }
 
@@ -341,6 +374,13 @@ export default async function handler(req, res) {
     const { fileName, operation = "edit", originalContent, instruction, targetLanguage } = req.body || {};
     if (!originalContent) {
       return res.status(400).json({ error: "Parameter 'originalContent' wajib disertakan." });
+    }
+
+    let safeOriginal = String(originalContent);
+    if (safeOriginal.length > 1200000) {
+      const head = safeOriginal.slice(0, 800000);
+      const tail = safeOriginal.slice(-350000);
+      safeOriginal = `${head}\n\n... [Sebagian teks dipadatkan untuk batas prompt AI] ...\n\n${tail}`;
     }
 
     const lower = (fileName || "dokumen.pdf").toLowerCase();
@@ -352,7 +392,6 @@ export default async function handler(req, res) {
     const opLabel = operation === "translate" ? `terjemahan_${targetLanguage || "id"}` : operation;
     const resultBaseName = `${baseName}_${opLabel}`;
 
-    const ai = new GoogleGenAI({ apiKey });
     const model = process.env.DOC_GENERATE_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview";
 
     if (effectiveKind === "xlsx") {
@@ -364,7 +403,7 @@ Instruksi Pengguna: "${instruction || `Perbarui dan sesuaikan data dokumen Excel
 
 KONTEN ASLI:
 """
-${originalContent}
+${safeOriginal}
 """
 
 KEMBALIKAN HANYA JSON:
@@ -379,13 +418,7 @@ KEMBALIKAN HANYA JSON:
   ]
 }`;
 
-      const aiRes = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
-
-      const parsed = JSON.parse(aiRes.text || "{}");
+      const parsed = await callGeminiJsonWithFailover(candidateKeys, model, prompt);
       const buffer = await createExcelBuffer(parsed);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(resultBaseName)}.xlsx"`);
@@ -401,7 +434,7 @@ Instruksi Pengguna: "${instruction || `Lakukan ${operation} pada isi dokumen den
 
 KONTEN ASLI:
 """
-${originalContent}
+${safeOriginal}
 """
 
 KEMBALIKAN HANYA JSON:
@@ -423,13 +456,7 @@ KEMBALIKAN HANYA JSON:
   ]
 }`;
 
-      const aiRes = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
-
-      const parsed = JSON.parse(aiRes.text || "{}");
+      const parsed = await callGeminiJsonWithFailover(candidateKeys, model, prompt);
       let buffer;
       let mime;
       let ext;

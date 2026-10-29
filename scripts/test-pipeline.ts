@@ -39,6 +39,7 @@ import {
   MESSAGES,
   RESEARCH_STATUS_TEXT,
   buildSafeLiveDocumentContext,
+  buildSafeDocumentGenerationContext,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1340,6 +1341,38 @@ async function runTtsTests() {
   assert(
     hugeDoc.markdownContent.length === hugeText.length,
     "Teks lengkap 100% tetap tersimpan utuh di doc.markdownContent tanpa cacat untuk kebutuhan create_document / edit"
+  );
+
+  // C. Uji buildSafeDocumentGenerationContext (Mencegah HTTP 413 pada dokumen masif ratusan halaman)
+  console.log("  -> Menguji buildSafeDocumentGenerationContext (Perlindungan HTTP 413 Vercel & Model Context)...");
+  const genDocContext = buildSafeDocumentGenerationContext([hugeDoc], 1500000);
+  assert(
+    genDocContext.includes("PIIS0085253822005075.pdf") &&
+      genDocContext.includes("KDIGO 2022") &&
+      genDocContext.includes(hugeText),
+    "Dokumen 592.613 karakter masuk 100% utuh tanpa pemotongan ke konteks pembuatan dokumen (< 1.500.000 chars)"
+  );
+
+  const ultraMassiveText = "A".repeat(3000000); // 3 juta karakter
+  const ultraDoc = {
+    fileName: "PMK_No_3_Tahun_2023.pdf",
+    mimeType: "application/pdf",
+    markdownContent: ultraMassiveText,
+    usedOcr: false,
+    totalPages: 350,
+    truncated: false,
+    characterCount: 3000000,
+  };
+  const safeMassiveGenContext = buildSafeDocumentGenerationContext([ultraDoc], 1500000);
+  assert(
+    safeMassiveGenContext.length <= 1550000,
+    `Konteks dokumen masif 3 juta karakter otomatis dipadatkan (${safeMassiveGenContext.length} chars) di bawah batas 1.55 MB agar aman dari HTTP 413 Vercel`
+  );
+  assert(
+    safeMassiveGenContext.includes("PMK_No_3_Tahun_2023.pdf") &&
+      safeMassiveGenContext.includes("350 Halaman") &&
+      safeMassiveGenContext.includes("diringkas secara cerdas untuk batas kapasitas pemrosesan"),
+    "Konteks dokumen masif memuat metadata judul, halaman, dan catatan perangkuman"
   );
 
   // 24. Ringkasan

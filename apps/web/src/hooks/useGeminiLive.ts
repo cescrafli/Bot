@@ -20,6 +20,7 @@ import {
   DocumentKind,
   RESEARCH_STATUS_TEXT,
   buildSafeLiveDocumentContext,
+  buildSafeDocumentGenerationContext,
 } from "@celyn/shared";
 import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
 
@@ -274,7 +275,9 @@ export function useGeminiLive({
           const title = String(msg.args.title || "Dokumen Celyn");
           const instruction = String(msg.args.instruction || "");
           console.log("📄 [Proxy WS Tool] create_document dipanggil:", { kind, title });
-          generateDocumentRef.current(kind, title, instruction);
+          generateDocumentRef.current(kind, title, instruction).catch((err) => {
+            console.warn("[Proxy WS] create_document error:", err);
+          });
         }
       } else if (msg.type === "status") {
         setStatus(msg.status);
@@ -918,7 +921,9 @@ export function useGeminiLive({
                   const instruction = String((fc.args as any)?.instruction || "").trim();
                   console.log("📄 [Direct Live Tool] Menghasilkan dokumen:", { kind, title });
 
-                  generateDocumentRef.current(kind, title, instruction);
+                  generateDocumentRef.current(kind, title, instruction).catch((err) => {
+                    console.warn("[Direct Live] create_document error:", err);
+                  });
 
                   toolOutput = {
                     status: "ready",
@@ -1429,21 +1434,14 @@ export function useGeminiLive({
           headers["x-gemini-key"] = customKey;
         }
 
-        // Jika konteks belum diisi secara eksplisit, gunakan teks lengkap 100% dari activeDocuments
+        // Jika konteks belum diisi secara eksplisit, gunakan teks aman dari activeDocuments (maksimal 1.500.000 karakter)
         const effectiveContext =
           context ||
           (activeDocumentsRef.current.length > 0
-            ? activeDocumentsRef.current
-                .map(
-                  (d) =>
-                    `# Dokumen: ${d.fileName} (${d.totalPages || 1} Halaman, ${(
-                      d.characterCount || d.markdownContent.length
-                    ).toLocaleString("id-ID")} Karakter)\n\n${d.markdownContent}`
-                )
-                .join("\n\n---\n\n")
+            ? buildSafeDocumentGenerationContext(activeDocumentsRef.current, 1500000)
             : undefined);
 
-        const res = await fetch("/api/documents/generate", {
+        let res = await fetch("/api/documents/generate", {
           method: "POST",
           headers,
           body: JSON.stringify({
@@ -1454,6 +1452,27 @@ export function useGeminiLive({
             password,
           }),
         });
+
+        // Jika gateway/proxy serverless membatasi ukuran request (HTTP 413), coba otomatis dengan ringkasan konteks
+        if (res.status === 413 && effectiveContext && effectiveContext.length > 250000) {
+          console.warn("⚠️ [generateDocument] Payload melebihi batas gateway (HTTP 413), mencoba ulang otomatis dengan konteks teringkas 250k karakter...");
+          const condensedContext =
+            activeDocumentsRef.current.length > 0
+              ? buildSafeDocumentGenerationContext(activeDocumentsRef.current, 250000)
+              : effectiveContext.slice(0, 250000);
+
+          res = await fetch("/api/documents/generate", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              kind,
+              title,
+              instruction,
+              context: condensedContext,
+              password,
+            }),
+          });
+        }
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -1476,7 +1495,6 @@ export function useGeminiLive({
       } catch (err: any) {
         console.error("Gagal generate dokumen:", err);
         setDocStatusMessage(`Gagal membuat dokumen: ${err?.message || "Error"}`);
-        throw err;
       } finally {
         setIsGeneratingDoc(false);
       }

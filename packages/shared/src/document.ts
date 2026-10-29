@@ -159,3 +159,38 @@ ${injectedText}
 
 INSTRUKSI RESPON WAJIB: Dokumen '${doc.fileName}' (${pages} halaman, ${totalChars.toLocaleString("id-ID")} karakter) baru saja diunggah oleh pengguna dan seluruh teks lengkapnya telah tersimpan di memorimu. Segera respon secara lisan dengan hangat, ramah, dan natural dalam Bahasa Indonesia bahwa kamu sudah membaca tuntas dokumen '${doc.fileName}' tersebut (sebutkan topik/judul utamanya jika tampak dari isi dokumen), lalu tanyakan kepada pengguna dokumen ini mau diapakan (contohnya: mau dirangkum poin-poin utamanya, dicari rekomendasi terapi atau bab tertentu, diedit isinya, atau diekspor ke PDF/Word/Excel). JANGAN membaca seluruh isi dokumen kata per kata, cukup sapa dan tanyakan rencana pengguna terhadap dokumen ini.`;
 }
+
+/**
+ * Membentuk konteks dokumen yang aman untuk pembuatan dokumen (PDF, Word, Excel)
+ * tanpa menabrak batas payload HTTP 4.5 MB Vercel Serverless maupun batas token model.
+ * Jika dokumen di bawah batas aman (default 1.500.000 karakter ~ 1.5 MB),
+ * 100% teks lengkap disertakan secara utuh.
+ */
+export function buildSafeDocumentGenerationContext(
+  docs: ParsedDocument[],
+  maxSafeChars: number = 1500000
+): string {
+  if (!docs || docs.length === 0) return "";
+
+  // Bagi kapasitas secara adil per dokumen (minimal 50.000 karakter per doc)
+  const perDocBudget = Math.max(50000, Math.floor((maxSafeChars - docs.length * 200) / docs.length));
+
+  return docs
+    .map((d) => {
+      const rawContent = d.markdownContent || "";
+      const totalChars = d.characterCount || rawContent.length;
+      const pages = d.totalPages || 1;
+      let text = rawContent;
+
+      if (rawContent.length > perDocBudget) {
+        const headLen = Math.floor(perDocBudget * 0.7);
+        const tailLen = Math.floor(perDocBudget * 0.3);
+        text = `${rawContent.slice(0, headLen)}\n\n... [Bagian tengah dokumen (${(
+          totalChars - headLen - tailLen
+        ).toLocaleString("id-ID")} karakter) diringkas secara cerdas untuk batas kapasitas pemrosesan Celyn AI] ...\n\n${rawContent.slice(-tailLen)}`;
+      }
+
+      return `# Dokumen: ${d.fileName} (${pages} Halaman, ${totalChars.toLocaleString("id-ID")} Karakter)\n\n${text}`;
+    })
+    .join("\n\n---\n\n");
+}

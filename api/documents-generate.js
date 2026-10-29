@@ -361,6 +361,34 @@ async function createPdfBuffer(payload) {
   }
 }
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "4.5mb",
+    },
+  },
+  maxDuration: 60,
+};
+
+async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
+  let lastErr = null;
+  for (const key of candidateKeys) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: key });
+      const aiRes = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      });
+      return JSON.parse(aiRes.text || "{}");
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[documents-generate] Gagal generate dengan API key (${key.slice(0, 8)}...):`, err?.message || err);
+    }
+  }
+  throw lastErr || new Error("Semua API key Gemini gagal menghasilkan dokumen.");
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -383,8 +411,13 @@ export default async function handler(req, res) {
 
   const customKey = (req.headers["x-gemini-key"] || "").trim();
   const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-  const apiKey = customKey || rawEnvKeys.split(",")[0]?.trim();
-  if (!apiKey) {
+  const envKeys = rawEnvKeys
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  const candidateKeys = customKey ? [customKey, ...envKeys] : envKeys;
+  if (candidateKeys.length === 0) {
     return res.status(500).json({ error: "GEMINI_API_KEY belum dikonfigurasi." });
   }
 
@@ -401,14 +434,21 @@ export default async function handler(req, res) {
       .trim()
       .slice(0, 50) || "Dokumen";
 
-    const ai = new GoogleGenAI({ apiKey });
     const model = process.env.DOC_GENERATE_MODEL || "gemini-3-flash-preview";
+
+    // Pangkas konteks jika sangat besar (> 1.200.000 karakter) agar aman dalam batas token Gemini & memori Vercel
+    let safeContext = context ? String(context) : "";
+    if (safeContext.length > 1200000) {
+      const head = safeContext.slice(0, 800000);
+      const tail = safeContext.slice(-350000);
+      safeContext = `${head}\n\n... [Sebagian konteks dipadatkan untuk batas prompt AI] ...\n\n${tail}`;
+    }
 
     if (kind === "xlsx") {
       const prompt = `Anda adalah asisten data profesional. Buatlah lembar kerja Excel (XLSX) yang rapi dan terstruktur:
 Judul Dokumen: "${title}"
 Instruksi Pengguna: "${instruction}"
-${context ? `Konteks/Data Acuan:\n${context}` : ""}
+${safeContext ? `Konteks/Data Acuan:\n${safeContext}` : ""}
 
 KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
 {
@@ -426,13 +466,7 @@ KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
   ]
 }`;
 
-      const aiRes = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
-
-      const parsed = JSON.parse(aiRes.text || "{}");
+      const parsed = await callGeminiJsonWithFailover(candidateKeys, model, prompt);
       const buffer = await createExcelBuffer(parsed);
 
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -444,7 +478,7 @@ KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
       const prompt = `Anda adalah asisten pembuat laporan formal profesional. Buatlah draf laporan ${isPdf ? "PDF" : "Word (.docx)"}:
 Judul Dokumen: "${title}"
 Instruksi Pengguna: "${instruction}"
-${context ? `Konteks/Data Acuan:\n${context}` : ""}
+${safeContext ? `Konteks/Data Acuan:\n${safeContext}` : ""}
 
 KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
 {
@@ -463,13 +497,7 @@ KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
   ]
 }`;
 
-      const aiRes = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
-
-      const parsed = JSON.parse(aiRes.text || "{}");
+      const parsed = await callGeminiJsonWithFailover(candidateKeys, model, prompt);
       let buffer;
       let mime;
       let ext;

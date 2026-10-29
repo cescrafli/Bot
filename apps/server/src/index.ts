@@ -751,10 +751,10 @@ const server = http.createServer((req, res) => {
     let bodyTooLarge = false;
     req.on("data", (chunk) => {
       rawBody += chunk.toString();
-      if (rawBody.length > 256 * 1024) {
+      if (rawBody.length > 20 * 1024 * 1024) {
         bodyTooLarge = true;
         res.writeHead(413, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Ukuran JSON permintaan melebihi batas 256 KB." }));
+        res.end(JSON.stringify({ error: "Ukuran JSON permintaan melebihi batas 20 MB." }));
         req.destroy();
       }
     });
@@ -822,10 +822,10 @@ const server = http.createServer((req, res) => {
     let bodyTooLarge = false;
     req.on("data", (chunk) => {
       rawBody += chunk.toString();
-      if (rawBody.length > 512 * 1024) {
+      if (rawBody.length > 20 * 1024 * 1024) {
         bodyTooLarge = true;
         res.writeHead(413, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Ukuran JSON permintaan melebihi batas 512 KB." }));
+        res.end(JSON.stringify({ error: "Ukuran JSON permintaan melebihi batas 20 MB." }));
         req.destroy();
       }
     });
