@@ -7,8 +7,26 @@ interface TokenPayload {
   iat: number;
 }
 
-const toBase64Url = (buf: Buffer): string => buf.toString("base64url");
-const fromBase64Url = (str: string): Buffer => Buffer.from(str, "base64url");
+const toBase64Url = (buf: Uint8Array): string => {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(buf).toString("base64url");
+  }
+  let bin = "";
+  for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+
+const fromBase64Url = (str: string): Uint8Array => {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(str, "base64url");
+  }
+  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) base64 += "=";
+  const bin = atob(base64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+};
 
 /**
  * Sign an authentication token using HMAC-SHA256
@@ -23,7 +41,7 @@ export function signAuthToken(mode: AuthMode, secret: string, ttlSec = 8 * 3600)
     iat: now,
     exp: now + ttlSec,
   };
-  const payloadB64 = toBase64Url(Buffer.from(JSON.stringify(payload), "utf8"));
+  const payloadB64 = toBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
   if (!crypto.createHmac) {
     throw new Error("HMAC signing is only supported in Node.js server environments.");
   }
@@ -56,7 +74,7 @@ export function verifyAuthToken(token: string | undefined | null, secret: string
       return null;
     }
 
-    const payloadRaw = fromBase64Url(payloadB64).toString("utf8");
+    const payloadRaw = new TextDecoder().decode(fromBase64Url(payloadB64));
     const payload = JSON.parse(payloadRaw) as TokenPayload;
 
     const now = Math.floor(Date.now() / 1000);
@@ -79,11 +97,11 @@ export function verifyAuthToken(token: string | undefined | null, secret: string
  */
 export function verifyPassword(provided: string, expected: string): boolean {
   if (typeof provided !== "string" || typeof expected !== "string") return false;
-  const provBuf = Buffer.from(provided);
-  const expBuf = Buffer.from(expected);
-  if (!crypto.timingSafeEqual) {
+  if (!crypto.timingSafeEqual || typeof Buffer === "undefined") {
     return provided === expected;
   }
+  const provBuf = Buffer.from(provided);
+  const expBuf = Buffer.from(expected);
   if (provBuf.length !== expBuf.length) {
     // Prevent timing attack while still comparing
     crypto.timingSafeEqual(provBuf, provBuf);
