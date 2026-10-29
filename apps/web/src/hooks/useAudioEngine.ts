@@ -550,20 +550,17 @@ export function useAudioEngine({
             }
             preRollBufferRef.current = [];
           }
-          // Tahan gerbang tetap terbuka ~640ms (10 frame @ 64ms) agar jeda napas alami tidak terpotong namun tetap responsif
-          voiceHangoverFramesRef.current = 10;
+          // Tahan gerbang tetap terbuka ~1536ms (24 frame @ 64ms) agar jeda napas alami saat berbicara panjang tidak terpotong
+          voiceHangoverFramesRef.current = 24;
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else if (voiceHangoverFramesRef.current > 0) {
-          // Hangover tail: menjaga jeda mikro antar-kata dan gumaman lambat
+          // Hangover tail: menjaga jeda mikro antar-kata, jeda napas, dan gumaman berpikir
           voiceHangoverFramesRef.current--;
           onAudioChunkRef.current?.(int16ToBase64(pcm16k));
         } else {
-          // Gerbang tertutup: pengguna hening
+          // Gerbang tertutup: pengguna hening secara tuntas setelah jeda alami ~1.5 detik
           if (isGateOpenRef.current) {
             isGateOpenRef.current = false;
-            // Kirim 8 frame digital silence (~512ms) agar Server-Side VAD Gemini Live
-            // mendeteksi akhir giliran bicara secara bersih, gesit, dan minim latency
-            silenceFramesRemainingRef.current = 8;
           }
 
           // Simpan ke ring buffer pre-roll (maksimal 4 frame = 256ms @ 64ms)
@@ -571,15 +568,9 @@ export function useAudioEngine({
           if (preRollBufferRef.current.length > 4) {
             preRollBufferRef.current.shift();
           }
-
-          // Kirim digital silence kontinu HANYA selama masa flush cutoff turn
-          if (silenceFramesRemainingRef.current > 0) {
-            silenceFramesRemainingRef.current--;
-            const silence = new Int16Array(pcm16k.length);
-            onAudioChunkRef.current?.(int16ToBase64(silence));
-          }
-          // CATATAN KRITIS: JANGAN mengirim onAudioStreamEnd() saat hening terbuka!
-          // Sinyal audioStreamEnd hanya dikirim saat mikrofon dimatikan (stopMic/lepas PTT).
+          // CATATAN KRITIS: JANGAN mengirim frame zero buatan atau onAudioStreamEnd() saat jeda hening!
+          // Membiarkan audio hening ruangan alami mengalir mencegah artefak step-function
+          // yang membingungkan neural network Gemini sehingga terhindar dari pemotongan kalimat prematur.
         }
       };
 

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, Suspense, lazy } from "react";
+import React, { useState, useCallback, useEffect, useRef, Suspense, lazy } from "react";
 import { AvatarCanvas2D } from "./components/avatar/AvatarCanvas2D";
 import { ControlBar } from "./components/controls/ControlBar";
 import { JobTray } from "./components/controls/JobTray";
@@ -52,16 +52,20 @@ export function App() {
     return localStorage.getItem("celyn_selected_voice") || "Aoede";
   });
 
+  const liveRef = useRef<any>(null);
+
   // Hook Audio Capture & Playback
   const audioEngine = useAudioEngine({
     onAudioChunk: (b64PCM16k) => {
-      live.sendAudio(b64PCM16k);
+      if (liveRef.current?.isConnected) {
+        liveRef.current.sendAudio(b64PCM16k);
+      }
     },
     onBargeIn: () => {
-      live.onBargeIn();
+      liveRef.current?.onBargeIn();
     },
     onAudioStreamEnd: () => {
-      live.sendAudioStreamEnd();
+      liveRef.current?.sendAudioStreamEnd();
     },
   });
 
@@ -74,6 +78,17 @@ export function App() {
       audioEngine.stopPlayback();
     },
   });
+
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
+
+  // ⚡ Otomatis matikan mikrofon jika sesi terputus atau berakhir
+  useEffect(() => {
+    if (!live.isConnected && audioEngine.isMicActive) {
+      audioEngine.stopMic();
+    }
+  }, [live.isConnected, audioEngine]);
 
   // Hook Screen Capture dengan Change Detection hemat token
   const screenCapture = useScreenCapture({

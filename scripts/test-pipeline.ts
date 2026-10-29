@@ -180,6 +180,14 @@ async function runTtsTests() {
     "System prompt mengunci mutlak suara perempuan muda dan melarang seluruh suara pria/laki-laki"
   );
   assert(
+    CELYN_SYSTEM_PROMPT.includes("DILARANG KERAS MEMOTONG ATAU MENYELA SAAT PENGGUNA BERBICARA PANJANG"),
+    "System prompt memuat instruksi mutlak dilarang memotong/menyela pembicaraan panjang pengguna"
+  );
+  assert(
+    CELYN_SYSTEM_PROMPT.includes("MENJAWAB TEPAT SASARAN SESUAI PERTANYAAN (ANTI-SALAH PAHAM)"),
+    "System prompt memuat instruksi menyimak tuntas dan menjawab tepat sasaran sesuai pertanyaan pengguna"
+  );
+  assert(
     resolveVoiceId("Puck") === "Aoede" &&
       resolveVoiceId("Charon") === "Aoede" &&
       resolveVoiceId("Fenrir") === "Aoede" &&

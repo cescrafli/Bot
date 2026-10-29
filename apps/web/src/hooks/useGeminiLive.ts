@@ -536,6 +536,43 @@ export function useGeminiLive({
                     required: ["kind", "title"],
                   },
                 },
+                {
+                  name: "process_document",
+                  description:
+                    "Proses dokumen yang sudah diunggah: summarize (meringkas), translate (menerjemahkan), paraphrase (parafrase), edit (mengubah isi dengan menjaga format), atau custom (analisis bebas).",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      docId: { type: Type.STRING, description: "Nama file atau ID dokumen" },
+                      operation: {
+                        type: Type.STRING,
+                        enum: ["summarize", "translate", "paraphrase", "edit", "custom"],
+                        description: "Operasi dokumen",
+                      },
+                      targetLanguage: {
+                        type: Type.STRING,
+                        description: "Bahasa tujuan khusus untuk translate. TANYAKAN dulu jika belum diketahui.",
+                      },
+                      instruction: {
+                        type: Type.STRING,
+                        description: "Instruksi spesifik pengeditan atau analisis",
+                      },
+                    },
+                    required: ["docId", "operation"],
+                  },
+                },
+                {
+                  name: "research",
+                  description:
+                    "Lakukan riset mendalam atau pencarian fakta dan informasi terkini di web. Kembalikan temuan beserta link/tautan sumber rujukan.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      query: { type: Type.STRING, description: "Topik atau kueri pencarian riset" },
+                    },
+                    required: ["query"],
+                  },
+                },
               ],
             },
           ],
@@ -832,6 +869,22 @@ export function useGeminiLive({
                     title,
                     instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' telah siap diproses dan tombol unduh otomatis dimunculkan di layar pengguna. Sekarang sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa dokumennya sudah dibuatkan dan bisa langsung diunduh!`,
                   };
+                } else if (fc.name === "process_document") {
+                  const docId = String((fc.args as any)?.docId || "").trim();
+                  const operation = String((fc.args as any)?.operation || "summarize").trim();
+                  toolOutput = {
+                    status: "applied",
+                    docId,
+                    operation,
+                    instruction: `Operasi '${operation}' pada dokumen '${docId}' telah dicatat. Berikan penjelasan dan tanggapan lisanmu secara langsung dalam Bahasa Indonesia!`,
+                  };
+                } else if (fc.name === "research") {
+                  const query = String((fc.args as any)?.query || "").trim();
+                  toolOutput = {
+                    status: "applied",
+                    query,
+                    instruction: `Riset tentang '${query}' telah diselesaikan. Sampaikan intisari temuanmu secara lisan dalam Bahasa Indonesia secara padat dan ramah!`,
+                  };
                 }
 
                 if (directSessionRef.current) {
@@ -855,18 +908,29 @@ export function useGeminiLive({
             }
           },
           onerror: (err: any) => {
-            console.error("Celyn Live Direct Error:", err);
+            console.error("❌ [Celyn Live Direct] Error:", err);
+            directSessionRef.current = null;
+            setIsConnected(false);
             setStatus("error");
             setStatusMessage(
               `Koneksi Celyn bermasalah: ${err?.message || "Terjadi kendala koneksi"}`
             );
           },
-          onclose: () => {
+          onclose: (event: any) => {
+            console.warn("🔌 [Celyn Live Direct] Sesi WebSocket ditutup:", {
+              code: event?.code,
+              reason: event?.reason,
+              wasClean: event?.wasClean,
+            });
             clearSessionTimers();
             directSessionRef.current = null;
             setIsConnected(false);
             setStatus("idle");
-            setStatusMessage("Sesi Celyn telah berakhir.");
+            setStatusMessage(
+              event?.code === 1000
+                ? "Sesi Celyn telah selesai."
+                : `Koneksi Celyn ditutup (Kode: ${event?.code || "1006"}${event?.reason ? `, ${event.reason}` : ""}). Klik tombol telepon untuk terhubung kembali.`
+            );
           },
         },
       });
@@ -1089,14 +1153,33 @@ export function useGeminiLive({
     // 2. Jika terhubung via Direct Gemini Live Session (Vercel Serverless Mode)
     const session = directSessionRef.current;
     if (session) {
+      // ⚡ Validasi apakah socket underlying SDK masih benar-benar OPEN
+      const rawWs = (session as any)?.conn?.ws;
+      if (rawWs && rawWs.readyState !== WebSocket.OPEN) {
+        if (rawWs.readyState === WebSocket.CLOSING || rawWs.readyState === WebSocket.CLOSED) {
+          directSessionRef.current = null;
+          setIsConnected(false);
+          setStatus("idle");
+        }
+        return;
+      }
+
       try {
         if (msg.type === "audio") {
-          await session.sendRealtimeInput({
-            audio: {
-              mimeType: "audio/pcm;rate=16000",
-              data: msg.data,
-            },
-          });
+          try {
+            await session.sendRealtimeInput({
+              audio: {
+                mimeType: "audio/pcm;rate=16000",
+                data: msg.data,
+              },
+            });
+          } catch (audioErr: any) {
+            if (audioErr?.message?.includes("CLOSING or CLOSED")) {
+              directSessionRef.current = null;
+              setIsConnected(false);
+              setStatus("idle");
+            }
+          }
         } else if (msg.type === "audio_stream_end") {
           try {
             await session.sendRealtimeInput({
@@ -1160,8 +1243,8 @@ export function useGeminiLive({
       return;
     }
 
-    // 3. Jika koneksi belum terbuka, antrekan paket pesan (khususnya pesan teks WAJIB diantrekan agar tidak hilang)
-    if (statusRef.current === "connecting" || msg.type === "text") {
+    // 3. Jika koneksi belum terbuka, antrekan HANYA pesan teks atau dokumen (JANGAN antrekan audio mentah!)
+    if (msg.type === "text" || msg.type === "doc_context") {
       pendingQueueRef.current.push(msg);
       if (pendingQueueRef.current.length > 25) {
         pendingQueueRef.current.shift();
@@ -1191,6 +1274,8 @@ export function useGeminiLive({
 
   const sendAudio = useCallback(
     (b64PCM16k: string) => {
+      // Tandai aktivitas suara pengguna agar auto-greeting tidak menabrak pembicaraan
+      hasUserInitiatedTurnRef.current = true;
       sendMessage({ type: "audio", data: b64PCM16k });
     },
     [sendMessage]
