@@ -37,8 +37,7 @@ Monorepo berbasis npm workspaces:
 ### 1. Kebutuhan Sistem
 - **Node.js** v18+
 - **Gemini API Key** (gratis di [Google AI Studio](https://aistudio.google.com/))
-- *(Opsional)* Database **Turso** untuk memori cloud permanen ([turso.tech](https://turso.tech))
-
+- *(Opsional)* Database untuk memori
 ### 2. Instalasi
 ```bash
 git clone https://github.com/cescrafli/Bot.git
@@ -56,8 +55,8 @@ GEMINI_MODEL=gemini-3.8-live
 GEMINI_VOICE=Aoede
 
 # Database Turso (Opsional untuk memori permanen)
-TURSO_DATABASE_URL=libsql://nama-db-kamu.turso.io
-TURSO_AUTH_TOKEN=isi_token_turso_kamu
+DATABASE_URL=libsql://nama-db
+AUTH_TOKEN=token
 
 # Password Sesi Admin
 ADMIN_PASSWORD=admin
@@ -81,9 +80,9 @@ Akses antarmuka web di **`http://localhost:5173`**.
 | `npm run dev` | Menjalankan client dan backend bersamaan |
 | `npm run test:pipeline` | Menjalankan smoke test terpadu (audio, emosi, prompt, dan database) |
 | `npm run build` | Melakukan build produksi seluruh paket |
-| `npm run db:check` | Memeriksa isi memori yang tersimpan di Turso Cloud |
+| `npm run db:check` | Memeriksa isi memori yang tersimpan di database |
 
 ---
 
 ## Lisensi
-Hak Cipta © 2026 Rafli. Dirilis di bawah lisensi MIT.
+Hak Cipta © 2026 Rafli.
