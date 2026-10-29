@@ -171,6 +171,7 @@ ${expert.promptGuide}
 
   let lastError = null;
 
+  // Tahap 1: Coba dengan Google Search Grounding
   for (const modelName of uniqueModels) {
     for (const key of candidateKeys) {
       try {
@@ -208,12 +209,57 @@ ${expert.promptGuide}
           expertPersona: expert.persona,
           fieldLabel: expert.fieldLabel,
           modelUsed: modelName,
+          groundingAvailable: true,
         });
       } catch (err) {
         lastError = err;
-        console.warn(`[Vercel API /api/research] Model ${modelName} gagal dengan key ${key.slice(0, 8)}...:`, err?.message || err);
+        console.warn(`[Vercel API /api/research] [Grounding] Model ${modelName} gagal dengan key ${key.slice(0, 8)}...:`, err?.message || err);
       }
     }
+  }
+
+  // Tahap 2: Fallback tanpa Google Search Grounding
+  console.warn("[Vercel API /api/research] Grounding gagal/kuota habis, fallback ke mode tanpa grounding...");
+  for (const modelName of uniqueModels) {
+    for (const key of candidateKeys) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: key });
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: "user", parts: [{ text: promptText }] }],
+        });
+
+        const text = (response.text || "").trim();
+        if (!text) continue;
+
+        return res.status(200).json({
+          ok: true,
+          query,
+          summary: text,
+          sources: [],
+          expertPersona: expert.persona,
+          fieldLabel: expert.fieldLabel,
+          modelUsed: modelName,
+          groundingAvailable: false,
+        });
+      } catch (err) {
+        lastError = err;
+        console.warn(`[Vercel API /api/research] [Fallback] Model ${modelName} gagal dengan key ${key.slice(0, 8)}...:`, err?.message || err);
+      }
+    }
+  }
+
+  // Kedua tahap gagal
+  const isRateLimit = lastError?.status === 429 || lastError?.code === 429 ||
+    /429|quota|resource_exhausted|rate.?limit/i.test(String(lastError?.message || ""));
+  if (isRateLimit) {
+    return res.status(429).json({
+      ok: false,
+      error: "Layanan riset Celyn sedang sibuk. Coba lagi sebentar lagi ya.",
+      query,
+      expertPersona: expert.persona,
+      fieldLabel: expert.fieldLabel,
+    });
   }
 
   return res.status(500).json({

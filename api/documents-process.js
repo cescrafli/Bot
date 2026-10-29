@@ -18,6 +18,14 @@ import pdfmake from "pdfmake";
 import path from "node:path";
 import fs from "node:fs";
 
+function cleanJson(text) {
+  if (!text) return "";
+  let t = String(text).trim();
+  // Hapus markdown fences jika ada (```json ... ``` atau ``` ... ```)
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  return t.trim();
+}
+
 function stripMd(text) {
   if (!text) return "";
   return String(text)
@@ -329,7 +337,7 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
           config: { responseMimeType: "application/json" },
         });
         if (aiRes?.text) {
-          return JSON.parse(aiRes.text);
+          return JSON.parse(cleanJson(aiRes.text));
         }
       } catch (err) {
         lastErr = err;

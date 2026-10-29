@@ -2225,6 +2225,43 @@ async function runTtsTests() {
     "vercel.json mengalihkan rute /api/auth/verify langsung ke /api/health"
   );
 
+  // --- SECTION 32: Riset & Dokumen API Fix Verification ---
+  console.log("\n🧪 --- SECTION 32: Riset & Dokumen API Fix Verification ---");
+
+  // A. api/research.js memiliki fallback non-grounding
+  const researchCode = fs.readFileSync(path.resolve(process.cwd(), "api/research.js"), "utf8");
+  assert(
+    researchCode.includes("groundingAvailable") && researchCode.includes("fallback"),
+    "api/research.js memiliki fallback non-grounding saat googleSearch quota habis"
+  );
+
+  // B. documents-generate.js menggunakan gemini-3.8-flash sebagai default (bukan gemini-3-flash-preview sebagai default)
+  const generateCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-generate.js"), "utf8");
+  assert(
+    generateCode.includes('"gemini-3.8-flash"') &&
+      !generateCode.includes('|| "gemini-3-flash-preview"'),
+    "api/documents-generate.js menggunakan gemini-3.8-flash sebagai model default"
+  );
+
+  // C. cleanJson tersedia di documents-generate.js
+  assert(
+    generateCode.includes("cleanJson"),
+    "api/documents-generate.js memiliki fungsi cleanJson untuk sanitasi output JSON dari AI"
+  );
+
+  // D. cleanJson tersedia di documents-process.js
+  const processCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-process.js"), "utf8");
+  assert(
+    processCode.includes("cleanJson"),
+    "api/documents-process.js memiliki fungsi cleanJson untuk sanitasi output JSON dari AI"
+  );
+
+  // E. documents-generate.js menggunakan verifyAuth (Bearer token support)
+  assert(
+    generateCode.includes("verifyAuth(req)"),
+    "api/documents-generate.js menggunakan verifyAuth yang mendukung Bearer token JWT"
+  );
+
   // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

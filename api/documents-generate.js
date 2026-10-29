@@ -17,6 +17,55 @@ import {
 import pdfmake from "pdfmake";
 import path from "node:path";
 import fs from "node:fs";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifyAuth(req) {
+  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
+  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
+  const expectedUserPassword = process.env.USER_PASSWORD || "login";
+
+  // Check Bearer Token
+  const authHeader = req.headers["authorization"] || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const parts = token.split(".");
+    if (parts.length === 2) {
+      try {
+        const [payloadB64, sigB64] = parts;
+        const expectedSig = createHmac("sha256", secret).update(payloadB64).digest();
+        const givenSig = Buffer.from(sigB64, "base64url");
+        if (givenSig.length === expectedSig.length && timingSafeEqual(givenSig, expectedSig)) {
+          const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+          if (payload.exp && payload.exp > Date.now() / 1000) {
+            return { valid: true, mode: payload.m };
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // Check direct password
+  const directPass = req.headers["x-admin-password"] || req.query?.password || req.query?.key;
+  if (directPass) {
+    const trimmed = String(directPass).trim();
+    if (trimmed === expectedPassword || trimmed === "admin") {
+      return { valid: true, mode: "jocelyn" };
+    }
+    if (trimmed === expectedUserPassword || trimmed === "login") {
+      return { valid: true, mode: "default" };
+    }
+  }
+
+  return { valid: false };
+}
+
+function cleanJson(text) {
+  if (!text) return "";
+  let t = String(text).trim();
+  // Hapus markdown fences jika ada (```json ... ``` atau ``` ... ```)
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  return t.trim();
+}
 
 function stripMd(text) {
   if (!text) return "";
@@ -527,7 +576,7 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
           config: { responseMimeType: "application/json" },
         });
         if (aiRes?.text) {
-          return JSON.parse(aiRes.text);
+          return JSON.parse(cleanJson(aiRes.text));
         }
       } catch (err) {
         lastErr = err;
@@ -579,11 +628,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed. Gunakan POST." });
   }
 
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
-  const authPass = req.headers["x-admin-password"] || req.query?.password || req.query?.key;
-
-  if (authPass !== "admin" && authPass !== "login" && authPass !== expectedPassword) {
-    return res.status(401).json({ error: "Akses ditolak: Autentikasi diperlukan." });
+  const auth = verifyAuth(req);
+  if (!auth.valid) {
+    return res.status(401).json({ error: "Akses ditolak: Autentikasi valid diperlukan." });
   }
 
   const customKey = (req.headers["x-gemini-key"] || "").trim();
@@ -611,7 +658,7 @@ export default async function handler(req, res) {
       .trim()
       .slice(0, 50) || "Dokumen";
 
-    const model = process.env.DOC_GENERATE_MODEL || "gemini-3-flash-preview";
+    const model = process.env.DOC_GENERATE_MODEL || "gemini-3.8-flash";
 
     // Pangkas konteks jika sangat besar (> 1.200.000 karakter) agar aman dalam batas token Gemini & memori Vercel
     let safeContext = context ? String(context) : "";
