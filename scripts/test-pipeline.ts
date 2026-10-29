@@ -1421,6 +1421,18 @@ async function runTtsTests() {
     "Prompt per bagian memuat nomor bagian dan skema JSON sections"
   );
 
+  // E. Uji sintaks seluruh fungsi serverless Vercel (api/*.js) agar cacat seperti HTTP 500 tak terulang
+  console.log("  -> Memeriksa sintaks seluruh api/*.js (fungsi serverless Vercel)...");
+  for (const apiFile of fs.readdirSync("api").filter((n) => n.endsWith(".js"))) {
+    let syntaxOk = true;
+    try {
+      execSync(`node --check "api/${apiFile}"`, { stdio: "pipe" });
+    } catch {
+      syntaxOk = false;
+    }
+    assert(syntaxOk, `Sintaks api/${apiFile} valid (dapat dimuat oleh Vercel tanpa HTTP 500)`);
+  }
+
   // 24. Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
