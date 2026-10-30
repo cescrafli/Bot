@@ -2340,6 +2340,51 @@ async function runTtsTests() {
     "api/research.js memiliki fallbackStartTime dan sintesis pakar darurat untuk respon ultra-cepat"
   );
 
+  // --- SECTION 35: Anti-Double Tool Call & High-Caliber Real Content Hardening ---
+  console.log("\n🧪 --- SECTION 35: Anti-Double Tool Call & High-Caliber Real Content Hardening ---");
+
+  // A. avatar.ts memiliki aturan tegas anti-double tool call
+  const avatarCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/avatar.ts"), "utf8");
+  assert(
+    avatarCode.includes("ATURAN KETAT SATU PANGGILAN TOOL PER PERMINTAAN") &&
+      avatarCode.includes("ANTI-DOUBLE CALL"),
+    "packages/shared/src/avatar.ts memuat aturan mutlak satu panggilan tool per giliran pengguna"
+  );
+
+  // B. useGeminiLive.ts memiliki guard deduplikasi turn untuk create_document dan research
+  const freshLiveCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"), "utf8");
+  assert(
+    freshLiveCode.includes("directDocCreatedThisTurnRef") &&
+      freshLiveCode.includes("directResearchDoneThisTurnRef"),
+    "apps/web/src/hooks/useGeminiLive.ts memiliki guard directDocCreatedThisTurnRef dan directResearchDoneThisTurnRef"
+  );
+
+  // C. useGeminiLive.ts mencegah eksekusi dokumen secara bersamaan (running lock)
+  assert(
+    freshLiveCode.includes("lastGenRef.current.running") &&
+      freshLiveCode.includes("Masih ada proses dokumen lain yang sedang berjalan"),
+    "apps/web/src/hooks/useGeminiLive.ts memblokir eksekusi dokumen konkuren yang dapat membebani serverless"
+  );
+
+  // D. api/documents-generate.js mewajibkan tabel data dalam prompt riset
+  assert(
+    freshGenerateCode.includes("TABEL DATA WAJIB DISERTAKAN"),
+    "api/documents-generate.js menginstruksikan AI menyertakan tabel data dan metrik dalam dokumen"
+  );
+
+  // E. api/documents-generate.js memiliki data tabel finansial riil pada fallback darurat
+  assert(
+    freshGenerateCode.includes("Hari / Sesi") && freshGenerateCode.includes("BBCA"),
+    "api/documents-generate.js menyertakan tabel metrik harian dan saham pada fallback domain finance"
+  );
+
+  // F. Fast failover timeout untuk gemini-3.8-flash agar fallback ke gemini-3-flash-preview tidak kehabisan budget
+  assert(
+    freshGenerateCode.includes("timeoutMs = modelToTry === \"gemini-3.8-flash\" ? 6000 : 14000") &&
+      freshResearchCode.includes("timeoutMs = modelName === \"gemini-3.8-flash\" ? 6000 : 12000"),
+    "api/documents-generate.js dan api/research.js menerapkan timeout cepat 6 detik pada model primer untuk mencegah starving"
+  );
+
   // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

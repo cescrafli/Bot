@@ -130,11 +130,18 @@ export default async function handler(req, res) {
   }
 
   const customKey = (req.headers["x-gemini-key"] || body.apiKey || req.query?.apiKey || "").trim();
-  const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+  const rawEnvKeys = [
+    process.env.GEMINI_API_KEYS,
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_FALLBACK,
+    process.env.GEMINI_API_KEY_SECRET,
+  ]
+    .filter(Boolean)
+    .join(",");
   const envKeys = rawEnvKeys.split(",").map((k) => k.trim()).filter(Boolean);
 
   // Prioritaskan kunci standar Google AI Studio (AIzaSy...) sebelum kunci restricted (AQ...)
-  const sortedEnvKeys = [...envKeys].sort((a, b) => {
+  const sortedEnvKeys = [...new Set(envKeys)].sort((a, b) => {
     if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
     if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
     return 0;
@@ -195,7 +202,7 @@ Tautan rujukan asli dalam format markdown [Nama Sumber](https://url-sumber).`;
             tools: [{ googleSearch: {} }],
           },
         }),
-        8000
+        6000
       );
 
       const text = (response.text || "").trim();
@@ -246,12 +253,13 @@ Tautan rujukan asli dalam format markdown [Nama Sumber](https://url-sumber).`;
       if (Date.now() - fallbackStartTime > 22000) break;
       try {
         const ai = new GoogleGenAI({ apiKey: key });
+        const timeoutMs = modelName === "gemini-3.8-flash" ? 6000 : 12000;
         const response = await withTimeout(
           ai.models.generateContent({
             model: modelName,
             contents: [{ role: "user", parts: [{ text: promptText }] }],
           }),
-          14000
+          timeoutMs
         );
 
         const text = (response.text || "").trim();

@@ -343,13 +343,14 @@ async function callGeminiJsonWithFailover(candidateKeys, model, prompt) {
       if (Date.now() - startTime > MAX_TOTAL_BUDGET_MS - 8000) break;
       try {
         const ai = new GoogleGenAI({ apiKey: key });
+        const timeoutMs = modelToTry === "gemini-3.8-flash" ? 6000 : 14000;
         const aiRes = await withTimeout(
           ai.models.generateContent({
             model: modelToTry,
             contents: prompt,
             config: { responseMimeType: "application/json" },
           }),
-          14000
+          timeoutMs
         );
         if (aiRes?.text) {
           return JSON.parse(cleanJson(aiRes.text));
@@ -469,14 +470,21 @@ export default async function handler(req, res) {
   }
 
   const customKey = (req.headers["x-gemini-key"] || "").trim();
-  const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+  const rawEnvKeys = [
+    process.env.GEMINI_API_KEYS,
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_FALLBACK,
+    process.env.GEMINI_API_KEY_SECRET,
+  ]
+    .filter(Boolean)
+    .join(",");
   const envKeys = rawEnvKeys
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean);
 
   // Prioritaskan kunci standar AIzaSy... dibanding kunci restricted AQ...
-  const sortedEnvKeys = [...envKeys].sort((a, b) => {
+  const sortedEnvKeys = [...new Set(envKeys)].sort((a, b) => {
     if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
     if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
     return 0;

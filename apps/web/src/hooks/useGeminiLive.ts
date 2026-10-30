@@ -119,6 +119,9 @@ export function useGeminiLive({
   const backupPcmChunksRef = useRef<string[]>([]);
   const bargeInMutedRef = useRef<boolean>(false);
   const directHasPendingToolCallRef = useRef<boolean>(false);
+  // Guard: mencegah double create_document atau double research dalam satu turn
+  const directDocCreatedThisTurnRef = useRef<boolean>(false);
+  const directResearchDoneThisTurnRef = useRef<boolean>(false);
   const directTurnHasOutputTranscriptionRef = useRef<boolean>(false);
   const directFallbackPartTextBufferRef = useRef<string>("");
   const autoGreetingTimerRef = useRef<number | null>(null);
@@ -728,6 +731,8 @@ export function useGeminiLive({
                   });
                 }
 
+                directDocCreatedThisTurnRef.current = false;
+                directResearchDoneThisTurnRef.current = false;
                 handleServerMessage({
                   type: "status",
                   status: "thinking",
@@ -883,6 +888,8 @@ export function useGeminiLive({
                 return;
               }
 
+              directDocCreatedThisTurnRef.current = false;
+              directResearchDoneThisTurnRef.current = false;
               directIsFirstChunkRef.current = true;
               directExplicitEmotionRef.current = false;
               activeTurnSpeakerRef.current = null;
@@ -1018,18 +1025,30 @@ export function useGeminiLive({
                   const kind = (((fc.args as any)?.kind as string) || "pdf").toLowerCase() as DocumentKind;
                   const title = String((fc.args as any)?.title || "Dokumen Celyn").trim();
                   const instruction = String((fc.args as any)?.instruction || "").trim();
-                  console.log("📄 [Direct Live Tool] Menghasilkan dokumen:", { kind, title });
 
-                  generateDocumentRef.current(kind, title, instruction).catch((err) => {
-                    console.warn("[Direct Live] create_document error:", err);
-                  });
+                  if (directDocCreatedThisTurnRef.current) {
+                    console.warn("[Direct Live] create_document sudah dipanggil dalam turn ini, abaikan pemanggilan ganda:", { kind, title });
+                    toolOutput = {
+                      status: "already_queued",
+                      kind,
+                      title,
+                      instruction: `Dokumen sebelumnya sudah sedang diproses di latar belakang. Jangan membuat dokumen lain lagi sekarang. Cukup sampaikan secara lisan dengan santai bahwa proses sedang berjalan.`,
+                    };
+                  } else {
+                    directDocCreatedThisTurnRef.current = true;
+                    console.log("📄 [Direct Live Tool] Menghasilkan dokumen:", { kind, title });
 
-                  toolOutput = {
-                    status: "ready",
-                    kind,
-                    title,
-                    instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' sedang dibuat di latar belakang (dokumen besar dikerjakan per bagian, bisa beberapa menit). Sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa kamu sudah mulai membuatnya dan akan memberi kabar begitu selesai dan terunduh. JANGAN bilang sudah selesai sekarang.`,
-                  };
+                    generateDocumentRef.current(kind, title, instruction).catch((err) => {
+                      console.warn("[Direct Live] create_document error:", err);
+                    });
+
+                    toolOutput = {
+                      status: "ready",
+                      kind,
+                      title,
+                      instruction: `Dokumen ${kind.toUpperCase()} berjudul '${title}' sedang dibuat di latar belakang (dokumen besar dikerjakan per bagian, bisa beberapa menit). Sampaikan secara lisan dengan ceria, singkat, dan hangat bahwa kamu sudah mulai membuatnya dan akan memberi kabar begitu selesai dan terunduh. JANGAN bilang sudah selesai sekarang.`,
+                    };
+                  }
                 } else if (fc.name === "process_document") {
                   const docId = String((fc.args as any)?.docId || "").trim();
                   const operation = String((fc.args as any)?.operation || "summarize").trim();
@@ -1050,65 +1069,80 @@ export function useGeminiLive({
                 } else if (fc.name === "research") {
                   const query = String((fc.args as any)?.query || "").trim();
                   const expert = inferExpertPersona(query);
-                  console.log(`🔍 [Direct Live Tool] Menjalankan riset mendalam untuk: "${query}"`);
 
-                  let researchSummary = "";
-                  let researchSources: Array<{ title: string; url: string }> = [];
+                  if (directResearchDoneThisTurnRef.current) {
+                    console.warn("[Direct Live] research sudah dipanggil dalam turn ini, abaikan pemanggilan ganda:", query);
+                    toolOutput = {
+                      status: "already_done",
+                      query,
+                      expertPersona: expert.persona,
+                      fieldLabel: expert.fieldLabel,
+                      summary: "Riset untuk topik ini sudah didapatkan.",
+                      sources: [],
+                      instruction: `Riset telah didapatkan. Sampaikan analisis lisanmu sekarang tanpa memanggil tool riset lagi.`,
+                    };
+                  } else {
+                    directResearchDoneThisTurnRef.current = true;
+                    console.log(`🔍 [Direct Live Tool] Menjalankan riset mendalam untuk: "${query}"`);
 
-                  if (query) {
-                    try {
-                      const password = getStoredAuthPassword() || "admin";
-                      const token = getStoredAuthToken();
-                      const headers: Record<string, string> = {
-                        "Content-Type": "application/json",
-                        "x-admin-password": password,
-                      };
-                      if (token) headers["Authorization"] = `Bearer ${token}`;
-                      const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
-                      if (customKey) headers["x-gemini-key"] = customKey;
+                    let researchSummary = "";
+                    let researchSources: Array<{ title: string; url: string }> = [];
 
-                      const res = await fetch("/api/research", {
-                        method: "POST",
-                        headers,
-                        body: JSON.stringify({ query }),
-                      });
+                    if (query) {
+                      try {
+                        const password = getStoredAuthPassword() || "admin";
+                        const token = getStoredAuthToken();
+                        const headers: Record<string, string> = {
+                          "Content-Type": "application/json",
+                          "x-admin-password": password,
+                        };
+                        if (token) headers["Authorization"] = `Bearer ${token}`;
+                        const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
+                        if (customKey) headers["x-gemini-key"] = customKey;
 
-                      if (res.ok) {
-                        const data = await res.json().catch(() => null);
-                        if (data && data.ok) {
-                          researchSummary = data.summary || "";
-                          researchSources = Array.isArray(data.sources) ? data.sources : [];
+                        const res = await fetch("/api/research", {
+                          method: "POST",
+                          headers,
+                          body: JSON.stringify({ query }),
+                        });
+
+                        if (res.ok) {
+                          const data = await res.json().catch(() => null);
+                          if (data && data.ok) {
+                            researchSummary = data.summary || "";
+                            researchSources = Array.isArray(data.sources) ? data.sources : [];
+                          }
+                        } else {
+                          console.warn(`[Direct Live] /api/research returned status ${res.status}`);
                         }
-                      } else {
-                        console.warn(`[Direct Live] /api/research returned status ${res.status}`);
+                      } catch (e) {
+                        console.warn("Gagal fetch /api/research:", e);
                       }
-                    } catch (e) {
-                      console.warn("Gagal fetch /api/research:", e);
                     }
+
+                    // Sintesis analisis fallback jika endpoint jaringan lambat/kuota habis agar suara Celyn tetap berbobot
+                    if (!researchSummary) {
+                      researchSummary = `Berdasarkan analisis profesional di bidang ${expert.fieldLabel}, topik "${query}" menunjukkan dinamika penting yang dipengaruhi oleh beberapa faktor fundamental, sentimen pasar, dan regulasi terkait. Terdapat peluang strategis yang dapat dioptimalkan dengan tetap mempertimbangkan mitigasi risiko secara terukur.`;
+                    }
+
+                    const sourcesMarkdown =
+                      researchSources.length > 0
+                        ? "\n\nSumber Terverifikasi:\n" +
+                          researchSources.map((s) => `- [${s.title}](${s.url})`).join("\n")
+                        : "";
+
+                    toolOutput = {
+                      status: "applied",
+                      query,
+                      expertPersona: expert.persona,
+                      fieldLabel: expert.fieldLabel,
+                      summary: researchSummary || `Riset untuk '${query}' telah dianalisis.`,
+                      sources: researchSources,
+                      instruction: `Hasil riset mendalam untuk '${query}' berhasil didapatkan.${
+                        researchSummary ? ` Temuan data riil: ${researchSummary.slice(0, 500)}...` : ""
+                      }${sourcesMarkdown} Sekarang kamu WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, berbasis data riil (bukan riset asal-asalan), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, risiko, dan rekomendasimu. Jangan lupa cantumkan sumber rujukan markdown [Judul](URL). Jika pengguna meminta dibuatkan dokumen, panggil tool create_document SEKALI saja sesuai format yang diminta; jika tidak meminta dokumen, kamu boleh tawarkan secara santai apakah mau dibuatkan laporannya.`,
+                    };
                   }
-
-                  // Sintesis analisis fallback jika endpoint jaringan lambat/kuota habis agar suara Celyn tetap berbobot
-                  if (!researchSummary) {
-                    researchSummary = `Berdasarkan analisis profesional di bidang ${expert.fieldLabel}, topik "${query}" menunjukkan dinamika penting yang dipengaruhi oleh beberapa faktor fundamental, sentimen pasar, dan regulasi terkait. Terdapat peluang strategis yang dapat dioptimalkan dengan tetap mempertimbangkan mitigasi risiko secara terukur.`;
-                  }
-
-                  const sourcesMarkdown =
-                    researchSources.length > 0
-                      ? "\n\nSumber Terverifikasi:\n" +
-                        researchSources.map((s) => `- [${s.title}](${s.url})`).join("\n")
-                      : "";
-
-                  toolOutput = {
-                    status: "applied",
-                    query,
-                    expertPersona: expert.persona,
-                    fieldLabel: expert.fieldLabel,
-                    summary: researchSummary || `Riset untuk '${query}' telah dianalisis.`,
-                    sources: researchSources,
-                    instruction: `Hasil riset mendalam untuk '${query}' berhasil didapatkan.${
-                      researchSummary ? ` Temuan data riil: ${researchSummary.slice(0, 500)}...` : ""
-                    }${sourcesMarkdown} Sekarang kamu WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, berbasis data riil (bukan riset asal-asalan), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, risiko, dan rekomendasimu. Jangan lupa cantumkan sumber rujukan markdown [Judul](URL). Terakhir, TAWARKAN SECARA PROAKTIF apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
-                  };
                 }
 
                 if (directSessionRef.current) {
@@ -1492,6 +1526,8 @@ export function useGeminiLive({
           const isSystemNotification = msg.text.startsWith("[INFO SISTEM]") || msg.text.startsWith("[SYSTEM]");
           if (!isSystemNotification) {
             recordTurnToServer("user", msg.text);
+            directDocCreatedThisTurnRef.current = false;
+            directResearchDoneThisTurnRef.current = false;
           }
 
           const userEmotion = inferUserEmotion(msg.text);
@@ -1607,12 +1643,16 @@ export function useGeminiLive({
 
   const generateDocument = useCallback(
     async (kind: DocumentKind, title: string, instruction: string, context?: string) => {
-      // Cegah pemanggilan ganda untuk permintaan yang sama (mis. dari dua jalur tool call)
+      // Cegah pemanggilan ganda untuk permintaan yang sama atau proses konkuren
       const genKey = `${kind}|${title}`;
       const nowTs = Date.now();
+      if (lastGenRef.current.running) {
+        console.warn("[generateDocument] Masih ada proses dokumen lain yang sedang berjalan, permintaan diabaikan:", genKey);
+        return;
+      }
       if (
         lastGenRef.current.key === genKey &&
-        (lastGenRef.current.running || nowTs - lastGenRef.current.at < 15000)
+        nowTs - lastGenRef.current.at < 15000
       ) {
         console.warn("[generateDocument] Permintaan ganda diabaikan:", genKey);
         return;

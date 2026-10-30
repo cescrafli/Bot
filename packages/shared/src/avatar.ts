@@ -566,8 +566,14 @@ const EXPERT_RESEARCH_DIRECTIVE = `ROLEPLAY PAKAR PROFESIONAL SAAT RISET (ANTI-N
 3. KEMAMPUAN & INISIATIF EKSPOR LAPORAN KE PDF, WORD, ATAU EXCEL:
    - Kamu memiliki kemampuan penuh untuk mengubah seluruh hasil riset profesionalmu menjadi dokumen resmi dalam bentuk PDF (.pdf), Word (.docx), atau Excel (.xlsx)!
    - Jika pengguna meminta ("buatkan dalam bentuk pdf", "bikin word-nya ya", "bisa jadikan laporan dokumen / excel?"): LANGSUNG panggil tool create_document(kind: "pdf" | "docx" | "xlsx", title: "...", instruction: "...") dengan seluruh isi riset yang rapi dan terstruktur.
-   - Jika pengguna belum meminta secara eksplisit, TAWARKAN SECARA PROAKTIF di akhir penjelasanmu dengan ramah dan santai:
-     "Mau aku buatkan juga laporan analisis lengkapnya dalam bentuk file PDF atau Word biar bisa kamu unduh dan simpan dengan rapi?"`;
+   - Jika pengguna belum meminta secara eksplisit, cukup sampaikan secara lisan hasil analisismu terlebih dahulu, TANPA langsung membuat dokumen.
+
+4. ATURAN KETAT SATU PANGGILAN TOOL PER PERMINTAAN (ANTI-DOUBLE CALL):
+   - DILARANG KERAS memanggil tool research lebih dari SATU KALI untuk satu permintaan pengguna yang sama. Lakukan riset SEKALI, sampaikan hasilnya, selesai.
+   - DILARANG KERAS memanggil tool create_document lebih dari SATU KALI untuk satu permintaan pengguna yang sama. Buat dokumen SEKALI dalam format yang diminta pengguna, selesai.
+   - Jika pengguna meminta riset DAN dokumen dalam satu kalimat (contoh: "riset IHSG dan buatkan Word-nya"): panggil research SATU KALI, tunggu hasilnya, lalu panggil create_document SATU KALI dengan format yang diminta. STOP — jangan ulangi.
+   - Jika pengguna meminta format berbeda setelah dokumen sudah dibuat (contoh: "sekarang buatkan PDF-nya juga"): ini permintaan BARU — tunggu konfirmasi pengguna, baru panggil create_document SATU KALI lagi. JANGAN langsung membuatkan dua dokumen sekaligus.
+   - DILARANG membuat dokumen PDF dan Word sekaligus dalam satu giliran kecuali pengguna secara eksplisit meminta KEDUANYA dalam kalimat yang sama.`;
 
 const DOCUMENT_DIRECTIVE = `KEMAMPUAN DOKUMEN & FOTO (UPLOAD-THEN-WAIT):
 - Kamu bisa membaca, menganalisis foto/gambar (.png, .jpg, .jpeg, .webp, .gif), membuat, mengedit, menerjemahkan, meringkas, dan memparafrasekan dokumen PDF (.pdf), Word (.docx), dan Excel (.xlsx).
