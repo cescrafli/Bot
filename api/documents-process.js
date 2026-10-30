@@ -40,6 +40,25 @@ function stripMd(text) {
     .trim();
 }
 
+function normalizeTableRow(row, headers) {
+  if (Array.isArray(row)) {
+    return headers.map((_, idx) => (row[idx] != null ? String(row[idx]) : ""));
+  }
+  if (row && typeof row === "object") {
+    return headers.map((h, idx) => {
+      if (row[h] != null) return String(row[h]);
+      const lowerH = String(h).toLowerCase().trim();
+      for (const [k, v] of Object.entries(row)) {
+        if (k.toLowerCase().trim() === lowerH) return String(v);
+      }
+      const vals = Object.values(row);
+      if (vals[idx] != null) return String(vals[idx]);
+      return "";
+    });
+  }
+  return headers.map(() => (row != null ? String(row) : ""));
+}
+
 async function createExcelBuffer(payload) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Celyn AI Bot";
@@ -170,13 +189,14 @@ async function createWordBuffer(payload) {
 
       const dataRows = (sec.table.rows || []).map((row, rIdx) => {
         const isEven = rIdx % 2 === 1;
+        const normalizedCells = normalizeTableRow(row, sec.table.headers);
         return new TableRow({
-          children: sec.table.headers.map(
-            (_, cIdx) =>
+          children: normalizedCells.map(
+            (cellVal) =>
               new TableCell({
                 children: [
                   new Paragraph({
-                    text: stripMd(row[cIdx] || ""),
+                    text: stripMd(cellVal),
                     alignment: AlignmentType.LEFT,
                   }),
                 ],
@@ -248,9 +268,10 @@ async function createPdfBuffer(payload) {
     }
     if (sec.table && sec.table.headers && sec.table.headers.length > 0) {
       const head = sec.table.headers.map((h) => ({ text: stripMd(h), style: "tableHeader" }));
-      const rows = (sec.table.rows || []).map((row) =>
-        sec.table.headers.map((_, i) => ({ text: stripMd(row[i] || ""), style: "tableCell" }))
-      );
+      const rows = (sec.table.rows || []).map((row) => {
+        const normalizedCells = normalizeTableRow(row, sec.table.headers);
+        return normalizedCells.map((cellVal) => ({ text: stripMd(cellVal), style: "tableCell" }));
+      });
       content.push({
         margin: [0, 8, 0, 14],
         table: {

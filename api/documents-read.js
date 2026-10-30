@@ -295,10 +295,10 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
                   },
                 },
                 {
-                  text: `Anda adalah asisten analisis visual dan OCR cerdas Celyn. Lakukan analisis foto/gambar '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
-1. EKSTRAKSI TEKS (OCR MENYELURUH): Transkripsikan SELURUH teks yang terlihat pada gambar dengan akurat (teks cetak, tulisan tangan, tabel, formulir, kuitansi, label, kode, atau dokumen scan). Pertahankan struktur aslinya (gunakan Markdown Table jika berupa tabel data).
-2. DESKRIPSI VISUAL & ELEMEN PENTING: Jelaskan konten visual gambar secara rinci (objek utama, diagram, grafik/chart, pola, konteks warna/layout, dan elemen visual penting).
-3. INTISARI KUNCI: Berikan ringkasan poin-poin utama dari isi foto/gambar ini.`,
+                  text: `Anda adalah asisten peneliti dan analis visual tingkat pakar Celyn. Lakukan pembacaan dan analisis mendalam terhadap foto/gambar '${fileName}' ini dengan ketelitian mikro:
+1. PEMBACAAN TEKS & ANGKA DETAIL (OCR PARIPURNA): Baca dan transkripsikan SELURUH teks, angka, simbol matematika/keuangan, satuan, label sumbu grafik, indikator teknikal, kode, dan detail kecil tanpa ada yang terlewat. Pertahankan struktur aslinya (sajikan dalam format Markdown Table jika berupa tabel data atau kisi matriks).
+2. DEKOMPOSISI VISUAL, GRAFIK & DIAGRAM: Bedah konten visual secara presisi (identifikasi jenis diagram/chart, arah tren garis/candlestick, level support/resistance, label perbandingan, diagram alur/arsitektur, atau skema konsep).
+3. SINTESIS RISET & KESIMPULAN BERDASARKAN GAMBAR: Formulasikan temuan visual menjadi data terstruktur dan ringkasan eksekutif yang siap digunakan langsung sebagai dasar riset komprehensif, perhitungan akurat, atau perumusan jawaban profesional.`,
                 },
               ],
             });

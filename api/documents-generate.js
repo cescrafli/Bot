@@ -81,6 +81,25 @@ function stripMd(text) {
     .trim();
 }
 
+function normalizeTableRow(row, headers) {
+  if (Array.isArray(row)) {
+    return headers.map((_, idx) => (row[idx] != null ? String(row[idx]) : ""));
+  }
+  if (row && typeof row === "object") {
+    return headers.map((h, idx) => {
+      if (row[h] != null) return String(row[h]);
+      const lowerH = String(h).toLowerCase().trim();
+      for (const [k, v] of Object.entries(row)) {
+        if (k.toLowerCase().trim() === lowerH) return String(v);
+      }
+      const vals = Object.values(row);
+      if (vals[idx] != null) return String(vals[idx]);
+      return "";
+    });
+  }
+  return headers.map(() => (row != null ? String(row) : ""));
+}
+
 async function createExcelBuffer(payload) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Celyn AI Bot";
@@ -257,9 +276,10 @@ async function createWordBuffer(payload) {
 
       const dataRows = (sec.table.rows || []).map((row, rIdx) => {
         const isEven = rIdx % 2 === 1;
+        const normalizedCells = normalizeTableRow(row, sec.table.headers);
         return new TableRow({
-          children: sec.table.headers.map((_, cIdx) => {
-            const cellText = stripMd(row[cIdx] || "");
+          children: normalizedCells.map((cellVal) => {
+            const cellText = stripMd(cellVal);
             return new TableCell({
               shading: isEven ? { fill: "F8FAFC" } : undefined,
               children: [
@@ -345,9 +365,10 @@ async function createPdfBuffer(payload) {
     }
     if (sec.table && sec.table.headers && sec.table.headers.length > 0) {
       const headers = sec.table.headers.map((h) => ({ text: stripMd(h), style: "tableHeader" }));
-      const rows = (sec.table.rows || []).map((r) =>
-        sec.table.headers.map((_, cIdx) => ({ text: stripMd(r[cIdx] || ""), style: "tableCell" }))
-      );
+      const rows = (sec.table.rows || []).map((r) => {
+        const normalizedCells = normalizeTableRow(r, sec.table.headers);
+        return normalizedCells.map((cellVal) => ({ text: stripMd(cellVal), style: "tableCell" }));
+      });
       content.push({
         margin: [0, 8, 0, 14],
         table: {
@@ -810,7 +831,7 @@ PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:
    - Kesimpulan Ahli
    - Sumber Referensi & Catatan Metodologi
 3. Setiap section harus memuat 1-2 paragraf padat-berbobot dan 2-3 temuan kunci (bulletPoints) tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
-4. TABEL DATA WAJIB DISERTAKAN: Sertakan minimal 1 objek "table" di bagian analisis/fakta kunci yang memuat data terstruktur dengan "headers" dan "rows" (misalnya: data pergerakan harian, perbandingan metrik kinerja saham/sektor, atau indikator finansial/teknikal).
+4. TABEL DATA WAJIB DISERTAKAN: Sertakan minimal 1 objek "table" di bagian analisis/fakta kunci yang memuat data terstruktur dengan "headers" dan "rows" (misalnya: data pergerakan harian, perbandingan metrik kinerja saham/sektor, atau indikator finansial/teknikal). Jika pengguna meminta chart atau grafik perkembangan (seperti perkembangan mingguan dari hari ke hari atau perbandingan saham), sajikan tabel matriks komprehensif harian dan perbandingan emiten sebagai representasi visual data yang terstruktur.
 
 KEMBALIKAN HANYA JSON DENGAN STRUKTUR BERIKUT:
 {

@@ -1140,9 +1140,13 @@ export function useGeminiLive({
                       fieldLabel: expert.fieldLabel,
                       summary: researchSummary || `Riset untuk '${query}' telah dianalisis.`,
                       sources: researchSources,
-                      instruction: `Hasil riset mendalam untuk '${query}' berhasil didapatkan.${
-                        researchSummary ? ` Temuan data riil: ${researchSummary.slice(0, 500)}...` : ""
-                      }${sourcesMarkdown} Sekarang kamu WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, berbasis data riil (bukan riset asal-asalan), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, risiko, dan rekomendasimu. Jangan lupa cantumkan sumber rujukan markdown [Judul](URL). Jika pengguna meminta dibuatkan dokumen, panggil tool create_document SEKALI saja sesuai format yang diminta; jika tidak meminta dokumen, kamu boleh tawarkan secara santai apakah mau dibuatkan laporannya.`,
+                      instruction: `Hasil riset komprehensif tingkat pakar untuk '${query}' berhasil didapatkan.${
+                        researchSummary ? `\nTemuan Riset Riil:\n${researchSummary.slice(0, 4000)}` : ""
+                      }${sourcesMarkdown}\n\nSekarang kamu WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Terapkan 7 Ketentuan Emas Peneliti Teliti Celyn:
+1. Sampaikan hasil riset secara mendalam, berbasis data numerik riil, tajam, dan terstruktur.
+2. Jelaskan poin-poin pentingnya dengan runtut dalam bahasa yang mudah dipahami.
+3. Sebutkan sumber rujukan tepercaya dengan format markdown [Judul](URL).
+4. Jika pengguna meminta dokumen atau grafik/chart (misal Word/PDF mingguan atau harian), panggil tool create_document SEKALI saja dengan instruksi lengkap untuk menyertakan tabel data perkembangan harian dan perbandingan emiten/indikator; jika belum meminta, tawarkan secara santai.`,
                     };
                   }
                 }

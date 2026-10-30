@@ -2441,6 +2441,62 @@ async function runTtsTests() {
     "api/health.js mengembalikan informasi timestampWib dan zona waktu Asia/Jakarta"
   );
 
+  // --- SECTION 37: Peneliti Teliti & Komprehensif (7 Ketentuan Emas Riset & Visual) ---
+  console.log("\n🧪 --- SECTION 37: Peneliti Teliti & Komprehensif (7 Ketentuan Emas Riset & Visual) ---");
+
+  // A. avatar.ts memuat 7 Ketentuan Emas Peneliti Teliti Celyn
+  assert(
+    promptNow.includes("Riset Mendalam") &&
+      promptNow.includes("Banyak Sumber Terpercaya") &&
+      promptNow.includes("Rangkuman & Penjelasan Runtut") &&
+      promptNow.includes("Representasi Visual, Diagram & Chart") &&
+      promptNow.includes("Input Gambar & Analisis Detail") &&
+      promptNow.includes("Olah & Edit Gambar") &&
+      promptNow.includes("Kualitas Tanpa Kompromi"),
+    "buildCelynSystemPrompt memuat 7 Ketentuan Emas Peneliti Teliti & Komprehensif secara utuh"
+  );
+
+  // B. avatar.ts menginstruksikan pembuatan dokumen kaya tabel perkembangan harian & saham saat diminta chart
+  assert(
+    avatarCode.includes("perkembangan harian") &&
+      avatarCode.includes("perbandingan per saham"),
+    "avatar.ts menginstruksikan pembuatan dokumen dengan tabel perkembangan harian & saham saat diminta chart"
+  );
+
+  // C. api/research.js memiliki maxDuration: 60 dan ekstraksi deduplikasi tautan sumber
+  const updatedResearchCode = fs.readFileSync(path.resolve(process.cwd(), "api/research.js"), "utf8");
+  assert(
+    updatedResearchCode.includes("maxDuration: 60") &&
+      updatedResearchCode.includes("seenUrls") &&
+      updatedResearchCode.includes("mdLinkRegex"),
+    "api/research.js mengonfigurasi maxDuration: 60 dan ekstraksi tautan sumber komprehensif"
+  );
+
+  // D. api/documents-generate.js memiliki helper normalizeTableRow untuk ketahanan tabel Word & PDF
+  const updatedGenerateCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-generate.js"), "utf8");
+  assert(
+    updatedGenerateCode.includes("function normalizeTableRow") &&
+      updatedGenerateCode.includes("normalizedCells"),
+    "api/documents-generate.js memiliki helper normalizeTableRow untuk perlindungan rendering tabel"
+  );
+
+  // E. api/documents-read.js memuat prompt vision OCR mikro untuk teks, angka, dan detail grafik
+  const updatedReadCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-read.js"), "utf8");
+  assert(
+    updatedReadCode.includes("PEMBACAAN TEKS & ANGKA DETAIL") &&
+      updatedReadCode.includes("DEKOMPOSISI VISUAL, GRAFIK & DIAGRAM") &&
+      updatedReadCode.includes("SINTESIS RISET"),
+    "api/documents-read.js memuat prompt OCR Vision mikro untuk pembacaan teks, angka, dan detail grafik"
+  );
+
+  // F. useGeminiLive.ts menyuntikkan data riset kaya (hingga 4000 karakter) ke konteks Live
+  const updatedLiveCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"), "utf8");
+  assert(
+    updatedLiveCode.includes("researchSummary.slice(0, 4000)") &&
+      updatedLiveCode.includes("7 Ketentuan Emas Peneliti Teliti Celyn"),
+    "useGeminiLive.ts menyuntikkan data riset kaya hingga 4000 karakter dan 7 Ketentuan Emas ke sesi Live"
+  );
+
   // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);
