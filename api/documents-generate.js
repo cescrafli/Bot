@@ -704,6 +704,17 @@ export default async function handler(req, res) {
     const model = process.env.DOC_GENERATE_MODEL || "gemini-3.8-flash";
     const expert = inferExpertPersona(`${title} ${instruction}`);
 
+    const wibDateStr = new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Jakarta",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date());
+
     // Pangkas konteks jika sangat besar (> 1.200.000 karakter) agar aman dalam batas token Gemini & memori Vercel
     let safeContext = context ? String(context) : "";
     if (safeContext.length > 1200000) {
@@ -718,6 +729,7 @@ Tugas Anda: Membuat lembar kerja Excel (XLSX) profesional tingkat tinggi yang ra
 Judul Dokumen/Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
 Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
+Waktu Acuan (WIB / Jakarta, UTC+7): ${wibDateStr} WIB
 ${safeContext ? `Konteks/Data Acuan:\n${safeContext}` : ""}
 
 PANDUAN RISET & DESAIN EXCEL TINGKAT AHLI:
@@ -785,6 +797,7 @@ Tugas Anda: Menyusun ${docTypeLabel} profesional tingkat tinggi (High-Caliber Pr
 Judul Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
 Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
+Waktu Acuan (WIB / Jakarta, UTC+7): ${wibDateStr} WIB
 ${safeContext ? `Konteks/Materi Acuan:\n${safeContext}` : ""}
 
 PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:

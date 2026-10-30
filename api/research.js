@@ -157,11 +157,24 @@ export default async function handler(req, res) {
   const fallbackModel = "gemini-3-flash-preview";
   const uniqueModels = [primaryModel, fallbackModel].filter(Boolean);
 
+  const wibDateStr = new Intl.DateTimeFormat("id-ID", {
+    timeZone: "Asia/Jakarta",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+
   const promptText = `Anda adalah ${expert.persona}.
 Sajikan laporan riset eksekutif tingkat pakar yang mendalam, berbasis data riil, tajam, dan terstruktur untuk topik berikut:
 Topik/Pertanyaan: "${query}"
 Bidang Keahlian: ${expert.fieldLabel}
+Waktu Acuan Riset (WIB / Jakarta, UTC+7): ${wibDateStr} WIB
 Panduan Analisis: ${expert.promptGuide}
+PENTING ZONA WAKTU: Gunakan waktu acuan Jakarta (WIB, UTC+7) di atas sebagai patokan resmi hari, tanggal, dan rentang "minggu ini". JANGAN PERNAH mengikuti waktu UTC server.
 
 FORMAT LAPORAN RISET EKSEKUTIF (300-450 kata, padat-berbobot, langsung pada inti):
 ## Ringkasan Eksekutif

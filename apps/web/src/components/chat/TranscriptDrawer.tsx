@@ -38,7 +38,8 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `celyn-chat-${new Date().toISOString().slice(0, 10)}.txt`;
+    const dateStr = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Jakarta" }).format(new Date());
+    a.download = `celyn-chat-${dateStr}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };

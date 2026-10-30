@@ -636,51 +636,63 @@ const MEMORY_DIRECTIVE = `PENGINGAT & MEMORI JANGKA PANJANG (FILTER CERDAS & SUM
    - Saat pengguna bertanya: "tadi kita bahas apa?", "kamu ingat nggak aku cerita apa barusan?", "tadi aku lagi ngerjain apa?", atau me-recall obrolan sebelumnya:
      Kamu WAJIB LANGSUNG MENJAWAB dengan detail, hangat, akrab, dan tepat sasaran berdasarkan catatan memori dan riwayat percakapan yang kamu pegang!`;
 
-/**
- * Membangun instruksi sistem Celyn secara terisolasi dan aman.
- * Catatan privasi: Seluruh kisah latar belakang pribadi pencipta
- * tersimpan di Turso Cloud Database dan hanya disuntikkan lewat memoryContext
- * pada server terotentikasi, sehingga 0 byte kisah pribadi tersimpan di bundle publik browser.
- */
-export function buildCelynSystemPrompt(
-  authMode: AuthMode = "default",
-  memoryContext?: string
-): string {
-  const isJocelyn = authMode === "jocelyn";
-  const base = [
-    PERSONA,
-    IDENTITY_DEFAULT,
-    CONVERSATION,
-    VOICE_DELIVERY,
-    LISTENING,
-    EMPATHY,
-    SCREEN,
-    BOUNDARIES,
-    DOCUMENT_DIRECTIVE,
-    KNOWLEDGE_UNCERTAINTY_DIRECTIVE,
-    EXPERT_RESEARCH_DIRECTIVE,
-    MEMORY_DIRECTIVE,
-    RHYTHM_DEFAULT,
-    EXAMPLES,
-    TOOLS,
-  ].join("\n\n");
+/* ------------------------------------------------------------------ */
+/* ZONA WAKTU & ACUAN WAKTU JAKARTA (WIB, UTC+7)                      */
+/* ------------------------------------------------------------------ */
 
-  // Memori & Kisah Privat Turso Cloud HANYA disematkan jika mode adalah 'jocelyn' (admin)
-  // Untuk mode 'default' (login), memori tidak pernah disematkan (zero leak)
-  if (isJocelyn && memoryContext && memoryContext.trim().length > 0) {
-    return `${base}\n\n${memoryContext.trim()}`;
-  }
-  return base;
+/** Zona waktu bawaan. Seluruh sistem Celyn beroperasi dalam Waktu Indonesia Barat (WIB, Asia/Jakarta, UTC+7). */
+export const DEFAULT_TIME_ZONE = "Asia/Jakarta";
+
+function getWibHourFallback(date: Date): number {
+  // Selalu hitung dari UTC + 7 jam (WIB, Asia/Jakarta) agar tidak terpengaruh zona waktu server UTC
+  const utcHours = date.getUTCHours();
+  return (utcHours + 7) % 24;
 }
 
-export const CELYN_SYSTEM_PROMPT = buildCelynSystemPrompt("default");
+export function getHourInZone(date: Date, timeZone: string = DEFAULT_TIME_ZONE): number {
+  try {
+    const formatted = new Intl.DateTimeFormat("en-GB", {
+      hour: "numeric",
+      hourCycle: "h23",
+      timeZone,
+    }).format(date);
+    const hour = parseInt(formatted, 10);
+    return Number.isNaN(hour) ? getWibHourFallback(date) : hour % 24;
+  } catch {
+    return getWibHourFallback(date);
+  }
+}
 
-/* ------------------------------------------------------------------ */
-/* SAPAAN PEMBUKA                                                      */
-/* ------------------------------------------------------------------ */
+export type TimeOfDay = "pagi" | "siang" | "sore" | "malam" | "larut malam";
 
-/** Zona waktu bawaan. Penting kalau kode jalan di server (UTC) tapi penggunanya di Indonesia. */
-export const DEFAULT_TIME_ZONE = "Asia/Jakarta";
+export function getTimeOfDay(hour: number): TimeOfDay {
+  if (hour >= 4 && hour < 11) return "pagi";
+  if (hour >= 11 && hour < 15) return "siang";
+  if (hour >= 15 && hour < 18) return "sore";
+  if (hour >= 18 && hour < 23) return "malam";
+  return "larut malam";
+}
+
+/** Format tanggal & waktu lengkap Bahasa Indonesia untuk Waktu Indonesia Barat (WIB / Asia/Jakarta) */
+export function getWibFormattedString(date: Date = new Date()): string {
+  try {
+    const formatted = new Intl.DateTimeFormat("id-ID", {
+      timeZone: DEFAULT_TIME_ZONE,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).format(date);
+    return `${formatted} WIB`;
+  } catch {
+    const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    return `${wib.toISOString().slice(0, 19).replace("T", " ")} WIB`;
+  }
+}
 
 /** Format waktu lokal Indonesia Barat (WIB, Asia/Jakarta, UTC+7) dalam format 'YYYY-MM-DD HH:MM:SS' */
 export function getWibTimestamp(date: Date = new Date()): string {
@@ -701,29 +713,62 @@ export function getWibTimestamp(date: Date = new Date()): string {
   }
 }
 
-function getHourInZone(date: Date, timeZone: string): number {
-  try {
-    const formatted = new Intl.DateTimeFormat("en-GB", {
-      hour: "numeric",
-      hourCycle: "h23",
-      timeZone,
-    }).format(date);
-    const hour = parseInt(formatted, 10);
-    return Number.isNaN(hour) ? date.getHours() : hour % 24;
-  } catch {
-    return date.getHours();
+export function buildTimeDirective(date: Date = new Date()): string {
+  const timeStr = getWibFormattedString(date);
+  const hour = getHourInZone(date, DEFAULT_TIME_ZONE);
+  const timeOfDay = getTimeOfDay(hour);
+  return `ACUAN WAKTU & ZONA WAKTU RESMI (100% WAKTU JAKARTA / WIB, UTC+7):
+- Seluruh acuan waktu, jam, hari, dan tanggal dalam percakapan WAJIB 100% mengikuti Waktu Indonesia Barat (WIB, zona waktu Jakarta / Asia/Jakarta, UTC+7).
+- DILARANG KERAS menggunakan atau merujuk ke waktu UTC, GMT, atau zona waktu server luar negeri. Di mana pun server berjalan, kamu HANYA hidup dan berinteraksi dalam waktu Jakarta (WIB).
+- Waktu saat ini di Jakarta: ${timeStr} (suasana ${timeOfDay}).
+- Jika pengguna bertanya tentang waktu saat ini ("sekarang jam berapa?", "hari ini hari apa?", "tanggal berapa sekarang?"), sebutkan waktu Jakarta ini dengan luwes dan natural dalam Bahasa Indonesia.`;
+}
+
+/**
+ * Membangun instruksi sistem Celyn secara terisolasi dan aman.
+ * Catatan privasi: Seluruh kisah latar belakang pribadi pencipta
+ * tersimpan di Turso Cloud Database dan hanya disuntikkan lewat memoryContext
+ * pada server terotentikasi, sehingga 0 byte kisah pribadi tersimpan di bundle publik browser.
+ */
+export function buildCelynSystemPrompt(
+  authMode: AuthMode = "default",
+  memoryContext?: string,
+  now: Date = new Date()
+): string {
+  const isJocelyn = authMode === "jocelyn";
+  const timeDirective = buildTimeDirective(now);
+  const base = [
+    PERSONA,
+    IDENTITY_DEFAULT,
+    CONVERSATION,
+    VOICE_DELIVERY,
+    LISTENING,
+    EMPATHY,
+    SCREEN,
+    BOUNDARIES,
+    DOCUMENT_DIRECTIVE,
+    KNOWLEDGE_UNCERTAINTY_DIRECTIVE,
+    EXPERT_RESEARCH_DIRECTIVE,
+    timeDirective,
+    MEMORY_DIRECTIVE,
+    RHYTHM_DEFAULT,
+    EXAMPLES,
+    TOOLS,
+  ].join("\n\n");
+
+  // Memori & Kisah Privat Turso Cloud HANYA disematkan jika mode adalah 'jocelyn' (admin)
+  // Untuk mode 'default' (login), memori tidak pernah disematkan (zero leak)
+  if (isJocelyn && memoryContext && memoryContext.trim().length > 0) {
+    return `${base}\n\n${memoryContext.trim()}`;
   }
+  return base;
 }
 
-type TimeOfDay = "pagi" | "siang" | "sore" | "malam" | "larut malam";
+export const CELYN_SYSTEM_PROMPT = buildCelynSystemPrompt("default");
 
-function getTimeOfDay(hour: number): TimeOfDay {
-  if (hour >= 4 && hour < 11) return "pagi";
-  if (hour >= 11 && hour < 15) return "siang";
-  if (hour >= 15 && hour < 18) return "sore";
-  if (hour >= 18 && hour < 23) return "malam";
-  return "larut malam";
-}
+/* ------------------------------------------------------------------ */
+/* SAPAAN PEMBUKA                                                      */
+/* ------------------------------------------------------------------ */
 
 const GREETING_SAMPLES: Record<TimeOfDay, readonly string[]> = {
   pagi: [

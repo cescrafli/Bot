@@ -275,10 +275,12 @@ export function useGeminiLive({
         setStatus("listening");
         onInterrupted();
       } else if (msg.type === "transcript") {
-        const time = new Date().toLocaleTimeString([], {
+        const time = new Intl.DateTimeFormat("id-ID", {
+          timeZone: "Asia/Jakarta",
           hour: "2-digit",
           minute: "2-digit",
-        });
+          hourCycle: "h23",
+        }).format(new Date());
         const cleanMsgText = stripVoiceMetadataTags(msg.text);
         if (!cleanMsgText && msg.speaker === "celyn") {
           return;
@@ -1618,10 +1620,12 @@ export function useGeminiLive({
       setStatus("thinking");
       setStatusMessage("Celyn sedang menyimak & merangkai jawaban...");
 
-      const time = new Date().toLocaleTimeString([], {
+      const time = new Intl.DateTimeFormat("id-ID", {
+        timeZone: "Asia/Jakarta",
         hour: "2-digit",
         minute: "2-digit",
-      });
+        hourCycle: "h23",
+      }).format(new Date());
       setTranscripts((prev) => [
         ...prev.slice(-99),
         { speaker: "user", text, time },

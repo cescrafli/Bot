@@ -138,10 +138,22 @@ export default async function handler(req, res) {
     }
   }
 
+  const wibTime = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date()).replace("T", " ");
+
   return res.status(200).json({
     status: "ok",
     service: "Celyn AI Bot Vercel Serverless",
     timestamp: new Date().toISOString(),
+    timestampWib: `${wibTime} WIB`,
+    timeZone: "Asia/Jakarta",
     environment: {
       aiConfigured: hasGeminiKey,
       tursoConfigured: hasTursoUrl && hasTursoToken,

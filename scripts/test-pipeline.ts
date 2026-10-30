@@ -47,6 +47,8 @@ import {
   stripVoiceMetadataTags,
   buildDocumentChunkPrompt,
   inferExpertPersona,
+  getWibTimestamp,
+  getWibFormattedString,
 } from "@celyn/shared";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -2383,6 +2385,60 @@ async function runTtsTests() {
     freshGenerateCode.includes("timeoutMs = modelToTry === \"gemini-3.8-flash\" ? 6000 : 14000") &&
       freshResearchCode.includes("timeoutMs = modelName === \"gemini-3.8-flash\" ? 6000 : 12000"),
     "api/documents-generate.js dan api/research.js menerapkan timeout cepat 6 detik pada model primer untuk mencegah starving"
+  );
+
+  // --- SECTION 36: Standarisasi Waktu Resmi Indonesia Barat (WIB / Asia/Jakarta, UTC+7) ---
+  console.log("\n🧪 --- SECTION 36: Standarisasi Waktu Resmi Indonesia Barat (WIB / Asia/Jakarta, UTC+7) ---");
+
+  // A. System prompt Celyn memuat direktif acuan waktu resmi Jakarta / WIB dan melarang UTC
+  const promptNow = buildCelynSystemPrompt("default");
+  assert(
+    promptNow.includes("ACUAN WAKTU & ZONA WAKTU RESMI (100% WAKTU JAKARTA / WIB, UTC+7)") &&
+      promptNow.includes("DILARANG KERAS menggunakan atau merujuk ke waktu UTC") &&
+      promptNow.includes("WIB"),
+    "buildCelynSystemPrompt menyuntikkan direktif waktu resmi Jakarta (WIB, UTC+7) dan melarang UTC"
+  );
+
+  // B. getWibFormattedString menghasilkan format Bahasa Indonesia dengan akhiran WIB
+  const formattedWib = getWibFormattedString(new Date());
+  assert(
+    formattedWib.endsWith("WIB") &&
+      !formattedWib.includes("UTC") &&
+      formattedWib.length > 10,
+    `getWibFormattedString menghasilkan format waktu Jakarta yang valid (${formattedWib})`
+  );
+
+  // C. getWibTimestamp menghasilkan format YYYY-MM-DD HH:MM:SS
+  const wibStamp = getWibTimestamp(new Date());
+  assert(
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(wibStamp),
+    `getWibTimestamp menghasilkan format 'YYYY-MM-DD HH:MM:SS' presisi (${wibStamp})`
+  );
+
+  // D. useGeminiLive.ts memformat transkrip menggunakan zona waktu Asia/Jakarta
+  assert(
+    freshLiveCode.includes('timeZone: "Asia/Jakarta"') &&
+      freshLiveCode.includes('hourCycle: "h23"'),
+    "apps/web/src/hooks/useGeminiLive.ts memformat bubble chat transkrip dengan zona waktu Asia/Jakarta (24 jam)"
+  );
+
+  // E. api/research.js dan api/documents-generate.js menyertakan acuan waktu WIB dalam prompt AI
+  assert(
+    freshResearchCode.includes('timeZone: "Asia/Jakarta"') &&
+      freshResearchCode.includes("Waktu Acuan Riset (WIB / Jakarta, UTC+7)"),
+    "api/research.js menyuntikkan acuan waktu Jakarta (WIB) ke dalam prompt riset pakar"
+  );
+  assert(
+    freshGenerateCode.includes('timeZone: "Asia/Jakarta"') &&
+      freshGenerateCode.includes("Waktu Acuan (WIB / Jakarta, UTC+7)"),
+    "api/documents-generate.js menyuntikkan acuan waktu Jakarta (WIB) ke dalam prompt dokumen"
+  );
+
+  // F. api/health.js menyediakan timestampWib dan zona waktu Asia/Jakarta
+  const freshHealthCode = fs.readFileSync(path.resolve(process.cwd(), "api/health.js"), "utf8");
+  assert(
+    freshHealthCode.includes('timeZone: "Asia/Jakarta"') && freshHealthCode.includes("timestampWib"),
+    "api/health.js mengembalikan informasi timestampWib dan zona waktu Asia/Jakarta"
   );
 
   // Ringkasan
