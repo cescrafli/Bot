@@ -149,14 +149,14 @@ export const CELYN_CORE_TOOLS: ToolDeclaration[] = [
   {
     name: "edit_image",
     description:
-      "Edit, manipulasi, ubah latar belakang, tambahkan objek di belakang subjek, atau kontrol tampilan foto di layar sesuai perintah pengguna (seperti: 'tambah pohon di belakangnya', 'ubah warna latar belakang jadi biru/merah', 'putar 90 derajat', 'crop 1:1', 'tolong hide foto', 'tampilkan kembali fotonya', 'kembalikan ke foto asli').",
+      "Edit, manipulasi, ubah warna bagian spesifik foto (seperti warna rambut, warna pakaian/jas, dasi, objek), ubah latar belakang, tambahkan objek di belakang subjek, atau kontrol tampilan foto di layar sesuai perintah pengguna (seperti: 'cat rambutnya jadi warna putih/merah/hitam', 'ubah warna rambut jadi putih semuanya', 'rambutnya doang yang dicat putih', 'tambah pohon di belakangnya', 'ubah warna latar belakang jadi biru/merah', 'putar 90 derajat', 'crop 1:1', 'tolong hide foto', 'tampilkan kembali fotonya', 'kembalikan ke foto asli').",
     parameters: {
       type: "OBJECT",
       properties: {
         action: {
           type: "STRING",
           description:
-            "Aksi pengeditan: 'add_object' (tambah pohon/benda di belakang subjek), 'replace_background' (ganti suasana/latar belakang), 'background_color' (ganti warna latar belakang polos misal biru/merah), 'transform' (putar, crop, filter hitam-putih, watermark), 'hide' (sembunyikan foto dari layar), 'show' (tampilkan foto di layar), atau 'reset' (kembalikan ke foto asli)",
+            "Aksi pengeditan: 'recolor_part' (ubah warna bagian spesifik seperti rambut, baju, jas, objek tanpa merusak latar belakang), 'add_object' (tambah pohon/benda di belakang subjek), 'replace_background' (ganti suasana/latar belakang), 'background_color' (ganti warna latar belakang polos misal biru/merah), 'transform' (putar, crop, filter hitam-putih, watermark), 'hide' (sembunyikan foto dari layar), 'show' (tampilkan foto di layar), atau 'reset' (kembalikan ke foto asli)",
         },
         instruction: {
           type: "STRING",

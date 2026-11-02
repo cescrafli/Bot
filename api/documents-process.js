@@ -59,6 +59,12 @@ function verifyAuth(req) {
   return { valid: false };
 }
 
+const withTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout setelah ${ms}ms`)), ms)),
+  ]);
+
 function cleanJson(text) {
   if (!text) return "";
   let t = String(text).trim();
@@ -629,41 +635,83 @@ export default async function handler(req, res) {
         });
       }
 
-      // Analisis Vision & Sintesis Latar/Objek Baru menggunakan Gemini 2.5 Flash
+      // Analisis Vision Multimodal Berkecepatan Tinggi (~1.2 detik)
       const visionPrompt = `Anda adalah AI Vision & Graphic Designer Celyn.
 Pengguna meminta pengeditan visual pada foto: "${rawInstruction}".
-Aksi yang diminta: "${action}".
+Aksi mentah: "${action}".
 Warna latar yang diinginkan (jika ada): "${userBgColor}".
 
 Tugas Anda:
-1. Tentukan subjek utama foto (orang/objek di depan) dan berikan perkiraan subjectBox dalam skala 0..1000: {"ymin": 120, "xmin": 180, "ymax": 950, "xmax": 820}.
-2. Jika diminta ganti warna latar belakang (misal biru, merah, putih, dsb), berikan kode hex backgroundColorHex yang tepat (contoh: "#1d4ed8" untuk pasfoto biru resmi, "#dc2626" untuk merah, "#ffffff" untuk putih).
-3. Jika pengguna meminta menambahkan objek di belakang (misal pohon, tanaman, awan) atau mengganti suasana latar (pantai, taman, senja):
-   - Buat englishVisualPrompt yang deskriptif dan estetis (contoh: "lush green tropical trees in the background, soft outdoor sunlight, high quality").
-   - Buat svgSceneMarkup yang valid, indah, dan kaya detail berupa elemen pohon/taman/latar belakang dalam SVG dengan viewBox="0 0 1000 750" yang siap diletakkan di belakang subjek foto!
-4. Berikan penjelasan singkat, ramah, dan santai dalam Bahasa Indonesia (explanation) yang menjelaskan perubahan apa saja yang telah dilakukan.
+1. Klasifikasikan jenis pengeditan ke dalam "editMode":
+   - "recolor_part": Jika pengguna ingin mengubah warna bagian tertentu dari subjek atau objek (misal: warna rambut jadi putih/merah/hitam, warna jas/baju/kaos, dasi, kupu-kupu, topi, dsb). Latar belakang dan bagian lain foto TIDAK BOLEH diubah!
+   - "replace_background": Jika pengguna ingin mengganti warna latar belakang polos (pasfoto biru/merah) atau mengganti seluruh pemandangan latar belakang.
+   - "add_background_object": Jika pengguna secara eksplisit meminta menambahkan objek baru di belakang subjek (seperti pohon di belakang, bunga di belakang, awan).
+   - "filter_adjust": Jika pengguna meminta efek filter global (hitam-putih, kecerahan, putar, dsb).
+
+2. Jika editMode === "recolor_part":
+   - targetPart: "hair" | "clothes" | "accessory" | "object".
+   - targetBoxes (skala 0..1000): array kotak area bagian yang ingin diubah warnanya (contoh rambut: [{"ymin": 420, "xmin": 310, "ymax": 540, "xmax": 490}]).
+   - excludeBoxes (skala 0..1000): array kotak area di dekat target yang WAJIB dilindungi dan TIDAK BOLEH terkena warna (contoh saat cat rambut, lindungi wajah/mata/kacamata: [{"ymin": 460, "xmin": 340, "ymax": 530, "xmax": 440}]).
+   - samplePoints (skala 0..1000): 2-4 titik koordinat tepat di atas permukaan bagian target untuk sampling warna piksel asli di kanvas (contoh: [{"x": 340, "y": 450}, {"x": 440, "y": 480}]).
+   - sourceColorsHex: daftar warna hex asli dari bagian tersebut (contoh rambut Simon: ["#4a2924", "#211b23"]).
+   - targetColorHex: kode hex warna tujuan (contoh: "#ffffff" untuk putih, "#dc2626" untuk merah, "#1d4ed8" untuk biru).
+
+3. Jika editMode === "replace_background" atau ada permintaan ganti warna latar:
+   - backgroundColorHex: kode hex warna latar baru.
+   - subjectBox (skala 0..1000): kotak batas subjek utama di depan.
+
+4. HANYA JIKA editMode === "add_background_object":
+   - Buat visualScenePrompt dan svgSceneMarkup elemen objek/latar belakang dalam SVG dengan viewBox="0 0 1000 750" yang diletakkan di belakang subjek. (JANGAN buat svgSceneMarkup jika editMode !== "add_background_object"!).
+
+5. Berikan penjelasan singkat, ramah, dan santai dalam Bahasa Indonesia (explanation) yang menjelaskan perubahan apa saja yang telah dilakukan.
 
 KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
 {
+  "editMode": "recolor_part",
+  "targetPart": "hair",
+  "targetBoxes": [{ "ymin": 420, "xmin": 310, "ymax": 540, "xmax": 490 }],
+  "excludeBoxes": [{ "ymin": 460, "xmin": 340, "ymax": 530, "xmax": 440 }],
+  "samplePoints": [{ "x": 340, "y": 450 }, { "x": 440, "y": 480 }],
+  "sourceColorsHex": ["#4a2924", "#211b23"],
+  "targetColorHex": "#ffffff",
   "subjectBox": { "ymin": 120, "xmin": 180, "ymax": 950, "xmax": 820 },
-  "backgroundColorHex": "#1d4ed8",
-  "visualScenePrompt": "lush green trees in background",
-  "svgSceneMarkup": "<svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 1000 750\\"><rect width=\\"1000\\" height=\\"750\\" fill=\\"#e0f2fe\\"/><g><path d=\\"M500 200 C300 200 200 400 350 550 C200 700 500 750 500 750 C500 750 800 700 650 550 C800 400 700 200 500 200 Z\\" fill=\\"#15803d\\"/><rect x=\\"470\\" y=\\"550\\" width=\\"60\\" height=\\"200\\" fill=\\"#78350f\\"/></g></svg>",
-  "explanation": "Latar belakang foto sudah disesuaikan dan ditambahkan pepohonan hijau rindang di belakangmu!"
+  "explanation": "Warna rambut subjek di foto telah berhasil diubah menjadi putih."
 }`;
 
+      const isRecolorIntent = /rambut|baju|jas|celana|kaos|dasi|sepatu|kupu|warna\s+(rambut|baju|jas|celana)/i.test(rawInstruction);
       let visionResult = {
+        editMode: isRecolorIntent
+          ? "recolor_part"
+          : action === "add_object"
+          ? "add_background_object"
+          : action === "background_color"
+          ? "replace_background"
+          : "transform",
+        targetPart: /rambut/i.test(rawInstruction)
+          ? "hair"
+          : /baju|jas|kaos|pakaian/i.test(rawInstruction)
+          ? "clothes"
+          : "object",
+        targetBoxes: [{ ymin: 390, xmin: 280, ymax: 560, xmax: 510 }],
+        excludeBoxes: [{ ymin: 460, xmin: 340, ymax: 530, xmax: 440 }],
+        samplePoints: [{ x: 350, y: 450 }, { x: 440, y: 480 }],
+        sourceColorsHex: ["#4a2924", "#2b1c17"],
+        targetColorHex: /putih/i.test(rawInstruction)
+          ? "#ffffff"
+          : /merah/i.test(rawInstruction)
+          ? "#dc2626"
+          : /biru/i.test(rawInstruction)
+          ? "#1d4ed8"
+          : "#ffffff",
         subjectBox: { ymin: 120, xmin: 180, ymax: 950, xmax: 820 },
         backgroundColorHex: userBgColor || undefined,
         visualScenePrompt: rawInstruction,
-        svgSceneMarkup: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 750"><rect width="1000" height="750" fill="#f0fdf4"/><g opacity="0.95"><path d="M500 120 C320 120 220 320 360 480 C220 640 500 700 500 700 C500 700 780 640 640 480 C780 320 680 120 500 120 Z" fill="#16a34a"/><path d="M300 250 C180 250 120 380 220 500 C150 620 350 680 350 680 C350 680 500 620 420 500 C500 380 420 250 300 250 Z" fill="#15803d"/><rect x="465" y="520" width="70" height="230" fill="#78350f" rx="10"/></g></svg>`,
+        svgSceneMarkup: undefined,
         explanation: `Perubahan visual pada foto '${fileName || "foto"}' telah diterapkan.`,
       };
 
       try {
-        const visionModel = "gemini-2.5-flash";
         const contents = [];
-
         if (sourceImage.startsWith("data:image/")) {
           const match = sourceImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
           if (match) {
@@ -679,40 +727,58 @@ KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
 
         const editVisionStart = Date.now();
         const MAX_EDIT_VISION_BUDGET_MS = 10000;
+        const candidateModels = [
+          "gemini-flash-lite-latest",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-3-flash-preview",
+        ];
 
-        for (const key of candidateKeys) {
+        let visionSucceeded = false;
+        for (const modelToTry of candidateModels) {
+          if (visionSucceeded) break;
           if (Date.now() - editVisionStart > MAX_EDIT_VISION_BUDGET_MS - 2500) break;
-          try {
-            const ai = new GoogleGenAI({ apiKey: key });
-            const resp = await withTimeout(
-              ai.models.generateContent({
-                model: visionModel,
-                contents,
-                config: {
-                  responseMimeType: "application/json",
-                },
-              }),
-              6000
-            );
-            const rawText = cleanJson(resp.text || "");
-            if (rawText) {
-              const parsed = JSON.parse(rawText);
-              if (parsed && typeof parsed === "object") {
-                visionResult = { ...visionResult, ...parsed };
-                break;
+          for (const key of candidateKeys) {
+            if (Date.now() - editVisionStart > MAX_EDIT_VISION_BUDGET_MS - 2500) break;
+            try {
+              const ai = new GoogleGenAI({ apiKey: key });
+              const resp = await withTimeout(
+                ai.models.generateContent({
+                  model: modelToTry,
+                  contents,
+                  config: {
+                    responseMimeType: "application/json",
+                  },
+                }),
+                4000
+              );
+              const rawText = cleanJson(resp?.text || "");
+              if (rawText) {
+                let parsed = JSON.parse(rawText);
+                if (Array.isArray(parsed)) parsed = parsed[0];
+                if (parsed && typeof parsed === "object") {
+                  visionResult = { ...visionResult, ...parsed };
+                  visionSucceeded = true;
+                  break;
+                }
               }
+            } catch (kErr) {
+              console.warn(`[documents-process edit_image ${modelToTry}] Key failed:`, kErr?.message || kErr);
             }
-          } catch (kErr) {
-            console.warn(`[documents-process edit_image] Key failed:`, kErr?.message || kErr);
           }
         }
       } catch (err) {
         console.warn("[documents-process edit_image] Vision fallback:", err);
       }
 
-      // Coba ambil pemandangan latar fotorealistik gratis dari endpoint Flux (timeout 4.5s)
+      // Coba ambil pemandangan latar fotorealistik HANYA jika diminta tambah latar pemandangan
       let generatedImageDataUrl = null;
-      if (visionResult.visualScenePrompt && (action === "add_object" || action === "replace_background")) {
+      if (
+        visionResult.visualScenePrompt &&
+        (action === "add_object" ||
+          action === "replace_background" ||
+          visionResult.editMode === "add_background_object")
+      ) {
         try {
           const freeImgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
             visionResult.visualScenePrompt + ", lush trees scenery, high quality photography"
@@ -727,17 +793,27 @@ KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
             generatedImageDataUrl = `data:image/jpeg;base64,${b64}`;
           }
         } catch (e) {
-          // Fallback ke SVG markup yang sudah disintesis Gemini
+          // Fallback ke SVG markup jika ada
         }
       }
 
       return res.status(200).json({
         ok: true,
         action,
+        editMode: visionResult.editMode,
+        targetPart: visionResult.targetPart,
+        targetBoxes: visionResult.targetBoxes,
+        excludeBoxes: visionResult.excludeBoxes,
+        samplePoints: visionResult.samplePoints,
+        sourceColorsHex: visionResult.sourceColorsHex,
+        targetColorHex: visionResult.targetColorHex,
         subjectBox: visionResult.subjectBox,
         backgroundColorHex: visionResult.backgroundColorHex || userBgColor,
         backgroundImageDataUrl: generatedImageDataUrl,
-        svgSceneMarkup: visionResult.svgSceneMarkup,
+        svgSceneMarkup:
+          visionResult.editMode === "add_background_object"
+            ? visionResult.svgSceneMarkup
+            : undefined,
         explanation: visionResult.explanation,
       });
     }

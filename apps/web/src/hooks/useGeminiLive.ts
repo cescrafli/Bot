@@ -361,7 +361,13 @@ export function useGeminiLive({
       const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
       if (customKey) headers["x-gemini-key"] = customKey;
 
-      const sourceDataUrl = targetDoc.originalPreviewDataUrl || targetDoc.previewDataUrl || "";
+      const isRecolorOrReset =
+        action === "recolor_part" ||
+        action === "reset" ||
+        /rambut|baju|jas|celana|kaos|dasi|sepatu|kupu|warna/i.test(instruction);
+      const sourceDataUrl = isRecolorOrReset
+        ? (targetDoc.originalPreviewDataUrl || targetDoc.previewDataUrl || "")
+        : (targetDoc.previewDataUrl || targetDoc.originalPreviewDataUrl || "");
       const thumb = await ClientImageEditor.createVisionThumbnail(sourceDataUrl, 800, 0.78);
 
       let editApiResult: any = null;
@@ -400,6 +406,13 @@ export function useGeminiLive({
       const compositeResult = await ClientImageEditor.compositeEditedPhoto({
         sourceDataUrl,
         action: action as any,
+        editMode: editApiResult?.editMode,
+        targetPart: editApiResult?.targetPart,
+        targetBoxes: editApiResult?.targetBoxes,
+        excludeBoxes: editApiResult?.excludeBoxes,
+        samplePoints: editApiResult?.samplePoints,
+        sourceColorsHex: editApiResult?.sourceColorsHex,
+        targetColorHex: editApiResult?.targetColorHex,
         backgroundColor: resolvedBgHex,
         backgroundImageDataUrl: bgImageDataUrl,
         svgSceneMarkup,
@@ -417,11 +430,27 @@ export function useGeminiLive({
       setActiveDocuments([...currentDocs]);
       setLastPhotoEditSummary(explanation);
 
+      // Kirim frame visual hasil editan ke sesi Gemini Live secara real-time
+      if (directSessionRef.current) {
+        try {
+          const newThumb = await ClientImageEditor.createVisionThumbnail(newPreviewDataUrl, 800, 0.78);
+          directSessionRef.current.sendRealtimeInput({
+            media: {
+              mimeType: newThumb.mimeType,
+              data: newThumb.base64,
+            },
+          });
+        } catch (syncErr) {
+          console.warn("[handleExecutePhotoEdit] Gagal menyinkronkan frame visual editan:", syncErr);
+        }
+      }
+
       return {
         success: true,
         action,
+        editMode: editApiResult?.editMode,
         explanation,
-        instruction: `Perubahan foto berhasil diterapkan secara visual di layar pengguna: ${explanation}. Sampaikan kepada pengguna secara lisan dengan hangat, ceria, dan bangga atas hasil editnya!`,
+        instruction: `Perubahan foto berhasil diterapkan secara visual di layar pengguna: ${explanation}. Foto hasil editan sekarang sudah aktif di layar pengguna. Sampaikan kepada pengguna secara lisan dengan hangat, manis, ceria, dan bangga atas hasil editnya! JANGAN PERNAH meminta maaf atau berkata sistemmu terbatas atau belum bisa mengedit bagian tertentu, karena foto SUDAH berhasil diedit!`,
       };
     } catch (err: any) {
       console.warn("Gagal mengeksekusi edit foto:", err);
@@ -521,7 +550,10 @@ export function useGeminiLive({
           console.log("📄 [Tool Call Event] create_document diterima:", msg.args);
         } else if (msg.name === "edit_image") {
           console.log("🎨 [Tool Call Event] edit_image diterima via server:", msg.args);
-          handleExecutePhotoEdit(msg.args);
+          // Jalankan hanya jika sesi directSession tidak aktif (karena directSession menangani eksekusi tool secara terstruktur dengan sendToolResponse)
+          if (!directSessionRef.current) {
+            handleExecutePhotoEdit(msg.args);
+          }
         }
       } else if (msg.type === "status") {
         setStatus(msg.status);

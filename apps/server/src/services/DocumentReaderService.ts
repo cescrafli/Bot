@@ -119,11 +119,13 @@ export class DocumentReaderService {
     }
 
     const candidateModels = [
-      "gemini-2.5-flash",
+      "gemini-flash-lite-latest",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-3-flash-preview",
       (config as any).visionModel,
       config.textModel,
       "gemini-3.8-flash",
-      "gemini-3-flash-preview",
     ].filter((m): m is string => Boolean(m));
     const uniqueModels = [...new Set(candidateModels)];
 

@@ -3007,13 +3007,13 @@ async function runTtsTests() {
     "ClientImageEditor.ts mengimplementasikan createVisionThumbnail untuk kompresi payload Vision"
   );
 
-  // 2. Verifikasi Strict Timeout & gemini-2.5-flash di api/documents-read.js
+  // 2. Verifikasi Strict Timeout & Model Cepat di api/documents-read.js
   const s44DocReadCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-read.js"), "utf8");
   assert(
     s44DocReadCode.includes("withTimeout") &&
       s44DocReadCode.includes("MAX_IMAGE_TIME_BUDGET_MS") &&
-      s44DocReadCode.includes('"gemini-2.5-flash"'),
-    "api/documents-read.js memprioritaskan gemini-2.5-flash dan menerapkan total budget timeout anti-504"
+      s44DocReadCode.includes('"gemini-flash-lite-latest"'),
+    "api/documents-read.js memprioritaskan gemini-flash-lite-latest dan menerapkan total budget timeout anti-504"
   );
 
   // 3. Verifikasi Strict Timeout di api/documents-process.js
@@ -3035,9 +3035,62 @@ async function runTtsTests() {
   // 5. Verifikasi Paritas DocumentReaderService.ts Server Lokal
   const s44ServerReaderCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/services/DocumentReaderService.ts"), "utf8");
   assert(
-    s44ServerReaderCode.includes('"gemini-2.5-flash"') &&
+    s44ServerReaderCode.includes('"gemini-flash-lite-latest"') &&
       s44ServerReaderCode.includes("startServerTime"),
-    "DocumentReaderService.ts server lokal memiliki paritas model gemini-2.5-flash dan batas timeout"
+    "DocumentReaderService.ts server lokal memiliki paritas model gemini-flash-lite-latest dan batas timeout"
+  );
+
+  // 45. Uji Precision Voice Photo Editor & Selective Part Recoloring
+  console.log("\n--- 45. Uji Precision Voice Photo Editor & Selective Part Recoloring ---");
+
+  // 1. Verifikasi recolorTargetPart di ClientImageEditor.ts
+  const s45EditorCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/services/ClientImageEditor.ts"), "utf8");
+  assert(
+    s45EditorCode.includes("recolorTargetPart") &&
+      s45EditorCode.includes("targetBoxes") &&
+      s45EditorCode.includes("excludeBoxes") &&
+      s45EditorCode.includes("isTargetWhite"),
+    "ClientImageEditor.ts mengimplementasikan recolorTargetPart dengan 4-Gate Protection & Shading Transfer"
+  );
+
+  // 2. Verifikasi withTimeout di top-level api/documents-process.js
+  assert(
+    s44DocProcessCode.indexOf("const withTimeout = (promise, ms)") < s44DocProcessCode.indexOf("function cleanJson"),
+    "api/documents-process.js mendeklarasikan withTimeout di top-level module scope (anti-ReferenceError)"
+  );
+
+  // 3. Verifikasi editMode recolor_part & model berkecepatan tinggi di api/documents-process.js
+  assert(
+    s44DocProcessCode.includes('"recolor_part"') &&
+      s44DocProcessCode.includes('"gemini-flash-lite-latest"') &&
+      s44DocProcessCode.includes("targetBoxes") &&
+      s44DocProcessCode.includes("excludeBoxes"),
+    "api/documents-process.js mendukung editMode recolor_part dan model gemini-flash-lite-latest (~1.2s)"
+  );
+
+  // 4. Verifikasi paritas processImageEdit di apps/server DocumentService.ts
+  const s45ServerDocCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/services/DocumentService.ts"), "utf8");
+  assert(
+    s45ServerDocCode.includes('"recolor_part"') &&
+      s45ServerDocCode.includes('"gemini-flash-lite-latest"'),
+    "apps/server DocumentService.ts memiliki paritas penuh untuk editMode recolor_part"
+  );
+
+  // 5. Verifikasi Instruksi Sistem Celyn Anti-Tolak Edit Rambut/Baju
+  const s45AvatarPrompt = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/avatar.ts"), "utf8");
+  assert(
+    s45AvatarPrompt.includes("KEMAMPUAN INI MENCAKUP EDIT BAGIAN SPESIFIK") &&
+      s45AvatarPrompt.includes("DILARANG KERAS meminta maaf dan berkata") &&
+      s45AvatarPrompt.includes("recolor_part"),
+    "packages/shared/src/avatar.ts melarang Celyn menolak atau berdalih sistem terbatas saat diminta edit rambut"
+  );
+
+  // 6. Verifikasi Tool Definition edit_image memuat recolor_part
+  const s45ToolsCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/tools.ts"), "utf8");
+  assert(
+    s45ToolsCode.includes("'recolor_part'") &&
+      s45ToolsCode.includes("rambut"),
+    "packages/shared/src/tools.ts memuat aksi recolor_part untuk pewarnaan bagian spesifik"
   );
 
   // Ringkasan

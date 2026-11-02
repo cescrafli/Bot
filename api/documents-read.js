@@ -280,10 +280,12 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
   if (isImage) {
     if (keys.length > 0) {
       const modelsToTry = [
-        "gemini-2.5-flash",
+        "gemini-flash-lite-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview",
         process.env.DOC_VISION_MODEL || process.env.TEXT_MODEL,
         "gemini-3.8-flash",
-        "gemini-3-flash-preview",
       ].filter(Boolean);
       const uniqueModels = [...new Set(modelsToTry)];
 
