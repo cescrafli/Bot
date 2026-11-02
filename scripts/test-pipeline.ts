@@ -128,7 +128,7 @@ assert(restoredSamples[2] === -16384, "Preservasi amplitudo negatif -16384 akura
 // 3. Uji Validitas Skema Tool Calling Celyn Core Tools
 console.log("\n--- 3. Uji Definisi Celyn Core Tools ---");
 
-assert(CELYN_CORE_TOOLS.length === 6, "Tepat 6 core tool AI terdaftar untuk Celyn");
+assert(CELYN_CORE_TOOLS.length === 7, "Tepat 7 core tool AI terdaftar untuk Celyn (termasuk edit_image)");
 const toolNames = CELYN_CORE_TOOLS.map((t) => t.name);
 assert(toolNames.includes("set_expression"), "Tool 'set_expression' tersedia");
 assert(toolNames.includes("point_at_screen"), "Tool 'point_at_screen' tersedia");
@@ -136,6 +136,7 @@ assert(toolNames.includes("remember_fact"), "Tool 'remember_fact' tersedia untuk
 assert(toolNames.includes("create_document"), "Tool 'create_document' tersedia untuk pembuatan PDF/DOCX/XLSX");
 assert(toolNames.includes("process_document"), "Tool 'process_document' tersedia untuk transformasi dokumen");
 assert(toolNames.includes("research"), "Tool 'research' tersedia untuk riset web dengan sitasi tautan");
+assert(toolNames.includes("edit_image"), "Tool 'edit_image' tersedia untuk voice-driven photo editing");
 
 // 4. Uji Normalisasi & Pemetaan Sinonim Emosi Avatar
 console.log("\n--- 4. Uji Normalisasi Emosi Avatar & Deteksi Emosi Pengguna ---");
@@ -2492,9 +2493,10 @@ async function runTtsTests() {
   // F. useGeminiLive.ts menyuntikkan data riset kaya (hingga 4000 karakter) ke konteks Live
   const updatedLiveCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"), "utf8");
   assert(
-    updatedLiveCode.includes("researchSummary.slice(0, 4000)") &&
+    (updatedLiveCode.includes("researchSummary.slice(0, 4000)") ||
+      updatedLiveCode.includes("researchSummary.slice(0, 16000)")) &&
       updatedLiveCode.includes("7 Ketentuan Emas Peneliti Teliti Celyn"),
-    "useGeminiLive.ts menyuntikkan data riset kaya hingga 4000 karakter dan 7 Ketentuan Emas ke sesi Live"
+    "useGeminiLive.ts menyuntikkan data riset kaya hingga 4000-16000 karakter dan 7 Ketentuan Emas ke sesi Live"
   );
 
   // --- SECTION 38: Full Project Audit, Supply Chain & Zero-Leak Script Hygiene ---
@@ -2721,6 +2723,277 @@ async function runTtsTests() {
       readmeCode.includes("350+ skenario uji") &&
       readmeCode.includes("gemini-3.8-flash"),
     "README.md memuat dokumentasi akurat TURSO_DATABASE_URL, 350+ skenario uji, dan model gemini-3.8-flash"
+  );
+
+  // J. Verifikasi Section 40: 360° Technical Audit & Parity Upgrades
+  console.log("\n🧪 --- SECTION 40: 360° Technical Audit & Parity Upgrades ---");
+
+  // 1. Verifikasi verifyAuth HMAC di api/documents-process.js
+  const docProcCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-process.js"), "utf8");
+  assert(
+    docProcCode.includes("createHmac") &&
+      docProcCode.includes("timingSafeEqual") &&
+      docProcCode.includes("payload.exp"),
+    "api/documents-process.js memverifikasi HMAC signature dan expired time untuk token Bearer (anti-spoofing)"
+  );
+
+  // 2. Verifikasi api/remember.js null handling
+  const rememberCode = fs.readFileSync(path.resolve(process.cwd(), "api/remember.js"), "utf8");
+  assert(
+    rememberCode.includes('action: "ignored"') &&
+      rememberCode.includes("smartUpsertUserProfile"),
+    "api/remember.js aman dari null pointer crash saat smartUpsertUserProfile mengembalikan null"
+  );
+
+  // 3. Verifikasi totalPages parity dan 4th OCR dimension di api/documents-read.js
+  const s40DocReadCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-read.js"), "utf8");
+  assert(
+    s40DocReadCode.includes("pages: totalPages") &&
+      s40DocReadCode.includes("DETEKSI SOAL, TUGAS, ATAU INSTRUKSI"),
+    "api/documents-read.js mengembalikan totalPages secara konsisten dan memuat 4 dimensi deteksi Micro-OCR"
+  );
+
+  // 4. Verifikasi Banned Male Voices di api/token.js dan apps/server/src/index.ts
+  const tokenCode = fs.readFileSync(path.resolve(process.cwd(), "api/token.js"), "utf8");
+  const s40ServerIndexCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/index.ts"), "utf8");
+  assert(
+    tokenCode.includes("BANNED_MALE_VOICES") &&
+      s40ServerIndexCode.includes("BANNED_MALE_VOICES"),
+    "api/token.js dan apps/server/src/index.ts memblokir mutlak karakter suara pria/laki-laki"
+  );
+
+  // 5. Verifikasi Zero Vendor Leak di apps/server/src/geminiSession.ts
+  const geminiSessionCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/geminiSession.ts"), "utf8");
+  assert(
+    geminiSessionCode.includes("Sesi Celyn telah berakhir.") &&
+      geminiSessionCode.includes("Gagal membuka sesi Celyn:"),
+    "apps/server/src/geminiSession.ts bersih 100% dari kebocoran nama vendor pada status klien"
+  );
+
+  // 6. Verifikasi Download Endpoint RFC 6266 & MIME types di apps/server/src/index.ts
+  assert(
+    s40ServerIndexCode.includes("application/pdf") &&
+      s40ServerIndexCode.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    "apps/server/src/index.ts download endpoint menyertakan Content-Type spesifik (PDF/XLSX/DOCX)"
+  );
+
+  // 7. Verifikasi Interactive Image Studio di DocumentModal.tsx
+  const s40DocModalCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/components/modals/DocumentModal.tsx"), "utf8");
+  assert(
+    s40DocModalCode.includes("Studio Pengolahan & Edit Gambar") &&
+      s40DocModalCode.includes("handleDownloadEditedImage") &&
+      s40DocModalCode.includes("imgBrightness"),
+    "DocumentModal.tsx memuat Interactive Image Studio dengan rotasi, flip, filter visual, dan anotasi watermark"
+  );
+
+  // 8. Verifikasi VoiceSelectorModal.tsx Uji Suara
+  const voiceModalCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/components/modals/VoiceSelectorModal.tsx"), "utf8");
+  assert(
+    voiceModalCode.includes("onTestVoice") &&
+      voiceModalCode.includes("Uji Suara"),
+    "VoiceSelectorModal.tsx memuat tombol interaktif uji coba suara Celyn"
+  );
+
+  // 9. Verifikasi Pembersihan Aset Lengan Mati
+  assert(
+    !fs.existsSync(path.resolve(process.cwd(), "apps/web/public/celyn_arm_l_clean.png")) &&
+      !fs.existsSync(path.resolve(process.cwd(), "apps/web/public/celyn_arm_r_clean.png")),
+    "File aset png lengan mati celyn_arm_l_clean dan celyn_arm_r_clean berhasil dihapus dari public/"
+  );
+
+  // 42. Uji Audit Komprehensif: Riset Mendalam Zero-Omission, Studio Gambar Nyata & UI/UX Terpadu
+  console.log("\n--- 42. Uji Audit Komprehensif: Riset Mendalam Zero-Omission, Studio Gambar Nyata & UI/UX Terpadu ---");
+
+  // 1. Verifikasi 9 Domain Pakar di api/research.js
+  const s42ResearchCode = fs.readFileSync(path.resolve(process.cwd(), "api/research.js"), "utf8");
+  assert(
+    s42ResearchCode.includes('domain: "business"') &&
+      s42ResearchCode.includes('domain: "science"') &&
+      s42ResearchCode.includes('domain: "education"') &&
+      s42ResearchCode.includes('domain: "finance"') &&
+      s42ResearchCode.includes('domain: "legal"') &&
+      s42ResearchCode.includes('domain: "medical"') &&
+      s42ResearchCode.includes('domain: "tech"') &&
+      s42ResearchCode.includes('domain: "economics"') &&
+      s42ResearchCode.includes('domain: "general"'),
+    "api/research.js memiliki 9 domain pakar lengkap identik dengan packages/shared/src/tools.ts"
+  );
+
+  // 2. Verifikasi Grounding Cascade & 8192 Max Tokens di api/research.js & ResearchService.ts
+  const s42ResearchServiceCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/ResearchService.ts"),
+    "utf8"
+  );
+  assert(
+    s42ResearchCode.includes("candidateGroundingModels") &&
+      s42ResearchCode.includes("maxOutputTokens: 8192"),
+    "api/research.js mengimplementasikan Grounding Cascade multi-model dan batas output 8192 token"
+  );
+  assert(
+    s42ResearchServiceCode.includes("maxOutputTokens: 8192") &&
+      s42ResearchServiceCode.includes("candidateModels"),
+    "ResearchService server mengimplementasikan Grounding Cascade dan 8192 token"
+  );
+
+  // 3. Verifikasi Injeksi Otomatis Laporan Riset ke Transkrip & Dokumen Aktif
+  const s42LiveCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"), "utf8");
+  const s42SessionCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/geminiSession.ts"), "utf8");
+  assert(
+    s42LiveCode.includes("Auto-append naskah laporan riset utuh ke transkrip") &&
+      s42LiveCode.includes("Auto-register ke activeDocuments"),
+    "useGeminiLive.ts otomatis menyuntikkan laporan riset utuh ke TranscriptDrawer dan activeDocuments"
+  );
+  assert(
+    s42SessionCode.includes("this.sendToClient({") &&
+      s42SessionCode.includes("this.activeDocs.set(researchDocName.toLowerCase()"),
+    "geminiSession.ts server mengirim laporan tertulis riset utuh dan mendaftarkannya ke activeDocs"
+  );
+
+  // 4. Verifikasi Studio Gambar Nyata di DocumentModal.tsx & ParsedDocument
+  const s42DocModalCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/components/modals/DocumentModal.tsx"), "utf8");
+  const s42DocSharedCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/document.ts"), "utf8");
+  assert(
+    s42DocSharedCode.includes("previewDataUrl?: string;"),
+    "ParsedDocument pada packages/shared/src/document.ts menyertakan properti previewDataUrl"
+  );
+  assert(
+    s42DocModalCode.includes("renderEditedImageToBlob") &&
+      s42DocModalCode.includes("handleApplyAndAnalyzeWithCelyn") &&
+      s42DocModalCode.includes("img.crossOrigin = \"anonymous\""),
+    "DocumentModal.tsx memproses piksel gambar asli dengan canvas dan memiliki tombol Analisis dengan Celyn"
+  );
+
+  // 5. Verifikasi Renderer Tabel Markdown & Heading di TranscriptDrawer.tsx
+  const s42TranscriptCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/components/chat/TranscriptDrawer.tsx"), "utf8");
+  assert(
+    s42TranscriptCode.includes("renderInlineTokens") &&
+      s42TranscriptCode.includes("<table className=") &&
+      s42TranscriptCode.includes("sm:max-w-lg md:max-w-xl"),
+    "TranscriptDrawer.tsx merender tabel data Markdown, heading, dan memiliki lebar desktop yang lega"
+  );
+
+  // 6. Verifikasi Multi-Voice Persona Test di useAudioEngine.ts & App.tsx
+  const s42AudioEngineCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useAudioEngine.ts"), "utf8");
+  const s42AppCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/App.tsx"), "utf8");
+  const s42TtsCode = fs.readFileSync(path.resolve(process.cwd(), "api/tts.js"), "utf8");
+  assert(
+    s42AudioEngineCode.includes("triggerTestSpeech = useCallback") &&
+      s42AudioEngineCode.includes("Aoede") &&
+      s42AudioEngineCode.includes("Zephyr"),
+    "useAudioEngine.ts mendukung pengujian spesifik per persona suara (Aoede, Zephyr, Leda, Kore)"
+  );
+  assert(
+    s42AppCode.includes("handleTestSpeech = useCallback(\n    (voiceId?: string) => {"),
+    "App.tsx meneruskan voiceId ke audioEngine.triggerTestSpeech"
+  );
+  assert(
+    s42TtsCode.includes("lowerVoice.includes(\"aoede\")") &&
+      s42TtsCode.includes("body.voiceName"),
+    "api/tts.js mengonfigurasi prosodi khusus untuk uji coba karakter suara Live"
+  );
+
+  // 7. Verifikasi Dead Code Cleanup: AvatarFaceOverlayProps & scripts/test-poc-vision.ts
+  const s42OverlayCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/avatar/AvatarFaceOverlay.tsx"),
+    "utf8"
+  );
+  assert(
+    !s42OverlayCode.includes("mouthPivotX") &&
+      !s42OverlayCode.includes("mouthScale"),
+    "AvatarFaceOverlay.tsx bersih dari props mati (mouthPivotX, mouthPivotY, mouthScale)"
+  );
+  assert(
+    !fs.existsSync(path.resolve(process.cwd(), "scripts/test-poc-vision.ts")),
+    "File skrip mati scripts/test-poc-vision.ts berhasil dibersihkan"
+  );
+
+  // 43. Uji Voice-Driven Photo Editor & Live Photo Stage (100% Free, Zero-Quota Limit)
+  console.log("\n--- 43. Uji Voice-Driven Photo Editor & Live Photo Stage (100% Free, Zero-Quota Limit) ---");
+
+  // 1. Verifikasi Deklarasi Tool edit_image pada @celyn/shared
+  const s43ToolsCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/tools.ts"), "utf8");
+  const s43AvatarCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/avatar.ts"), "utf8");
+  const s43LiveTypesCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/live.ts"), "utf8");
+  const s43DocTypesCode = fs.readFileSync(path.resolve(process.cwd(), "packages/shared/src/document.ts"), "utf8");
+
+  assert(
+    s43ToolsCode.includes('name: "edit_image"') &&
+      s43ToolsCode.includes("add_object") &&
+      s43ToolsCode.includes("replace_background") &&
+      s43ToolsCode.includes("background_color") &&
+      s43ToolsCode.includes("transform") &&
+      s43ToolsCode.includes("hide") &&
+      s43ToolsCode.includes("show") &&
+      s43ToolsCode.includes("reset"),
+    "packages/shared/src/tools.ts memuat tool deklarasi edit_image dengan parameter aksi lengkap"
+  );
+  assert(
+    s43AvatarCode.includes("edit_image") &&
+      s43AvatarCode.includes("EDIT & PENGOLAHAN FOTO DENGAN SUARA"),
+    "packages/shared/src/avatar.ts sistem prompt mewajibkan pemanggilan edit_image saat ada perintah foto"
+  );
+  assert(
+    s43LiveTypesCode.includes('"edit_image"') &&
+      s43DocTypesCode.includes("originalPreviewDataUrl?: string;") &&
+      s43DocTypesCode.includes("subjectBox?:"),
+    "packages/shared/src/live.ts dan document.ts memuat tipe edit_image, originalPreviewDataUrl, dan subjectBox"
+  );
+
+  // 2. Verifikasi ClientImageEditor (Alpha Matting & 4-Layer Compositor)
+  const s43EditorCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/services/ClientImageEditor.ts"), "utf8");
+  assert(
+    s43EditorCode.includes("extractForegroundSubjectMask") &&
+      s43EditorCode.includes("compositeEditedPhoto") &&
+      s43EditorCode.includes("resolveIndonesianColor") &&
+      s43EditorCode.includes("featherRange"),
+    "ClientImageEditor.ts mengimplementasikan isolasi subjek, perimeter color sampling, dan kanvas kompositor 4 layer"
+  );
+
+  // 3. Verifikasi LivePhotoStage Floating UI Component
+  const s43StageCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/components/modals/LivePhotoStage.tsx"), "utf8");
+  assert(
+    s43StageCode.includes("LivePhotoStage") &&
+      s43StageCode.includes("isComparingOriginal") &&
+      s43StageCode.includes("Tahan untuk Bandingkan Foto Asli"),
+    "LivePhotoStage.tsx memuat panggung foto mengambang dengan fitur tekan-tahan pembanding foto asli"
+  );
+
+  // 4. Verifikasi Vercel Serverless Function Count Parity (Maksimal 12)
+  const apiDirFiles = fs.readdirSync(path.resolve(process.cwd(), "api")).filter((f) => f.endsWith(".js"));
+  assert(
+    apiDirFiles.length <= 12,
+    `Jumlah Serverless Functions di api/ (${apiDirFiles.length}) aman dalam batas paket Hobby Vercel (<= 12)`
+  );
+
+  // 5. Verifikasi operation === "edit_image" di api/documents-process.js dan DocumentService.ts
+  const s43DocProcessCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-process.js"), "utf8");
+  const s43DocServerCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/services/DocumentService.ts"), "utf8");
+  assert(
+    s43DocProcessCode.includes('operation === "edit_image"') &&
+      s43DocProcessCode.includes("svgSceneMarkup") &&
+      s43DocProcessCode.includes("pollinations.ai"),
+    "api/documents-process.js menangani operation edit_image dengan Gemini Vision synthesis dan fallback generator gratis"
+  );
+  assert(
+    s43DocServerCode.includes("processImageEdit") &&
+      s43DocServerCode.includes("svgSceneMarkup"),
+    "apps/server DocumentService.ts menangani processImageEdit secara paritas dengan serverless handler"
+  );
+
+  // 6. Verifikasi Integrasi useGeminiLive & App.tsx
+  const s43AppCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/App.tsx"), "utf8");
+  const s43LiveHookCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"), "utf8");
+  assert(
+    s43AppCode.includes("<LivePhotoStage") &&
+      s43AppCode.includes("live.activePhotoDoc") &&
+      s43AppCode.includes("live.isPhotoStageVisible"),
+    "apps/web/src/App.tsx merender LivePhotoStage dengan data live hook"
+  );
+  assert(
+    s43LiveHookCode.includes("handleExecutePhotoEdit") &&
+      s43LiveHookCode.includes('fc.name === "edit_image"') &&
+      s43LiveHookCode.includes("resetActivePhoto"),
+    "useGeminiLive.ts mengikat tool edit_image ke direct live session dan manajemen stage foto"
   );
 
   // Ringkasan

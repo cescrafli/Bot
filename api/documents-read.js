@@ -298,7 +298,8 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
                   text: `Anda adalah asisten peneliti dan analis visual tingkat pakar Celyn. Lakukan pembacaan dan analisis mendalam terhadap foto/gambar '${fileName}' ini dengan ketelitian mikro:
 1. PEMBACAAN TEKS & ANGKA DETAIL (OCR PARIPURNA): Baca dan transkripsikan SELURUH teks, angka, simbol matematika/keuangan, satuan, label sumbu grafik, indikator teknikal, kode, dan detail kecil tanpa ada yang terlewat. Pertahankan struktur aslinya (sajikan dalam format Markdown Table jika berupa tabel data atau kisi matriks).
 2. DEKOMPOSISI VISUAL, GRAFIK & DIAGRAM: Bedah konten visual secara presisi (identifikasi jenis diagram/chart, arah tren garis/candlestick, level support/resistance, label perbandingan, diagram alur/arsitektur, atau skema konsep).
-3. SINTESIS RISET & KESIMPULAN BERDASARKAN GAMBAR: Formulasikan temuan visual menjadi data terstruktur dan ringkasan eksekutif yang siap digunakan langsung sebagai dasar riset komprehensif, perhitungan akurat, atau perumusan jawaban profesional.`,
+3. SINTESIS RISET & KESIMPULAN BERDASARKAN GAMBAR: Formulasikan temuan visual menjadi data terstruktur dan ringkasan eksekutif yang siap digunakan langsung sebagai dasar riset komprehensif, perhitungan akurat, atau perumusan jawaban profesional.
+4. DETEKSI SOAL, TUGAS, ATAU INSTRUKSI: Jika gambar berisi soal ujian, latihan hitungan, studi kasus, atau pertanyaan tugas, uraikan setiap butir soal secara lengkap beserta angka, pilihan jawaban (jika ada), dan instruksi pengerjaannya agar dapat diselesaikan secara solutif dan runtut.`,
                 },
               ],
             });
@@ -320,6 +321,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
           mimeType: mimeType || "image/jpeg",
           markdownContent: visualText,
           usedOcr: true,
+          totalPages: 1,
           pages: 1,
           truncated: false,
           characterCount: visualText.length,
@@ -331,6 +333,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
       mimeType: mimeType || "image/jpeg",
       markdownContent: `(File foto/gambar '${fileName}' berhasil diunggah)`,
       usedOcr: false,
+      totalPages: 1,
       pages: 1,
       truncated: false,
       characterCount: 0,
@@ -358,6 +361,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
         mimeType: "application/pdf",
         markdownContent: cleanText,
         usedOcr: false,
+        totalPages,
         pages: totalPages,
         truncated: false,
         characterCount: cleanText.length,
@@ -368,6 +372,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
       const modelsToTry = [
         process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL,
         "gemini-3.8-flash",
+        "gemini-2.5-flash",
         "gemini-3-flash-preview",
       ].filter(Boolean);
       const uniqueModels = [...new Set(modelsToTry)];
@@ -409,6 +414,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
           mimeType: "application/pdf",
           markdownContent: ocrText,
           usedOcr: true,
+          totalPages,
           pages: totalPages,
           truncated: false,
           characterCount: ocrText.length,
@@ -421,6 +427,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
       mimeType: "application/pdf",
       markdownContent: cleanText || "(PDF kosong atau berupa gambar pindai)",
       usedOcr: false,
+      totalPages,
       pages: totalPages,
       truncated: false,
       characterCount: cleanText.length,
@@ -655,9 +662,24 @@ export default async function handler(req, res) {
   try {
     const uploaded = await parseMultipart(req);
     const customKey = (req.headers["x-gemini-key"] || req.query?.apiKey || "").trim();
-    const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-    const envKeys = rawEnvKeys.split(",").map((k) => k.trim()).filter(Boolean);
-    const candidateKeys = customKey ? [customKey, ...envKeys] : envKeys;
+    const rawEnvKeys = [
+      process.env.GEMINI_API_KEYS,
+      process.env.GEMINI_API_KEY,
+      process.env.GEMINI_API_KEY_FALLBACK,
+      process.env.GEMINI_API_KEY_SECRET,
+    ]
+      .filter(Boolean)
+      .join(",");
+    const envKeys = rawEnvKeys
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    const sortedEnvKeys = [...new Set(envKeys)].sort((a, b) => {
+      if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
+      if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
+      return 0;
+    });
+    const candidateKeys = customKey ? [customKey, ...sortedEnvKeys] : sortedEnvKeys;
     const document = await extractDoc(uploaded.buffer, uploaded.fileName, uploaded.mimeType, candidateKeys);
 
     return res.status(200).json({ ok: true, document });

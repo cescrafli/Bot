@@ -17,6 +17,10 @@ import {
   Check,
   Eye,
   Copy,
+  RotateCcw,
+  RotateCw,
+  Crop,
+  Sliders,
 } from "lucide-react";
 import { ParsedDocument, DocumentKind } from "@celyn/shared";
 import { getStoredAuthPassword, getStoredAuthToken } from "../../hooks/useAuth.js";
@@ -61,6 +65,219 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [previewingDoc, setPreviewingDoc] = useState<ParsedDocument | null>(null);
   const [copiedDoc, setCopiedDoc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // State Studio Pengolahan Gambar Interaktif
+  const [imgRotation, setImgRotation] = useState<number>(0);
+  const [imgFlipH, setImgFlipH] = useState(false);
+  const [imgFlipV, setImgFlipV] = useState(false);
+  const [imgBrightness, setImgBrightness] = useState<number>(0);
+  const [imgContrast, setImgContrast] = useState<number>(0);
+  const [imgSaturation, setImgSaturation] = useState<number>(0);
+  const [imgGrayscale, setImgGrayscale] = useState<boolean>(false);
+  const [imgInvert, setImgInvert] = useState<boolean>(false);
+  const [imgAspectRatio, setImgAspectRatio] = useState<"original" | "1:1" | "16:9" | "4:3">("original");
+  const [imgAnnotationText, setImgAnnotationText] = useState("");
+  const [imgAnnotationColor, setImgAnnotationColor] = useState("#f43f5e");
+  const [imgOutputFormat, setImgOutputFormat] = useState<"png" | "jpeg" | "webp">("png");
+
+  const isImageDoc = (doc?: ParsedDocument | null) => {
+    if (!doc) return false;
+    return (
+      doc.mimeType.startsWith("image/") ||
+      /\.(png|jpe?g|webp|gif|bmp)$/i.test(doc.fileName)
+    );
+  };
+
+  const [isApplyingEditedImage, setIsApplyingEditedImage] = useState(false);
+
+  const renderEditedImageToBlob = async (doc: ParsedDocument): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const mime = `image/${imgOutputFormat === "jpeg" ? "jpeg" : imgOutputFormat}`;
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+
+      const applyFiltersAndTransforms = (
+        targetW: number,
+        targetH: number,
+        drawCallback: () => void
+      ) => {
+        const isRotatedQuarter = Math.abs(imgRotation) % 180 === 90;
+        canvas.width = isRotatedQuarter ? targetH : targetW;
+        canvas.height = isRotatedQuarter ? targetW : targetH;
+
+        ctx.save();
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const filters = [
+          `brightness(${100 + imgBrightness}%)`,
+          `contrast(${100 + imgContrast}%)`,
+          `saturate(${100 + imgSaturation}%)`,
+          imgGrayscale ? "grayscale(100%)" : "",
+          imgInvert ? "invert(100%)" : "",
+        ].filter(Boolean).join(" ");
+        if (filters) ctx.filter = filters;
+
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((imgRotation * Math.PI) / 180);
+        ctx.scale(imgFlipH ? -1 : 1, imgFlipV ? -1 : 1);
+
+        drawCallback();
+        ctx.restore();
+
+        // Watermark & text annotation
+        if (imgAnnotationText.trim()) {
+          ctx.save();
+          const fontSize = Math.max(18, Math.round(canvas.width / 32));
+          ctx.font = `bold ${fontSize}px sans-serif`;
+          ctx.fillStyle = imgAnnotationColor || "#f43f5e";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+
+          const textMetrics = ctx.measureText(imgAnnotationText.trim());
+          const textW = textMetrics.width;
+          const bgPadding = 12;
+          const bannerY = canvas.height - fontSize - 24;
+
+          ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+          ctx.fillRect(
+            (canvas.width - textW) / 2 - bgPadding,
+            bannerY - bgPadding,
+            textW + bgPadding * 2,
+            fontSize + bgPadding * 2
+          );
+
+          ctx.fillStyle = imgAnnotationColor || "#f43f5e";
+          ctx.fillText(imgAnnotationText.trim(), canvas.width / 2, canvas.height - 24);
+          ctx.restore();
+        }
+
+        canvas.toBlob((blob) => resolve(blob), mime, 0.95);
+      };
+
+      if (doc.previewDataUrl) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          let srcX = 0;
+          let srcY = 0;
+          let srcW = img.naturalWidth || img.width || 800;
+          let srcH = img.naturalHeight || img.height || 600;
+
+          let targetW = srcW;
+          let targetH = srcH;
+
+          if (imgAspectRatio === "1:1") {
+            const size = Math.min(srcW, srcH);
+            srcX = (srcW - size) / 2;
+            srcY = (srcH - size) / 2;
+            srcW = size;
+            srcH = size;
+            targetW = 1000;
+            targetH = 1000;
+          } else if (imgAspectRatio === "16:9") {
+            let cropW = srcW;
+            let cropH = Math.round((srcW * 9) / 16);
+            if (cropH > srcH) {
+              cropH = srcH;
+              cropW = Math.round((srcH * 16) / 9);
+            }
+            srcX = (srcW - cropW) / 2;
+            srcY = (srcH - cropH) / 2;
+            srcW = cropW;
+            srcH = cropH;
+            targetW = 1600;
+            targetH = 900;
+          } else if (imgAspectRatio === "4:3") {
+            let cropW = srcW;
+            let cropH = Math.round((srcW * 3) / 4);
+            if (cropH > srcH) {
+              cropH = srcH;
+              cropW = Math.round((srcH * 4) / 3);
+            }
+            srcX = (srcW - cropW) / 2;
+            srcY = (srcH - cropH) / 2;
+            srcW = cropW;
+            srcH = cropH;
+            targetW = 1200;
+            targetH = 900;
+          }
+
+          applyFiltersAndTransforms(targetW, targetH, () => {
+            ctx.drawImage(img, srcX, srcY, srcW, srcH, -targetW / 2, -targetH / 2, targetW, targetH);
+          });
+        };
+        img.onerror = () => {
+          applyFiltersAndTransforms(800, 600, () => {
+            ctx.fillStyle = "#1e293b";
+            ctx.fillRect(-400, -300, 800, 600);
+            ctx.fillStyle = "#e2e8f0";
+            ctx.font = "bold 24px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(`[${doc.fileName}]`, 0, 0);
+          });
+        };
+        img.src = doc.previewDataUrl;
+      } else {
+        let width = 800;
+        let height = 600;
+        if (imgAspectRatio === "1:1") {
+          width = 600;
+          height = 600;
+        } else if (imgAspectRatio === "16:9") {
+          width = 960;
+          height = 540;
+        } else if (imgAspectRatio === "4:3") {
+          width = 800;
+          height = 600;
+        }
+        applyFiltersAndTransforms(width, height, () => {
+          ctx.fillStyle = "#1e293b";
+          ctx.fillRect(-width / 2, -height / 2, width, height);
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = "bold 24px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(`[${doc.fileName}]`, 0, 0);
+        });
+      }
+    });
+  };
+
+  const handleDownloadEditedImage = async (doc: ParsedDocument) => {
+    const blob = await renderEditedImageToBlob(doc);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const baseName = doc.fileName.replace(/\.[^/.]+$/, "");
+    a.href = url;
+    a.download = `${baseName}_edited.${imgOutputFormat}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleApplyAndAnalyzeWithCelyn = async (doc: ParsedDocument) => {
+    setIsApplyingEditedImage(true);
+    setErrorMessage(null);
+    try {
+      const blob = await renderEditedImageToBlob(doc);
+      if (!blob) throw new Error("Gagal merender hasil olahan gambar.");
+      const mime = `image/${imgOutputFormat === "jpeg" ? "jpeg" : imgOutputFormat}`;
+      const baseName = doc.fileName.replace(/\.[^/.]+$/, "");
+      const newFile = new File([blob], `${baseName}_edited.${imgOutputFormat}`, { type: mime });
+      await onUploadDocument(newFile);
+      setEditingDoc(null);
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Gagal menerapkan hasil edit gambar.");
+    } finally {
+      setIsApplyingEditedImage(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -410,10 +627,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                                 ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
                                 : "text-slate-400 hover:text-white hover:bg-slate-800"
                             }`}
-                            title="Edit / Proses dokumen in-place"
+                            title={isImageDoc(doc) ? "Studio Olah Gambar" : "Edit / Proses dokumen in-place"}
                           >
                             <Edit3 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Edit In-Place</span>
+                            <span className="hidden sm:inline">{isImageDoc(doc) ? "Studio Foto" : "Edit In-Place"}</span>
                           </button>
 
                           <button
@@ -426,8 +643,279 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                         </div>
                       </div>
 
+                      {/* Inline Image Studio */}
+                      {editingDoc?.fileName === doc.fileName && isImageDoc(doc) && (
+                        <div className="mt-1 p-3.5 rounded-xl bg-slate-950/80 border border-purple-500/30 space-y-3 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1.5">
+                              <ImageIcon className="w-3.5 h-3.5" />
+                              <span>Studio Pengolahan & Edit Gambar</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {doc.fileName}
+                            </span>
+                          </div>
+
+                          {/* Preview visual mini */}
+                          <div className="h-44 sm:h-52 bg-slate-900/90 rounded-lg border border-white/10 flex items-center justify-center overflow-hidden relative p-2">
+                            {doc.previewDataUrl ? (
+                              <div className="relative max-h-full max-w-full flex items-center justify-center">
+                                <img
+                                  src={doc.previewDataUrl}
+                                  alt={doc.fileName}
+                                  style={{
+                                    transform: `rotate(${imgRotation}deg) scaleX(${imgFlipH ? -1 : 1}) scaleY(${imgFlipV ? -1 : 1})`,
+                                    filter: `brightness(${100 + imgBrightness}%) contrast(${100 + imgContrast}%) saturate(${100 + imgSaturation}%) ${imgGrayscale ? "grayscale(100%)" : ""} ${imgInvert ? "invert(100%)" : ""}`,
+                                    transition: "all 0.2s ease",
+                                    aspectRatio: imgAspectRatio === "1:1" ? "1/1" : imgAspectRatio === "16:9" ? "16/9" : imgAspectRatio === "4:3" ? "4/3" : "auto",
+                                    objectFit: imgAspectRatio === "original" ? "contain" : "cover",
+                                  }}
+                                  className="max-h-36 sm:max-h-44 max-w-full rounded shadow-md object-contain"
+                                />
+                                {imgAnnotationText && (
+                                  <div
+                                    className="absolute bottom-1 left-2 right-2 text-center text-[10px] font-bold px-2 py-0.5 rounded bg-black/60 backdrop-blur-xs truncate"
+                                    style={{ color: imgAnnotationColor }}
+                                  >
+                                    "{imgAnnotationText}"
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  transform: `rotate(${imgRotation}deg) scaleX(${imgFlipH ? -1 : 1}) scaleY(${imgFlipV ? -1 : 1})`,
+                                  filter: `brightness(${100 + imgBrightness}%) contrast(${100 + imgContrast}%) saturate(${100 + imgSaturation}%) ${imgGrayscale ? "grayscale(100%)" : ""} ${imgInvert ? "invert(100%)" : ""}`,
+                                  transition: "all 0.2s ease",
+                                }}
+                                className="text-center p-3"
+                              >
+                                <ImageIcon className="w-8 h-8 text-purple-400 mx-auto mb-1" />
+                                <p className="text-[11px] font-semibold text-white truncate max-w-[200px]">{doc.fileName}</p>
+                                {imgAnnotationText && (
+                                  <p className="text-[10px] font-bold" style={{ color: imgAnnotationColor }}>
+                                    "{imgAnnotationText}"
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Kontrol 1: Rotasi & Flip */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-medium text-slate-400">Rotasi & Pembalikan (Transform)</label>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => setImgRotation((r) => (r - 90) % 360)}
+                                className="px-2 py-1 rounded-md bg-white/5 hover:bg-purple-500/20 text-slate-300 hover:text-purple-200 border border-white/10 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>-90°</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setImgRotation((r) => (r + 90) % 360)}
+                                className="px-2 py-1 rounded-md bg-white/5 hover:bg-purple-500/20 text-slate-300 hover:text-purple-200 border border-white/10 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                              >
+                                <RotateCw className="w-3 h-3" />
+                                <span>+90°</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setImgFlipH((f) => !f)}
+                                className={`px-2 py-1 rounded-md border text-[10px] font-semibold cursor-pointer ${
+                                  imgFlipH ? "bg-purple-500/30 text-purple-200 border-purple-500/50" : "bg-white/5 text-slate-300 border-white/10"
+                                }`}
+                              >
+                                Flip Horizontal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setImgFlipV((f) => !f)}
+                                className={`px-2 py-1 rounded-md border text-[10px] font-semibold cursor-pointer ${
+                                  imgFlipV ? "bg-purple-500/30 text-purple-200 border-purple-500/50" : "bg-white/5 text-slate-300 border-white/10"
+                                }`}
+                              >
+                                Flip Vertikal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setImgRotation(0);
+                                  setImgFlipH(false);
+                                  setImgFlipV(false);
+                                  setImgBrightness(0);
+                                  setImgContrast(0);
+                                  setImgSaturation(0);
+                                  setImgGrayscale(false);
+                                  setImgInvert(false);
+                                  setImgAnnotationText("");
+                                }}
+                                className="px-2 py-1 rounded-md bg-white/5 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10 text-[10px] ml-auto cursor-pointer"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Kontrol 2: Rasio Aspek (Crop Preset) */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-medium text-slate-400">Rasio Aspek (Crop Preset)</label>
+                            <div className="grid grid-cols-4 gap-1">
+                              {(["original", "1:1", "16:9", "4:3"] as const).map((ratio) => (
+                                <button
+                                  key={ratio}
+                                  type="button"
+                                  onClick={() => setImgAspectRatio(ratio)}
+                                  className={`py-1 text-[10px] font-semibold rounded-md border transition-all cursor-pointer ${
+                                    imgAspectRatio === ratio
+                                      ? "bg-purple-500/30 text-purple-200 border-purple-500/50"
+                                      : "bg-white/5 text-slate-400 border-white/5 hover:text-white"
+                                  }`}
+                                >
+                                  {ratio === "original" ? "Asli" : ratio}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Kontrol 3: Filter & Penyesuaian Visual */}
+                          <div className="grid grid-cols-2 gap-2 text-[10px]">
+                            <div>
+                              <div className="flex justify-between text-slate-400 mb-0.5">
+                                <span>Kecerahan</span>
+                                <span>{imgBrightness > 0 ? `+${imgBrightness}` : imgBrightness}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={imgBrightness}
+                                onChange={(e) => setImgBrightness(Number(e.target.value))}
+                                className="w-full accent-purple-400 cursor-pointer h-1 bg-slate-800 rounded"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-slate-400 mb-0.5">
+                                <span>Kontras</span>
+                                <span>{imgContrast > 0 ? `+${imgContrast}` : imgContrast}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={imgContrast}
+                                onChange={(e) => setImgContrast(Number(e.target.value))}
+                                className="w-full accent-purple-400 cursor-pointer h-1 bg-slate-800 rounded"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-[10px]">
+                            <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={imgGrayscale}
+                                onChange={(e) => setImgGrayscale(e.target.checked)}
+                                className="rounded accent-purple-500"
+                              />
+                              <span>Hitam Putih (Grayscale)</span>
+                            </label>
+                            <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={imgInvert}
+                                onChange={(e) => setImgInvert(e.target.checked)}
+                                className="rounded accent-purple-500"
+                              />
+                              <span>Inversi Warna</span>
+                            </label>
+                          </div>
+
+                          {/* Kontrol 4: Anotasi Teks & Watermark */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-medium text-slate-400">Anotasi / Watermark Teks</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={imgAnnotationText}
+                                onChange={(e) => setImgAnnotationText(e.target.value)}
+                                placeholder="Contoh: Dokumen Terverifikasi, Rahasia, Catatan Bab 2"
+                                className="flex-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-purple-500/50"
+                              />
+                              <input
+                                type="color"
+                                value={imgAnnotationColor}
+                                onChange={(e) => setImgAnnotationColor(e.target.value)}
+                                className="w-7 h-7 rounded border border-white/10 bg-transparent cursor-pointer"
+                                title="Warna Teks Anotasi"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Kontrol 5: Format Output & Tombol Aksi */}
+                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-slate-400">Format:</span>
+                              {(["png", "jpeg", "webp"] as const).map((fmt) => (
+                                <button
+                                  key={fmt}
+                                  type="button"
+                                  onClick={() => setImgOutputFormat(fmt)}
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase cursor-pointer ${
+                                    imgOutputFormat === fmt
+                                      ? "bg-purple-500/30 text-purple-200 border border-purple-500/50"
+                                      : "text-slate-400 hover:text-white"
+                                  }`}
+                                >
+                                  {fmt}
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setEditingDoc(null)}
+                                className="px-2 py-1 text-xs text-slate-400 hover:text-white cursor-pointer"
+                              >
+                                Tutup
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isApplyingEditedImage}
+                                onClick={() => handleApplyAndAnalyzeWithCelyn(doc)}
+                                className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-purple-500/20 text-purple-200 border border-purple-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+                                title="Kirim hasil editan foto ini ke Celyn untuk dianalisis dan dibahas perubahannya"
+                              >
+                                {isApplyingEditedImage ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Menerapkan...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                                    <span>Analisis dengan Celyn</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadEditedImage(doc)}
+                                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Unduh Hasil Edit</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Inline In-Place Document Editor */}
-                      {editingDoc?.fileName === doc.fileName && (
+                      {editingDoc?.fileName === doc.fileName && !isImageDoc(doc) && (
                         <div className="mt-1 p-3 rounded-xl bg-slate-950/70 border border-rose-500/20 space-y-3 animate-in fade-in">
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5">

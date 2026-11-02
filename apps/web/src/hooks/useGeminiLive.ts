@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { ActiveDocJob } from "../components/controls/DocumentActionPill";
 import { getStoredAuthPassword, getStoredAuthMode, getStoredAuthToken } from "./useAuth";
@@ -28,6 +28,7 @@ import {
   inferExpertPersona,
 } from "@celyn/shared";
 import { extractPdfClientSide } from "../services/ClientDocumentReader.js";
+import { ClientImageEditor, resolveIndonesianColor } from "../services/ClientImageEditor";
 
 interface UseGeminiLiveOptions {
   onAudioReceived: (b64Audio: string, mimeType?: string) => void;
@@ -99,6 +100,41 @@ export function useGeminiLive({
   const [jobs, setJobs] = useState<any[]>([]);
   const dismissJob = useCallback((id: string) => {
     setJobs((prev) => prev.filter((j) => j.id !== id));
+  }, []);
+
+  // State Panggung Foto Interaktif Suara (Live Photo Stage)
+  const [isPhotoStageVisible, setIsPhotoStageVisible] = useState(false);
+  const [lastPhotoEditSummary, setLastPhotoEditSummary] = useState<string | null>(null);
+
+  const activePhotoDoc = useMemo(() => {
+    return (
+      activeDocuments
+        .slice()
+        .reverse()
+        .find(
+          (d) =>
+            Boolean(d.previewDataUrl) ||
+            Boolean(d.originalPreviewDataUrl) ||
+            d.mimeType?.startsWith("image/") ||
+            /\.(png|jpe?g|webp|gif|bmp)$/i.test(d.fileName)
+        ) || null
+    );
+  }, [activeDocuments]);
+
+  const resetActivePhoto = useCallback(() => {
+    setActiveDocuments((prev) =>
+      prev.map((d) => {
+        if (d.originalPreviewDataUrl) {
+          return {
+            ...d,
+            previewDataUrl: d.originalPreviewDataUrl,
+            transformedPreviewDataUrl: undefined,
+          };
+        }
+        return d;
+      })
+    );
+    setLastPhotoEditSummary("Foto dikembalikan ke versi asli.");
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -250,6 +286,152 @@ export function useGeminiLive({
     }
   }, []);
 
+  const handleExecutePhotoEdit = useCallback(async (args: any) => {
+    const action = String(args?.action || "transform").toLowerCase();
+    const instruction = String(args?.instruction || "").trim();
+    const docId = args?.docId ? String(args.docId).toLowerCase() : "";
+
+    const currentDocs = activeDocumentsRef.current;
+    const targetDoc = currentDocs.slice().reverse().find((d) => {
+      if (docId) {
+        return d.fileName.toLowerCase().includes(docId);
+      }
+      return (
+        Boolean(d.previewDataUrl) ||
+        Boolean(d.originalPreviewDataUrl) ||
+        d.mimeType?.startsWith("image/") ||
+        /\.(png|jpe?g|webp|gif|bmp)$/i.test(d.fileName)
+      );
+    });
+
+    if (!targetDoc || (!targetDoc.previewDataUrl && !targetDoc.originalPreviewDataUrl)) {
+      return {
+        success: false,
+        message:
+          "Tidak ada foto yang sedang aktif untuk diedit. Minta pengguna mengunggah foto terlebih dahulu.",
+      };
+    }
+
+    if (action === "hide") {
+      setIsPhotoStageVisible(false);
+      return {
+        success: true,
+        action: "hide",
+        instruction:
+          "Tampilan foto telah berhasil disembunyikan dari layar. Sampaikan secara lisan kepada pengguna dengan santai dan ramah bahwa fotonya sudah kamu sembunyikan.",
+      };
+    }
+
+    if (action === "show") {
+      setIsPhotoStageVisible(true);
+      return {
+        success: true,
+        action: "show",
+        instruction:
+          "Foto kembali ditampilkan di layar. Beritahu pengguna secara lisan bahwa fotonya sudah kembali kamu tampilkan.",
+      };
+    }
+
+    if (action === "reset") {
+      const originalUrl = targetDoc.originalPreviewDataUrl || targetDoc.previewDataUrl;
+      targetDoc.previewDataUrl = originalUrl;
+      targetDoc.transformedPreviewDataUrl = undefined;
+      setActiveDocuments([...currentDocs]);
+      setIsPhotoStageVisible(true);
+      setLastPhotoEditSummary("Foto dikembalikan ke versi asli.");
+      return {
+        success: true,
+        action: "reset",
+        instruction:
+          "Foto telah dikembalikan sepenuhnya ke versi asli awal sebelum diedit. Sampaikan konfirmasi ceria kepada pengguna.",
+      };
+    }
+
+    setIsPhotoStageVisible(true);
+    setLastPhotoEditSummary("Sedang memproses perubahan foto...");
+
+    try {
+      const password = getStoredAuthPassword() || "admin";
+      const token = getStoredAuthToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-admin-password": password,
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
+      if (customKey) headers["x-gemini-key"] = customKey;
+
+      const sourceDataUrl = targetDoc.originalPreviewDataUrl || targetDoc.previewDataUrl || "";
+
+      let editApiResult: any = null;
+      try {
+        const res = await fetch("/api/documents/process", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            fileName: targetDoc.fileName,
+            operation: "edit_image",
+            action,
+            instruction,
+            backgroundColor: args.backgroundColor,
+            imagePreviewDataUrl: sourceDataUrl,
+          }),
+        });
+
+        if (res.ok) {
+          editApiResult = await res.json().catch(() => null);
+        }
+      } catch (netErr) {
+        console.warn("[handleExecutePhotoEdit] Network request error:", netErr);
+      }
+
+      const subjectBox = editApiResult?.subjectBox || targetDoc.subjectBox;
+      const resolvedBgHex =
+        editApiResult?.backgroundColorHex ||
+        resolveIndonesianColor(args.backgroundColor) ||
+        args.backgroundColor;
+      const bgImageDataUrl = editApiResult?.backgroundImageDataUrl || undefined;
+      const svgSceneMarkup = editApiResult?.svgSceneMarkup || undefined;
+      const explanation =
+        editApiResult?.explanation ||
+        `Perubahan visual pada foto '${targetDoc.fileName}' berhasil diterapkan.`;
+
+      const compositeResult = await ClientImageEditor.compositeEditedPhoto({
+        sourceDataUrl,
+        action: action as any,
+        backgroundColor: resolvedBgHex,
+        backgroundImageDataUrl: bgImageDataUrl,
+        svgSceneMarkup,
+        subjectBox,
+        rotation: typeof args.rotation === "number" ? args.rotation : 0,
+        aspectRatio: args.aspectRatio || "original",
+        grayscale: Boolean(args.grayscale),
+        watermarkText: args.watermarkText,
+      });
+
+      const newPreviewDataUrl = compositeResult.dataUrl;
+      targetDoc.previewDataUrl = newPreviewDataUrl;
+      targetDoc.transformedPreviewDataUrl = newPreviewDataUrl;
+      if (subjectBox) targetDoc.subjectBox = subjectBox;
+      setActiveDocuments([...currentDocs]);
+      setLastPhotoEditSummary(explanation);
+
+      return {
+        success: true,
+        action,
+        explanation,
+        instruction: `Perubahan foto berhasil diterapkan secara visual di layar pengguna: ${explanation}. Sampaikan kepada pengguna secara lisan dengan hangat, ceria, dan bangga atas hasil editnya!`,
+      };
+    } catch (err: any) {
+      console.warn("Gagal mengeksekusi edit foto:", err);
+      setLastPhotoEditSummary("Gagal memproses pengeditan foto.");
+      return {
+        success: false,
+        message: `Terjadi kendala visual saat mengedit foto: ${err?.message || "Error komposisi kanvas"}. Sampaikan ke pengguna dengan santai.`,
+      };
+    }
+  }, []);
+
   const handleServerMessage = useCallback(
     (msg: ServerMessage) => {
       if (msg.type === "session_info") {
@@ -336,11 +518,37 @@ export function useGeminiLive({
         } else if (msg.name === "create_document") {
           // Handled directly by background jobs (Proxy WS) or directSession toolCall execution (Direct Live)
           console.log("📄 [Tool Call Event] create_document diterima:", msg.args);
+        } else if (msg.name === "edit_image") {
+          console.log("🎨 [Tool Call Event] edit_image diterima via server:", msg.args);
+          handleExecutePhotoEdit(msg.args);
         }
       } else if (msg.type === "status") {
         setStatus(msg.status);
         if (msg.message) setStatusMessage(msg.message);
       } else if (msg.type === "job") {
+        const docJobKind: "pdf" | "docx" | "xlsx" = msg.fileName?.endsWith(".xlsx")
+          ? "xlsx"
+          : msg.fileName?.endsWith(".docx")
+          ? "docx"
+          : "pdf";
+        const docJobStage: "processing" | "done" | "error" =
+          msg.stage === "running"
+            ? "processing"
+            : msg.stage === "done"
+            ? "done"
+            : msg.stage === "error"
+            ? "error"
+            : "processing";
+        setActiveDocJob({
+          id: msg.jobId || `job_${Date.now()}`,
+          title: msg.fileName || "Dokumen Celyn",
+          fileName: msg.fileName || "dokumen.pdf",
+          kind: docJobKind,
+          stage: docJobStage,
+          message: msg.message || (docJobStage === "done" ? "Dokumen selesai dibuat!" : "Sedang memproses..."),
+          progress: msg.progress,
+        });
+
         setJobs((prev) => {
           const updatedJob = {
             id: msg.jobId,
@@ -691,6 +899,61 @@ export function useGeminiLive({
                     required: ["query"],
                   },
                 },
+                {
+                  name: "edit_image",
+                  description:
+                    "Manipulasi foto/gambar yang diunggah pengguna lewat perintah suara: ubah warna latar (misal pasfoto biru/merah), tambahkan objek di belakang subjek (misal pohon/taman/pantai), putar foto (rotasi), ubah rasio, jadikan hitam putih, sembunyikan foto (hide), tampilkan foto (show), atau reset kembali ke foto asli.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      action: {
+                        type: Type.STRING,
+                        enum: [
+                          "background_color",
+                          "add_object",
+                          "replace_background",
+                          "transform",
+                          "hide",
+                          "show",
+                          "reset",
+                        ],
+                        description: "Jenis aksi pengeditan atau kontrol tampilan foto",
+                      },
+                      instruction: {
+                        type: Type.STRING,
+                        description:
+                          "Instruksi visual lengkap pengguna (contoh: 'tambahin pohon di belakangnya', 'ganti latar jadi biru', 'hide fotonya')",
+                      },
+                      docId: {
+                        type: Type.STRING,
+                        description: "Nama file atau ID dokumen foto (opsional jika hanya ada 1 foto aktif)",
+                      },
+                      backgroundColor: {
+                        type: Type.STRING,
+                        description:
+                          "Nama warna atau kode hex untuk latar belakang baru (contoh: 'biru', 'merah', 'putih', '#1d4ed8')",
+                      },
+                      rotation: {
+                        type: Type.NUMBER,
+                        description: "Derajat putaran foto (0, 90, 180, 270)",
+                      },
+                      aspectRatio: {
+                        type: Type.STRING,
+                        enum: ["original", "1:1", "4:3", "3:4", "16:9"],
+                        description: "Rasio aspek foto yang diinginkan",
+                      },
+                      grayscale: {
+                        type: Type.BOOLEAN,
+                        description: "Apakah foto diubah menjadi hitam putih",
+                      },
+                      watermarkText: {
+                        type: Type.STRING,
+                        description: "Teks watermark opsional",
+                      },
+                    },
+                    required: ["action", "instruction"],
+                  },
+                },
               ],
             },
           ],
@@ -985,17 +1248,24 @@ export function useGeminiLive({
                   let saved = false;
                   if (fact) {
                     try {
+                      const token = getStoredAuthToken();
+                      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+                      const headers: Record<string, string> = {
+                        "Content-Type": "application/json",
+                        "x-admin-password": getStoredAuthPassword() || "admin",
+                      };
+                      if (token) headers["Authorization"] = `Bearer ${token}`;
+                      if (customKey) headers["x-gemini-key"] = customKey;
+
                       const res = await fetch("/api/remember", {
                         method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          "x-admin-password": getStoredAuthPassword() || "admin",
-                        },
+                        headers,
                         body: JSON.stringify({
                           fact,
                           category,
                           importance,
                           password: getStoredAuthPassword() || "admin",
+                          token,
                         }),
                       });
                       if (res.ok) {
@@ -1137,6 +1407,38 @@ export function useGeminiLive({
                           researchSources.map((s) => `- [${s.title}](${s.url})`).join("\n")
                         : "";
 
+                    const wibNow = new Intl.DateTimeFormat("id-ID", {
+                      timeZone: "Asia/Jakarta",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }).format(new Date());
+
+                    // Auto-append naskah laporan riset utuh ke transkrip agar pengguna memegang dokumen lengkap
+                    const fullDossierMarkdown = `### 🔍 Laporan Riset Mendalam: ${query}\n**Bidang Keahlian**: ${expert.fieldLabel} (${expert.persona})\n\n${researchSummary}${sourcesMarkdown}`;
+                    setTranscripts((prev) => [
+                      ...prev,
+                      {
+                        speaker: "celyn",
+                        text: fullDossierMarkdown,
+                        time: `${wibNow} WIB`,
+                      },
+                    ]);
+
+                    // Auto-register ke activeDocuments agar pembuatan PDF/Word/Excel berikutnya dapat memakai data riset 100%
+                    const sanitizedDocName = `Laporan_Riset_${query.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F]+/g, "_").slice(0, 40)}.md`;
+                    setActiveDocuments((prev) => [
+                      ...prev.filter((d) => d.fileName !== sanitizedDocName),
+                      {
+                        fileName: sanitizedDocName,
+                        mimeType: "text/markdown",
+                        markdownContent: fullDossierMarkdown,
+                        usedOcr: false,
+                        totalPages: 1,
+                        truncated: false,
+                        characterCount: fullDossierMarkdown.length,
+                      },
+                    ]);
+
                     toolOutput = {
                       status: "applied",
                       query,
@@ -1144,15 +1446,18 @@ export function useGeminiLive({
                       fieldLabel: expert.fieldLabel,
                       summary: researchSummary || `Riset untuk '${query}' telah dianalisis.`,
                       sources: researchSources,
-                      instruction: `Hasil riset komprehensif tingkat pakar untuk '${query}' berhasil didapatkan.${
-                        researchSummary ? `\nTemuan Riset Riil:\n${researchSummary.slice(0, 4000)}` : ""
+                      instruction: `Hasil riset komprehensif tingkat pakar untuk '${query}' berhasil didapatkan dan LAPORAN TERTULIS LENGKAP BESERTA TABEL & RUJUKAN telah otomatis ditampilkan di panel Riwayat Percakapan (Transkrip) serta disimpan di dokumen aktif.${
+                        researchSummary ? `\nTemuan Riset Riil Lengkap:\n${researchSummary.slice(0, 16000)}` : ""
                       }${sourcesMarkdown}\n\nSekarang kamu WAJIB BERPERAN sebagai '${expert.persona}' di bidang '${expert.fieldLabel}'. Terapkan 7 Ketentuan Emas Peneliti Teliti Celyn:
-1. Sampaikan hasil riset secara mendalam, berbasis data numerik riil, tajam, dan terstruktur.
-2. Jelaskan poin-poin pentingnya dengan runtut dalam bahasa yang mudah dipahami.
+1. Sampaikan hasil riset secara mendalam, berbasis data numerik riil, tajam, runtut, dan terstruktur.
+2. Jelaskan poin-poin pentingnya dengan runtut dalam bahasa yang mudah dipahami tanpa menghilangkan detail substansial.
 3. Sebutkan sumber rujukan tepercaya dengan format markdown [Judul](URL).
-4. Jika pengguna meminta dokumen atau grafik/chart (misal Word/PDF mingguan atau harian), panggil tool create_document SEKALI saja dengan instruksi lengkap untuk menyertakan tabel data perkembangan harian dan perbandingan emiten/indikator; jika belum meminta, tawarkan secara santai.`,
+4. Beritahu secara lisan dengan hangat bahwa naskah laporan tertulis lengkap beserta tabel dan sumber rujukan sudah siap dilihat di panel Riwayat Percakapan.
+5. Jika pengguna meminta dokumen atau grafik/chart (misal Word/PDF mingguan atau harian), panggil tool create_document SEKALI saja dengan instruksi lengkap untuk menyertakan tabel data perkembangan harian dan perbandingan emiten/indikator; jika belum meminta, tawarkan secara santai.`,
                     };
                   }
+                } else if (fc.name === "edit_image") {
+                  toolOutput = await handleExecutePhotoEdit(fc.args);
                 }
 
                 if (directSessionRef.current) {
@@ -1938,6 +2243,18 @@ export function useGeminiLive({
         const chunks = isSheet ? [targetDoc.markdownContent] : splitTextIntoChunks(targetDoc.markdownContent);
         const effectiveInstruction = instruction || `Lakukan ${operation} pada dokumen ini.`;
 
+        const outFileName = `${baseName}_${operation}.${ext}`;
+        const jobId = `job_proc_${Date.now()}`;
+        setActiveDocJob({
+          id: jobId,
+          title: `Proses ${operation}: ${targetDoc.fileName}`,
+          fileName: outFileName,
+          kind: (isSheet ? "xlsx" : ext) as "pdf" | "docx" | "xlsx",
+          stage: "processing",
+          progress: 0.1,
+          message: `Celyn sedang memproses (${operation}) dokumen...`,
+        });
+
         // Fungsi POST dengan tunggu otomatis saat batas kuota (HTTP 429), maksimal 4 percobaan
         const postWithRetry = async (payload: Record<string, unknown>): Promise<Response> => {
           let lastStatus = 0;
@@ -2042,10 +2359,22 @@ export function useGeminiLive({
           blob = await resRender.blob();
         }
 
+        activeDocBlobRef.current = blob;
+        setActiveDocJob({
+          id: jobId,
+          title: `Hasil ${operation}: ${targetDoc.fileName}`,
+          fileName: outFileName,
+          kind: (isSheet ? "xlsx" : ext) as "pdf" | "docx" | "xlsx",
+          stage: "done",
+          progress: 1.0,
+          message: `Dokumen '${outFileName}' berhasil diproses dan siap diunduh!`,
+          blob,
+        });
+
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${baseName}_${operation}.${ext}`;
+        a.download = outFileName;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -2066,6 +2395,7 @@ export function useGeminiLive({
           : /Dokumen '.*' tidak ditemukan/.test(rawMsg) || /^Celyn /.test(rawMsg)
           ? rawMsg
           : friendlyDocumentError(err);
+        setActiveDocJob((prev) => (prev ? { ...prev, stage: "error", message: friendly } : null));
         setDocStatusMessage(friendly);
         setTimeout(() => setDocStatusMessage(null), 8000);
         notifyCelyn(
@@ -2192,6 +2522,23 @@ export function useGeminiLive({
           throw new Error("Gagal mengekstrak isi dokumen.");
         }
 
+        if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) {
+          try {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+            doc.previewDataUrl = dataUrl;
+            doc.originalPreviewDataUrl = dataUrl;
+            setIsPhotoStageVisible(true);
+            setLastPhotoEditSummary("Foto siap diedit lewat perintah suaramu!");
+          } catch (e) {
+            console.warn("Gagal membuat previewDataUrl gambar:", e);
+          }
+        }
+
         setActiveDocuments((prev) => [
           ...prev.filter((d) => d.fileName !== doc.fileName),
           doc,
@@ -2216,7 +2563,7 @@ export function useGeminiLive({
           } catch (e) {
             console.warn("Gagal inject context dokumen ke direct session:", e);
           }
-        } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        } else {
           sendMessageRef.current({
             type: "doc_context",
             text: systemContent,
@@ -2270,6 +2617,12 @@ export function useGeminiLive({
     removeDocument,
     generateDocument,
     processDocument,
+    isPhotoStageVisible,
+    setIsPhotoStageVisible,
+    activePhotoDoc,
+    lastPhotoEditSummary,
+    resetActivePhoto,
+    handleExecutePhotoEdit,
     connect,
     disconnect,
     sendAudio,

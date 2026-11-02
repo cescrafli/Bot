@@ -4,11 +4,7 @@ import { EmotionType } from "@celyn/shared";
 interface AvatarFaceOverlayProps {
   emotion: EmotionType;
   isSpeaking: boolean;
-  mouthOpen: number;
-  intonation: number;
-  mouthPivotX: number;
-  mouthPivotY: number;
-  mouthScale: number;
+  intonation?: number;
 }
 
 /**
@@ -19,7 +15,7 @@ interface AvatarFaceOverlayProps {
 export const AvatarFaceOverlay: React.FC<AvatarFaceOverlayProps> = ({
   emotion,
   isSpeaking,
-  intonation,
+  intonation = 0,
 }) => {
   return (
     <div className="absolute inset-0 w-full h-full pointer-events-none z-25 overflow-hidden">

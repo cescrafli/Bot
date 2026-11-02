@@ -152,11 +152,11 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         )}
       </button>
 
-      {/* 4. Dokumen PDF / Word / Excel */}
+      {/* 4. Dokumen & Foto (PDF, Word, Excel, Gambar) */}
       <button
         onClick={onToggleDocumentModal}
         className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 active:scale-95 transition-all cursor-pointer relative"
-        title="Dokumen (PDF, Word, Excel)"
+        title="Foto & Dokumen (Unggah Foto, PDF, Word, Excel)"
       >
         <FileText className="w-4 h-4 text-slate-300" />
         {activeDocumentsCount !== undefined && activeDocumentsCount > 0 && (

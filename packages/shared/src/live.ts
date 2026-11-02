@@ -49,7 +49,14 @@ export type ServerMessage =
   | {
       type: "tool_call";
       id?: string;
-      name: "set_expression" | "point_at_screen" | "remember_fact" | "create_document" | "process_document" | "research";
+      name:
+        | "set_expression"
+        | "point_at_screen"
+        | "remember_fact"
+        | "create_document"
+        | "process_document"
+        | "research"
+        | "edit_image";
       args: Record<string, unknown>;
     }
   | {

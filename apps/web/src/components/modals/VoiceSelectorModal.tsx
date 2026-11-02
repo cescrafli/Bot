@@ -15,6 +15,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
   selectedVoice,
   onSelectVoice,
   onClose,
+  onTestVoice,
 }) => {
   if (!isOpen) return null;
 
@@ -86,6 +87,20 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                  {onTestVoice && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTestVoice(voice.id);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-200 border border-white/10 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                      title="Uji coba suara ini"
+                    >
+                      <Volume2 className="w-3 h-3 text-rose-400" />
+                      <span>Uji Suara</span>
+                    </button>
+                  )}
                   <div
                     className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
                       isSelected

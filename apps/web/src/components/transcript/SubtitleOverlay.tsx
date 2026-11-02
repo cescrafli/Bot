@@ -7,6 +7,15 @@ interface SubtitleOverlayProps {
   status?: "idle" | "connecting" | "listening" | "thinking" | "speaking" | "researching" | "working" | "error";
 }
 
+function cleanSubtitleText(raw: string): string {
+  let cleaned = stripVoiceMetadataTags(raw);
+  // Ubah tautan markdown [Judul](url) menjadi hanya Judul agar teks subtitle lisan nyaman dibaca
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  // Bersihkan format markdown tebal / miring / kode
+  cleaned = cleaned.replace(/[*_~`]/g, "");
+  return cleaned.trim();
+}
+
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   transcripts,
 }) => {
@@ -14,7 +23,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     transcripts.length > 0 ? transcripts[transcripts.length - 1] : null;
 
   const displaySubtitle = latestTranscript
-    ? stripVoiceMetadataTags(latestTranscript.text).trim()
+    ? cleanSubtitleText(latestTranscript.text)
     : "";
 
   return (

@@ -21,6 +21,8 @@ export interface ActiveDocJob {
   stage: "processing" | "done" | "error";
   /** Human-readable progress/status text */
   message: string;
+  /** Numerical progress indicator (0.0 to 1.0) */
+  progress?: number;
   /** Blob ready for download (only when stage === "done") */
   blob?: Blob;
   /** Error details (only when stage === "error") */

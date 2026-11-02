@@ -9,6 +9,7 @@ import { ShortcutsModal } from "./components/modals/ShortcutsModal";
 import { VoiceSelectorModal } from "./components/modals/VoiceSelectorModal";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { DocumentModal } from "./components/modals/DocumentModal";
+import { LivePhotoStage } from "./components/modals/LivePhotoStage";
 import { DocumentActionPill } from "./components/controls/DocumentActionPill";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useGeminiLive } from "./hooks/useGeminiLive";
@@ -16,17 +17,13 @@ import { useScreenCapture } from "./hooks/useScreenCapture";
 import { useAuth } from "./hooks/useAuth";
 import { AuthGate } from "./components/auth/AuthGate";
 import {
-  Bot,
-  Activity,
-  Wifi,
-  Shield,
   Send,
   Box,
-  Lock,
   AlertCircle,
-  Volume2,
   Settings,
   AudioLines,
+  Paperclip,
+  Upload,
 } from "lucide-react";
 import { getVoiceOption } from "@celyn/shared";
 
@@ -52,6 +49,11 @@ export function App() {
   const [selectedVoice, setSelectedVoice] = useState<string>(() => {
     return localStorage.getItem("celyn_selected_voice") || "Aoede";
   });
+
+  // State Unggah File Cepat (Drag & Drop & Quick Picker)
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragCounterRef = useRef(0);
+  const quickFileInputRef = useRef<HTMLInputElement>(null);
 
   const liveRef = useRef<any>(null);
 
@@ -114,14 +116,19 @@ export function App() {
     [live, audioEngine]
   );
 
-  // Uji coba suara: Jika live aktif, minta Celyn bicara langsung; jika belum, putar sampel audio
-  const handleTestSpeech = useCallback(() => {
-    if (live.isConnected) {
-      live.sendText("Celyn, halo! Coba sapa aku dengan satu kalimat ramah dan ceria.");
-    } else {
-      audioEngine.triggerTestSpeech();
-    }
-  }, [live, audioEngine]);
+  // Uji coba suara: Jika voiceId spesifik diuji dari VoiceSelectorModal, uji suara tersebut; jika tanpa argumen dan live aktif, sapa langsung
+  const handleTestSpeech = useCallback(
+    (voiceId?: string) => {
+      if (voiceId) {
+        audioEngine.triggerTestSpeech(voiceId);
+      } else if (live.isConnected) {
+        live.sendText("Celyn, halo! Coba sapa aku dengan satu kalimat ramah dan ceria.");
+      } else {
+        audioEngine.triggerTestSpeech();
+      }
+    },
+    [live, audioEngine]
+  );
 
   // Kirim Pesan Teks (dengan auto-connect jika belum tersambung, tanpa menyalakan mic)
   const handleSendText = useCallback(
@@ -311,6 +318,47 @@ export function App() {
     [audioEngine, auth]
   );
 
+  // Handler Drag and Drop Global
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDraggingFile(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current <= 0) {
+      setIsDraggingFile(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+    dragCounterRef.current = 0;
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      try {
+        await live.uploadDocument(file);
+      } catch (err: any) {
+        console.warn("Gagal unggah file via drag-and-drop:", err);
+      }
+    }
+  };
+
   // Gerbang Autentikasi: Tahan seluruh tampilan AI jika belum memasukkan password 'admin'
   if (!auth.isAuthenticated) {
     return (
@@ -325,7 +373,26 @@ export function App() {
   }
 
   return (
-    <div className="relative w-full h-[100dvh] flex flex-col justify-between bg-[#08080d] text-slate-200 overflow-hidden select-none safe-top safe-bottom safe-left safe-right">
+    <div
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className="relative w-full h-[100dvh] flex flex-col justify-between bg-[#08080d] text-slate-200 overflow-hidden select-none safe-top safe-bottom safe-left safe-right"
+    >
+      {/* Overlay Drag and Drop File & Foto Cepat */}
+      {isDraggingFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md pointer-events-none animate-in fade-in duration-150">
+          <div className="p-8 sm:p-10 rounded-3xl border-2 border-dashed border-rose-400/80 bg-rose-500/10 flex flex-col items-center gap-3 text-white text-center shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-300 animate-bounce">
+              <Upload className="w-8 h-8" />
+            </div>
+            <p className="text-base sm:text-lg font-bold">Lepaskan Foto atau Dokumen di Sini</p>
+            <p className="text-xs text-slate-300">Foto akan langsung dimuat ke Panggung Foto Celyn</p>
+          </div>
+        </div>
+      )}
+
       {/* Subtle Luxury Ambient Background */}
       <div
         aria-hidden="true"
@@ -510,14 +577,35 @@ export function App() {
                 e.preventDefault();
                 handleSendText(inputText);
               }}
-              className="w-full max-w-[min(28rem,calc(100vw-2rem))] flex items-center gap-2 px-3 py-1.5 rounded-2xl luxury-blur-panel border border-white/10 shadow-2xl animate-in fade-in slide-in-from-bottom-2"
+              className="w-full max-w-[min(28rem,calc(100vw-2rem))] flex items-center gap-1.5 px-3 py-1.5 rounded-2xl luxury-blur-panel border border-white/10 shadow-2xl animate-in fade-in slide-in-from-bottom-2"
             >
+              <input
+                type="file"
+                ref={quickFileInputRef}
+                accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,image/*,.pdf,.docx,.xlsx"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    await live.uploadDocument(file);
+                    e.target.value = "";
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => quickFileInputRef.current?.click()}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                title="Unggah Foto atau Dokumen"
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+              </button>
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="Ketik pesan untuk Celyn..."
-                className="flex-1 bg-transparent text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none px-2 py-1 min-w-0"
+                placeholder="Ketik pesan atau instruksi foto..."
+                className="flex-1 bg-transparent text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none px-1.5 py-1 min-w-0"
                 autoFocus
               />
               <button
@@ -573,6 +661,16 @@ export function App() {
       <ShortcutsModal
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
+      />
+
+      {/* Panggung Foto Interaktif Suara (Live Photo Stage) */}
+      <LivePhotoStage
+        doc={live.activePhotoDoc}
+        isVisible={live.isPhotoStageVisible}
+        statusText={live.lastPhotoEditSummary}
+        onClose={() => live.setIsPhotoStageVisible(false)}
+        onOpenStudio={() => setIsDocumentModalOpen(true)}
+        onReset={live.resetActivePhoto}
       />
 
       {/* Modal Manajemen Dokumen (PDF, Word, Excel) */}

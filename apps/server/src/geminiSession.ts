@@ -239,6 +239,61 @@ export class GeminiSession {
                     required: ["query"],
                   },
                 },
+                {
+                  name: "edit_image",
+                  description:
+                    "Manipulasi foto/gambar yang diunggah pengguna lewat perintah suara: ubah warna latar (misal pasfoto biru/merah), tambahkan objek di belakang subjek (misal pohon/taman/pantai), putar foto (rotasi), ubah rasio, jadikan hitam putih, sembunyikan foto (hide), tampilkan foto (show), atau reset kembali ke foto asli.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      action: {
+                        type: Type.STRING,
+                        enum: [
+                          "background_color",
+                          "add_object",
+                          "replace_background",
+                          "transform",
+                          "hide",
+                          "show",
+                          "reset",
+                        ],
+                        description: "Jenis aksi pengeditan atau kontrol tampilan foto",
+                      },
+                      instruction: {
+                        type: Type.STRING,
+                        description:
+                          "Instruksi visual lengkap pengguna (contoh: 'tambahin pohon di belakangnya', 'ganti latar jadi biru', 'hide fotonya')",
+                      },
+                      docId: {
+                        type: Type.STRING,
+                        description: "Nama file atau ID dokumen foto (opsional jika hanya ada 1 foto aktif)",
+                      },
+                      backgroundColor: {
+                        type: Type.STRING,
+                        description:
+                          "Nama warna atau kode hex untuk latar belakang baru (contoh: 'biru', 'merah', 'putih', '#1d4ed8')",
+                      },
+                      rotation: {
+                        type: Type.NUMBER,
+                        description: "Derajat putaran foto (0, 90, 180, 270)",
+                      },
+                      aspectRatio: {
+                        type: Type.STRING,
+                        enum: ["original", "1:1", "4:3", "3:4", "16:9"],
+                        description: "Rasio aspek foto yang diinginkan",
+                      },
+                      grayscale: {
+                        type: Type.BOOLEAN,
+                        description: "Apakah foto diubah menjadi hitam putih",
+                      },
+                      watermarkText: {
+                        type: Type.STRING,
+                        description: "Teks watermark opsional",
+                      },
+                    },
+                    required: ["action", "instruction"],
+                  },
+                },
               ],
             },
           ],
@@ -259,7 +314,7 @@ export class GeminiSession {
             this.sendToClient({
               type: "status",
               status: "idle",
-              message: "Sesi Gemini telah berakhir.",
+              message: "Sesi Celyn telah berakhir.",
             });
           },
         },
@@ -337,7 +392,7 @@ export class GeminiSession {
       console.error("Gagal menghubungkan ke Gemini Live API:", err);
       this.sendToClient({
         type: "error",
-        message: `Gagal membuka sesi Gemini: ${err.message}`,
+        message: `Gagal membuka sesi Celyn: ${err.message}`,
       });
     }
   }
@@ -860,6 +915,22 @@ export class GeminiSession {
 
           const researchResult = await researchService.conductResearch(query);
 
+          // Kirimkan naskah laporan riset lengkap ke transkrip client agar data/tabel tidak hilang
+          const dossierText = `### 🔍 Laporan Riset Mendalam: ${query}\n**Bidang Keahlian**: ${researchResult.fieldLabel} (${researchResult.expertPersona})\n\n${researchResult.formattedMarkdown}`;
+          this.sendToClient({
+            type: "transcript",
+            speaker: "celyn",
+            text: dossierText,
+            isFinal: true,
+          });
+
+          // Simpan juga ke activeDocs di sesi server agar bisa langsung diekspor 1-klik ke PDF/Word/Excel
+          const researchDocName = `Laporan_Riset_${query.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F]+/g, "_").slice(0, 40)}.md`;
+          this.activeDocs.set(researchDocName.toLowerCase(), {
+            fileName: researchDocName,
+            content: researchResult.formattedMarkdown,
+          });
+
           toolResponseOutput = {
             status: "done",
             query,
@@ -867,7 +938,9 @@ export class GeminiSession {
             fieldLabel: researchResult.fieldLabel,
             summary: researchResult.summary,
             sources: researchResult.sources,
-            instruction: `Hasil riset untuk '${query}' berhasil didapatkan. Sekarang kamu WAJIB BERPERAN sebagai '${researchResult.expertPersona}' di bidang '${researchResult.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, tajam (bukan riset ngasal), dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, risiko, dan rekomendasimu. Jangan lupa cantumkan sumber rujukan markdown [Judul](URL). Terakhir, TAWARKAN SECARA PROAKTIF apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
+            instruction: `Hasil riset mendalam tingkat pakar untuk '${query}' berhasil didapatkan dan LAPORAN TERTULIS LENGKAP BESERTA TABEL & RUJUKAN telah otomatis ditampilkan di panel Riwayat Percakapan (Transkrip) serta disimpan di dokumen aktif.${
+              researchResult.summary ? `\nTemuan Riset Riil Lengkap:\n${researchResult.summary.slice(0, 16000)}` : ""
+            }\n\nSekarang kamu WAJIB BERPERAN sebagai '${researchResult.expertPersona}' di bidang '${researchResult.fieldLabel}'. Sampaikan analisis profesionalmu secara lisan dengan berbobot, terstruktur, tajam, runtut, dan tetap santai-luwes ala Celyn. Jelaskan temuan utama, poin penting, data kunci, risiko, dan rekomendasimu. Jangan lupa sebutkan sumber rujukan tepercaya. Terakhir, TAWARKAN SECARA PROAKTIF apakah pengguna mau dibuatkan laporannya dalam bentuk dokumen PDF (.pdf) atau Word (.docx)!`,
           };
         } else if (fc.name === "process_document") {
           const { docId, operation, targetLanguage, instruction } = sanitizedArgs;
@@ -955,6 +1028,13 @@ export class GeminiSession {
               }
             })();
           }
+        } else if (fc.name === "edit_image") {
+          const { action, instruction } = sanitizedArgs;
+          toolResponseOutput = {
+            success: true,
+            action,
+            message: `Instruksi edit foto '${instruction || action}' berhasil dikirim ke panggung foto visual pengguna. Sampaikan konfirmasi secara lisan dengan santai, hangat, dan ceria bahwa perubahan foto telah langsung diterapkan di layar!`,
+          };
         }
 
         this.sendToClient({

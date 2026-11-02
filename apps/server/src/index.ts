@@ -39,7 +39,7 @@ function getClientIp(req: http.IncomingMessage): string {
 /**
  * Resolves authentication status from Bearer Token or legacy passwords ('admin' / 'login')
  */
-function getReqAuth(req: http.IncomingMessage): { valid: boolean; mode?: AuthMode } {
+function getReqAuth(req: http.IncomingMessage, bodyPasswordOrToken?: string): { valid: boolean; mode?: AuthMode } {
   // 1. Cek Authorization Header (Bearer token)
   const authHeader = req.headers["authorization"] || "";
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
@@ -58,16 +58,26 @@ function getReqAuth(req: http.IncomingMessage): { valid: boolean; mode?: AuthMod
     headerPass ||
     parsedUrl.searchParams.get("password") ||
     parsedUrl.searchParams.get("key") ||
+    bodyPasswordOrToken ||
     ""
-  ).trim().toLowerCase();
+  ).trim();
 
+  // Jika input berupa JWT / Bearer token
+  if (pass.startsWith("eyJ") || pass.includes(".")) {
+    const verified = verifyAuthToken(pass, config.authSecret);
+    if (verified) {
+      return { valid: true, mode: verified.mode };
+    }
+  }
+
+  const passLower = pass.toLowerCase();
   const adminPass = config.adminPassword.toLowerCase();
   const userPass = config.userPassword.toLowerCase();
 
-  if (pass === "admin" || pass === adminPass) {
+  if (passLower === "admin" || passLower === adminPass) {
     return { valid: true, mode: "jocelyn" };
   }
-  if (pass === "login" || pass === userPass) {
+  if (passLower === "login" || passLower === userPass) {
     return { valid: true, mode: "default" };
   }
 
@@ -166,7 +176,11 @@ const server = http.createServer((req, res) => {
   // Endpoint Unduh Dokumen Hasil Proses Latar Belakang (RFC 6266)
   if (req.url?.startsWith("/api/documents/download")) {
     const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
-    const jobId = parsedUrl.searchParams.get("id");
+    let jobId = parsedUrl.searchParams.get("id");
+    if (!jobId) {
+      const match = parsedUrl.pathname.match(/^\/api\/documents\/download\/([a-zA-Z0-9_-]+)/);
+      if (match) jobId = match[1];
+    }
     const job = jobId ? jobService.getJob(jobId) : undefined;
     if (!job || !job.resultBuffer) {
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -175,8 +189,16 @@ const server = http.createServer((req, res) => {
     }
     const safeName = job.fileName || "dokumen";
     const asciiName = safeName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const lowerName = safeName.toLowerCase();
+    let mimeType = "application/octet-stream";
+    if (lowerName.endsWith(".pdf")) mimeType = "application/pdf";
+    else if (lowerName.endsWith(".xlsx")) mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    else if (lowerName.endsWith(".docx")) mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    else if (lowerName.endsWith(".txt")) mimeType = "text/plain; charset=utf-8";
+    else if (lowerName.endsWith(".json")) mimeType = "application/json";
+
     res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
+      "Content-Type": mimeType,
       "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
       "Content-Length": job.resultBuffer.length,
     });
@@ -186,18 +208,12 @@ const server = http.createServer((req, res) => {
 
   // Endpoint Memori Turso (Untuk Serverless Parity & Direct Client)
   if (req.url === "/api/memory" || req.url?.startsWith("/api/memory?") || req.url?.startsWith("/api/memory/block")) {
-    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
-    const rawHeader = req.headers["x-admin-password"];
-    const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const authPass =
-      headerPass ||
-      parsedUrl.searchParams.get("password") ||
-      parsedUrl.searchParams.get("key");
+    const auth = getReqAuth(req);
 
     // Zero-leak security: Hanya admin yang diizinkan mengambil blok memori
-    if (authPass !== "admin" && authPass !== config.adminPassword) {
+    if (!auth.valid || auth.mode !== "jocelyn") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ memoryContext: null, mode: "default" }));
+      res.end(JSON.stringify({ memoryContext: null, mode: auth.mode || "default" }));
       return;
     }
 
@@ -223,11 +239,9 @@ const server = http.createServer((req, res) => {
     req.on("end", async () => {
       try {
         const parsed = JSON.parse(body || "{}");
-        const rawHeader = req.headers["x-admin-password"];
-        const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-        const authPass = headerPass || parsed.password;
+        const auth = getReqAuth(req, parsed.password || parsed.token);
 
-        if (authPass !== "admin" && authPass !== config.adminPassword) {
+        if (!auth.valid || auth.mode !== "jocelyn") {
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ ok: false, message: "Ignored for non-admin" }));
         }
@@ -257,11 +271,9 @@ const server = http.createServer((req, res) => {
     req.on("end", async () => {
       try {
         const parsed = JSON.parse(body || "{}");
-        const rawHeader = req.headers["x-admin-password"];
-        const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-        const authPass = headerPass || parsed.password;
+        const auth = getReqAuth(req, parsed.password || parsed.token);
 
-        if (authPass !== "admin" && authPass !== config.adminPassword) {
+        if (!auth.valid || auth.mode !== "jocelyn") {
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ ok: false, message: "Ignored for non-admin" }));
         }
@@ -291,11 +303,9 @@ const server = http.createServer((req, res) => {
     req.on("end", async () => {
       try {
         const parsed = JSON.parse(body || "{}");
-        const rawHeader = req.headers["x-admin-password"];
-        const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-        const authPass = headerPass || parsed.password;
+        const auth = getReqAuth(req, parsed.password || parsed.token);
 
-        if (authPass !== "admin" && authPass !== config.adminPassword) {
+        if (!auth.valid || auth.mode !== "jocelyn") {
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ ok: false, message: "Ignored for non-admin" }));
         }
@@ -374,30 +384,24 @@ const server = http.createServer((req, res) => {
 
   // Ephemeral Token endpoint (kompatibel dengan mode Vercel Serverless)
   if (req.url?.startsWith("/api/token")) {
-    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
-    const authPass =
-      req.headers["x-admin-password"] ||
-      parsedUrl.searchParams.get("password") ||
-      parsedUrl.searchParams.get("key");
-
-    const validPasswords = ["admin", "login", config.adminPassword];
-    if (!authPass || !validPasswords.includes(String(authPass).trim())) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') diperlukan." }));
+      res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') atau token diperlukan." }));
       return;
     }
 
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
     const rawClientKey = req.headers["x-gemini-key"] || parsedUrl.searchParams.get("apiKey");
     const customKey = (Array.isArray(rawClientKey) ? rawClientKey[0] : rawClientKey || "").trim();
 
-    let candidateKeys: string[] = [];
-    if (customKey) {
-      candidateKeys = [customKey];
-    } else if (config.geminiApiKeys && config.geminiApiKeys.length > 0) {
-      candidateKeys = config.geminiApiKeys;
-    } else if (config.geminiApiKey) {
-      candidateKeys = [config.geminiApiKey];
-    }
+    const envKeys = (config.geminiApiKeys && config.geminiApiKeys.length > 0)
+      ? config.geminiApiKeys
+      : (config.geminiApiKey ? [config.geminiApiKey] : []);
+
+    let candidateKeys: string[] = customKey
+      ? [customKey, ...envKeys.filter((k) => k !== customKey)]
+      : envKeys;
 
     if (candidateKeys.length === 0) {
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -421,7 +425,12 @@ const server = http.createServer((req, res) => {
     const coolingKeys = orderedKeys.filter((k) => (serverKeyCooldownMap.get(k) || 0) > now);
     const keysToTry = readyKeys.length > 0 ? [...readyKeys, ...coolingKeys] : coolingKeys;
 
-    const selectedVoice = resolveVoiceId(parsedUrl.searchParams.get("voice") || config.geminiVoice);
+    const BANNED_MALE_VOICES = new Set(["puck", "charon", "fenrir", "orus", "id-id-ardineural"]);
+    let rawVoice = parsedUrl.searchParams.get("voice") || config.geminiVoice || DEFAULT_VOICE_NAME;
+    if (BANNED_MALE_VOICES.has(rawVoice.toLowerCase())) {
+      rawVoice = DEFAULT_VOICE_NAME;
+    }
+    const selectedVoice = resolveVoiceId(rawVoice);
 
     (async () => {
       let tokenResource: any = null;
@@ -462,7 +471,7 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      const isAdmin = authPass === "admin" || authPass === config.adminPassword;
+      const isAdmin = auth.mode === "jocelyn";
       const memoryContext = isAdmin ? await memoryService.getMemoryPromptBlock() : undefined;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
@@ -743,6 +752,20 @@ const server = http.createServer((req, res) => {
         const fileName = String(body.fileName || "dokumen.pdf").trim();
         const operation = body.operation || "edit";
         const stage = body.stage ? String(body.stage) : "";
+
+        // Cabang khusus pengolahan foto interaktif (operation: "edit_image")
+        if (operation === "edit_image") {
+          const editResult = await documentService.processImageEdit({
+            fileName,
+            action: body.action,
+            instruction: body.instruction,
+            backgroundColor: body.backgroundColor,
+            imagePreviewDataUrl: body.imagePreviewDataUrl || body.originalContent,
+          });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(editResult));
+          return;
+        }
 
         // Tahap bertahap (dipanggil klien di latar belakang): potongan teks -> section JSON
         if (stage === "chunk") {

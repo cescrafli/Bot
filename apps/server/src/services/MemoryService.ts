@@ -174,7 +174,7 @@ export class MemoryService {
 
       // 1. Ambil fakta profil
       const factsRs = await db.execute(
-        "SELECT category, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 25"
+        "SELECT category, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 55"
       );
 
       // 2. Ambil ringkasan sesi terbaru
@@ -640,7 +640,26 @@ export class MemoryService {
     // Jika obrolan terlalu singkat (kurang dari 2 pesan), tidak perlu dibuatkan ringkasan
     if (!buffer || buffer.length < 2) return;
     const db = this.getClient();
-    if (!db || !process.env.GEMINI_API_KEY) return;
+    if (!db) return;
+
+    // Kumpulkan seluruh kandidat API key untuk rotasi & failover otomatis
+    const envKeys = (config.geminiApiKeys && config.geminiApiKeys.length > 0)
+      ? [...config.geminiApiKeys]
+      : (process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(",").map((k) => k.trim()).filter(Boolean) : []);
+    if (process.env.GEMINI_API_KEY && !envKeys.includes(process.env.GEMINI_API_KEY)) {
+      envKeys.unshift(process.env.GEMINI_API_KEY);
+    }
+    if (process.env.GEMINI_API_KEY_FALLBACK && !envKeys.includes(process.env.GEMINI_API_KEY_FALLBACK)) {
+      envKeys.push(process.env.GEMINI_API_KEY_FALLBACK);
+    }
+    if (process.env.GEMINI_API_KEY_SECRET && !envKeys.includes(process.env.GEMINI_API_KEY_SECRET)) {
+      envKeys.push(process.env.GEMINI_API_KEY_SECRET);
+    }
+
+    if (envKeys.length === 0) {
+      console.warn("[MEMORY] ⚠️ Kunci API Gemini tidak ditemukan untuk merangkum sesi.");
+      return;
+    }
 
     try {
       console.log(`[MEMORY] 🧠 Menganalisis & merangkum sesi ${sessionId} (${buffer.length} pesan)...`);
@@ -653,7 +672,7 @@ export class MemoryService {
       let existingFactsBlock = "";
       try {
         const existingRs = await db.execute(
-          "SELECT id, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 20"
+          "SELECT id, fact FROM user_profile ORDER BY importance DESC, updated_at DESC LIMIT 30"
         );
         if (existingRs.rows.length > 0) {
           existingFactsBlock =
@@ -662,10 +681,6 @@ export class MemoryService {
         }
       } catch {}
 
-      const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: { apiVersion: "v1alpha" },
-      });
       const prompt = `Analisis transkrip obrolan singkat antara Pengguna (Rafli) dan Celyn berikut:
 
 ${transcript}
@@ -694,22 +709,33 @@ Format output WAJIB JSON:
 
       let responseText = "";
       const preferredModel = config.textModel || process.env.TEXT_MODEL || "gemini-3-flash-preview";
-      const modelsToTry = [preferredModel, "gemini-3.8-flash", "gemini-3-flash-preview"];
-      // Dedup models
+      const modelsToTry = [preferredModel, "gemini-3.8-flash", "gemini-2.5-flash", "gemini-3-flash-preview"];
       const uniqueModels = Array.from(new Set(modelsToTry));
-      for (const modelName of uniqueModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-            },
-          });
-          responseText = response.text || "";
-          if (responseText) break;
-        } catch (modelErr: any) {
-          console.warn(`[MEMORY] ⚠️ Model ${modelName} gagal: ${modelErr?.message || modelErr}, mencoba alternatif...`);
+
+      // Multi-key & multi-model failover loop
+      outerLoop: for (const key of envKeys) {
+        const ai = new GoogleGenAI({
+          apiKey: key,
+          httpOptions: { apiVersion: "v1alpha" },
+        });
+        for (const modelName of uniqueModels) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: prompt,
+              config: {
+                responseMimeType: "application/json",
+              },
+            });
+            responseText = response.text || "";
+            if (responseText) break outerLoop;
+          } catch (modelErr: any) {
+            const msg = String(modelErr?.message || modelErr);
+            console.warn(`[MEMORY] ⚠️ Model ${modelName} dengan key ${key.slice(0, 8)}... gagal: ${msg}, mencoba alternatif...`);
+            if (/quota|rate\s*limit|resource_exhausted/i.test(msg)) {
+              break; // Coba key berikutnya jika quota habis
+            }
+          }
         }
       }
 
@@ -732,7 +758,9 @@ Format output WAJIB JSON:
         return;
       }
 
-      const parsed = JSON.parse(responseText);
+      // Bersihkan format markdown jika ada pembungkus ```json
+      const sanitizedJsonStr = responseText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, "$1").trim();
+      const parsed = JSON.parse(sanitizedJsonStr);
 
       const cleanSummary = this.sanitizeText(parsed.summary || "");
       const cleanMood = this.sanitizeText(parsed.userMood || "santai");

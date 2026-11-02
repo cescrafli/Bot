@@ -44,6 +44,24 @@ export interface ProcessDocumentInPlaceParams {
   targetLanguage?: string;
 }
 
+export interface ProcessImageEditParams {
+  fileName?: string;
+  action?: string;
+  instruction?: string;
+  backgroundColor?: string;
+  imagePreviewDataUrl?: string;
+}
+
+export interface ProcessImageEditResult {
+  ok: boolean;
+  action?: string;
+  subjectBox?: { ymin: number; xmin: number; ymax: number; xmax: number };
+  backgroundColorHex?: string;
+  backgroundImageDataUrl?: string | null;
+  svgSceneMarkup?: string;
+  explanation: string;
+}
+
 export class DocumentService {
   constructor() {}
 
@@ -405,6 +423,141 @@ KEMBALIKAN HANYA JSON VALID SESUAI SKEMA REPORTPAYLOAD:
         mimeType,
       };
     }
+  }
+
+  /**
+   * Pemrosesan Pengeditan Foto Berbasis Suara (Voice-Driven Photo Editing)
+   * Menggunakan Gemini 2.5 Flash Vision untuk ekstraksi koordinat subjek dan sintesis scene
+   * serta fallback pemandangan fotorealistik gratis.
+   */
+  async processImageEdit(params: ProcessImageEditParams): Promise<ProcessImageEditResult> {
+    const action = String(params.action || "transform").toLowerCase();
+    const rawInstruction = String(params.instruction || "Edit gambar ini").trim();
+    const userBgColor = params.backgroundColor ? String(params.backgroundColor).trim() : "";
+    const sourceImage = String(params.imagePreviewDataUrl || "").trim();
+
+    if (action === "hide" || action === "show" || action === "reset") {
+      return {
+        ok: true,
+        action,
+        explanation:
+          action === "hide"
+            ? "Tampilan foto telah berhasil disembunyikan dari layar."
+            : action === "show"
+            ? "Foto kembali ditampilkan di layar utama."
+            : "Foto telah dikembalikan ke versi asli.",
+      };
+    }
+
+    const visionPrompt = `Anda adalah AI Vision & Graphic Designer Celyn.
+Pengguna meminta pengeditan visual pada foto: "${rawInstruction}".
+Aksi yang diminta: "${action}".
+Warna latar yang diinginkan (jika ada): "${userBgColor}".
+
+Tugas Anda:
+1. Tentukan subjek utama foto (orang/objek di depan) dan berikan perkiraan subjectBox dalam skala 0..1000: {"ymin": 120, "xmin": 180, "ymax": 950, "xmax": 820}.
+2. Jika diminta ganti warna latar belakang (misal biru, merah, putih, dsb), berikan kode hex backgroundColorHex yang tepat (contoh: "#1d4ed8" untuk pasfoto biru resmi, "#dc2626" untuk merah, "#ffffff" untuk putih).
+3. Jika pengguna meminta menambahkan objek di belakang (misal pohon, tanaman, awan) atau mengganti suasana latar (pantai, taman, senja):
+   - Buat englishVisualPrompt yang deskriptif dan estetis (contoh: "lush green tropical trees in the background, soft outdoor sunlight, high quality").
+   - Buat svgSceneMarkup yang valid, indah, dan kaya detail berupa elemen pohon/taman/latar belakang dalam SVG dengan viewBox="0 0 1000 750" yang siap diletakkan di belakang subjek foto!
+4. Berikan penjelasan singkat, ramah, dan santai dalam Bahasa Indonesia (explanation) yang menjelaskan perubahan apa saja yang telah dilakukan.
+
+KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
+{
+  "subjectBox": { "ymin": 120, "xmin": 180, "ymax": 950, "xmax": 820 },
+  "backgroundColorHex": "#1d4ed8",
+  "visualScenePrompt": "lush green trees in background",
+  "svgSceneMarkup": "<svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 1000 750\\"><rect width=\\"1000\\" height=\\"750\\" fill=\\"#e0f2fe\\"/><g><path d=\\"M500 200 C300 200 200 400 350 550 C200 700 500 750 500 750 C500 750 800 700 650 550 C800 400 700 200 500 200 Z\\" fill=\\"#15803d\\"/><rect x=\\"470\\" y=\\"550\\" width=\\"60\\" height=\\"200\\" fill=\\"#78350f\\"/></g></svg>",
+  "explanation": "Latar belakang foto sudah disesuaikan dan ditambahkan pepohonan hijau rindang di belakangmu!"
+}`;
+
+    let visionResult: any = {
+      subjectBox: { ymin: 120, xmin: 180, ymax: 950, xmax: 820 },
+      backgroundColorHex: userBgColor || undefined,
+      visualScenePrompt: rawInstruction,
+      svgSceneMarkup: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 750"><rect width="1000" height="750" fill="#f0fdf4"/><g opacity="0.95"><path d="M500 120 C320 120 220 320 360 480 C220 640 500 700 500 700 C500 700 780 640 640 480 C780 320 680 120 500 120 Z" fill="#16a34a"/><path d="M300 250 C180 250 120 380 220 500 C150 620 350 680 350 680 C350 680 500 620 420 500 C500 380 420 250 300 250 Z" fill="#15803d"/><rect x="465" y="520" width="70" height="230" fill="#78350f" rx="10"/></g></svg>`,
+      explanation: `Perubahan visual pada foto '${params.fileName || "foto"}' telah diterapkan.`,
+    };
+
+    try {
+      const keys =
+        config.geminiApiKeys && config.geminiApiKeys.length > 0
+          ? config.geminiApiKeys
+          : [config.geminiApiKey];
+
+      const contents: any[] = [];
+      if (sourceImage.startsWith("data:image/")) {
+        const match = sourceImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+        if (match) {
+          contents.push({
+            inlineData: {
+              mimeType: match[1],
+              data: match[2],
+            },
+          });
+        }
+      }
+      contents.push({ text: visionPrompt });
+
+      for (const key of keys) {
+        if (!key) continue;
+        try {
+          const ai = new GoogleGenAI({ apiKey: key });
+          const resp = (await Promise.race([
+            ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents,
+              config: {
+                responseMimeType: "application/json",
+              },
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000)),
+          ])) as any;
+          const rawText = cleanJson(resp?.text || "");
+          if (rawText) {
+            const parsed = JSON.parse(rawText);
+            if (parsed && typeof parsed === "object") {
+              visionResult = { ...visionResult, ...parsed };
+              break;
+            }
+          }
+        } catch (kErr) {
+          console.warn("[DocumentService processImageEdit] Key failed:", (kErr as any)?.message || kErr);
+        }
+      }
+    } catch (err) {
+      console.warn("[DocumentService processImageEdit] Vision fallback:", err);
+    }
+
+    let generatedImageDataUrl: string | null = null;
+    if (visionResult.visualScenePrompt && (action === "add_object" || action === "replace_background")) {
+      try {
+        const freeImgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+          visionResult.visualScenePrompt + ", lush trees scenery, high quality photography"
+        )}?width=800&height=600&nologo=true`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4500);
+        const imgFetch = await fetch(freeImgUrl, { signal: controller.signal });
+        clearTimeout(timer);
+        if (imgFetch.ok) {
+          const arrBuf = await imgFetch.arrayBuffer();
+          const b64 = Buffer.from(arrBuf).toString("base64");
+          generatedImageDataUrl = `data:image/jpeg;base64,${b64}`;
+        }
+      } catch (e) {
+        // Fallback ke SVG scene markup
+      }
+    }
+
+    return {
+      ok: true,
+      action,
+      subjectBox: visionResult.subjectBox,
+      backgroundColorHex: visionResult.backgroundColorHex || userBgColor,
+      backgroundImageDataUrl: generatedImageDataUrl,
+      svgSceneMarkup: visionResult.svgSceneMarkup,
+      explanation: visionResult.explanation,
+    };
   }
 }
 

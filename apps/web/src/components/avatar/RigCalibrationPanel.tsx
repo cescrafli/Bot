@@ -2,28 +2,23 @@ import React from "react";
 import { Sliders, X, RotateCcw, Copy, Check, Eye } from "lucide-react";
 
 export interface RigConfig {
-  armPivotLX: number;
-  armPivotLY: number;
-  armPivotRX: number;
-  armPivotRY: number;
   mouthPivotX: number;
   mouthPivotY: number;
   mouthScale: number;
-  armMaxRot: number;
   breathIntensity: number;
   breathSpeed: number;
   showPivots: boolean;
+  armPivotLX?: number;
+  armPivotLY?: number;
+  armPivotRX?: number;
+  armPivotRY?: number;
+  armMaxRot?: number;
 }
 
 export const DEFAULT_RIG_CONFIG: RigConfig = {
-  armPivotLX: 28.9,
-  armPivotLY: 45.1,
-  armPivotRX: 71.7,
-  armPivotRY: 44.7,
   mouthPivotX: 51.6,
   mouthPivotY: 33.3,
   mouthScale: 1.0,
-  armMaxRot: 3.5,
   breathIntensity: 3.5,
   breathSpeed: 1.6,
   showPivots: false,
@@ -84,88 +79,8 @@ export const RigCalibrationPanel: React.FC<RigCalibrationPanelProps> = ({
         />
       </div>
 
-      {/* Bagian Lengan */}
-      <div className="space-y-3 mb-4">
-        <div className="text-[11px] font-bold text-rose-300 uppercase tracking-wider">
-          Sendi Bahu & Lengan
-        </div>
-        <div>
-          <div className="flex justify-between mb-1">
-            <span>Bahu Kiri (X, Y)</span>
-            <span className="text-slate-400">
-              {config.armPivotLX.toFixed(1)}%, {config.armPivotLY.toFixed(1)}%
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="range"
-              min="10"
-              max="50"
-              step="0.2"
-              value={config.armPivotLX}
-              onChange={(e) => update("armPivotLX", parseFloat(e.target.value))}
-              className="w-full accent-rose-500"
-            />
-            <input
-              type="range"
-              min="30"
-              max="65"
-              step="0.2"
-              value={config.armPivotLY}
-              onChange={(e) => update("armPivotLY", parseFloat(e.target.value))}
-              className="w-full accent-rose-500"
-            />
-          </div>
-        </div>
-
-        <div>
-          <div className="flex justify-between mb-1">
-            <span>Bahu Kanan (X, Y)</span>
-            <span className="text-slate-400">
-              {config.armPivotRX.toFixed(1)}%, {config.armPivotRY.toFixed(1)}%
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="range"
-              min="50"
-              max="90"
-              step="0.2"
-              value={config.armPivotRX}
-              onChange={(e) => update("armPivotRX", parseFloat(e.target.value))}
-              className="w-full accent-rose-500"
-            />
-            <input
-              type="range"
-              min="30"
-              max="65"
-              step="0.2"
-              value={config.armPivotRY}
-              onChange={(e) => update("armPivotRY", parseFloat(e.target.value))}
-              className="w-full accent-rose-500"
-            />
-          </div>
-        </div>
-
-        <div>
-          <div className="flex justify-between mb-1">
-            <span>Maks Sudut Ayunan Lengan</span>
-            <span className="text-slate-400">{config.armMaxRot.toFixed(1)}°</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="6"
-            step="0.1"
-            value={config.armMaxRot}
-            onChange={(e) => update("armMaxRot", parseFloat(e.target.value))}
-            className="w-full accent-rose-500"
-          />
-        </div>
-      </div>
-
       {/* Bagian Mulut & Lip-Sync */}
-      <div className="space-y-3 mb-4 pt-2 border-t border-white/10">
+      <div className="space-y-3 mb-4 pt-1">
         <div className="text-[11px] font-bold text-pink-300 uppercase tracking-wider">
           Posisi Mulut & Lip-Sync
         </div>

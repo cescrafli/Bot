@@ -629,50 +629,88 @@ export function useAudioEngine({
     setIsMicActive(false);
   }, []);
 
-  // Fitur Tes Bicara & Lip-Sync Mandiri (Memutar rekaman suara asli Celyn dari Gemini)
-  const triggerTestSpeech = useCallback(async () => {
-    try {
-      // Hentikan pemutaran sebelumnya jika sedang ada suara
-      stopPlayback();
+  // Fitur Tes Bicara & Lip-Sync Mandiri (Mendukung tes spesifik persona suara Aoede, Zephyr, Leda, Kore)
+  const triggerTestSpeech = useCallback(
+    async (voiceId?: string) => {
+      try {
+        stopPlayback();
 
-      const ctx = getOrCreateAudioContext();
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-
-      console.log("🔊 Memutar audio tes GadisNeural (/celyn_test_greeting.mp3)...");
-      const res = await fetch("/celyn_test_greeting.mp3");
-      const arrayBuffer = await res.arrayBuffer();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-
-      if (analyserRef.current) {
-        source.connect(analyserRef.current);
-      } else {
-        source.connect(ctx.destination);
-      }
-
-      activeSourcesRef.current.push(source);
-      source.start();
-      setIsPlaying(true);
-      isPlayingRef.current = true;
-
-      source.onended = () => {
-        activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
-        if (activeSourcesRef.current.length === 0) {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
+        const ctx = getOrCreateAudioContext();
+        if (ctx.state === "suspended") {
+          await ctx.resume();
         }
-        console.log("✅ Tes audio Celyn selesai.");
-      };
-    } catch (err) {
-      console.error("Gagal memutar tes audio:", err);
-      setIsPlaying(false);
-      isPlayingRef.current = false;
-    }
-  }, [getOrCreateAudioContext, stopPlayback]);
+
+        let audioBuffer: AudioBuffer | null = null;
+
+        // Jika voiceId spesifik diminta, coba sintesis sampel suara via /api/tts
+        if (voiceId) {
+          try {
+            const greetings: Record<string, string> = {
+              Aoede: "Halo! Aku Celyn dengan karakter vokal Aoede yang ramah, hangat, dan jernih.",
+              Zephyr: "Halo! Aku Celyn dengan karakter vokal Zephyr yang tenang, teduh, dan bijaksana.",
+              Leda: "Halo! Aku Celyn dengan karakter vokal Leda yang tegas, profesional, dan lugas.",
+              Kore: "Halo! Aku Celyn dengan karakter vokal Kore yang ceria, santai, dan bersemangat.",
+            };
+            const testText = greetings[voiceId] || `Halo! Aku Celyn, senang menyapamu dengan suara ${voiceId}.`;
+            const ttsRes = await fetch("/api/tts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: testText, voiceName: voiceId }),
+            });
+            if (ttsRes.ok) {
+              const data = await ttsRes.json().catch(() => null);
+              if (data?.audio) {
+                const binary = atob(data.audio);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                  bytes[i] = binary.charCodeAt(i);
+                }
+                audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+              }
+            }
+          } catch (e) {
+            console.warn("[useAudioEngine] TTS test fallback:", e);
+          }
+        }
+
+        // Fallback ke file MP3 bawaan jika offline atau tanpa voiceId
+        if (!audioBuffer) {
+          console.log("🔊 Memutar audio tes bawaan (/celyn_test_greeting.mp3)...");
+          const res = await fetch("/celyn_test_greeting.mp3");
+          const arrayBuffer = await res.arrayBuffer();
+          audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+
+        if (analyserRef.current) {
+          source.connect(analyserRef.current);
+        } else {
+          source.connect(ctx.destination);
+        }
+
+        activeSourcesRef.current.push(source);
+        source.start();
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+
+        source.onended = () => {
+          activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+          if (activeSourcesRef.current.length === 0) {
+            setIsPlaying(false);
+            isPlayingRef.current = false;
+          }
+          console.log("✅ Tes audio Celyn selesai.");
+        };
+      } catch (err) {
+        console.error("Gagal memutar tes audio:", err);
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+      }
+    },
+    [getOrCreateAudioContext, stopPlayback]
+  );
 
   // Pembersihan resource audio saat hook di-unmount
   useEffect(() => {

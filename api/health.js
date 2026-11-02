@@ -115,7 +115,12 @@ export default async function handler(req, res) {
   }
 
   // Diagnostic mode for authorized administrator
-  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
+  const hasGeminiKey = Boolean(
+    process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEYS ||
+    process.env.GEMINI_API_KEY_FALLBACK ||
+    process.env.GEMINI_API_KEY_SECRET
+  );
   const hasTursoUrl = Boolean(process.env.TURSO_DATABASE_URL);
   const hasTursoToken = Boolean(process.env.TURSO_AUTH_TOKEN);
   const hasAdminPass = Boolean(process.env.ADMIN_PASSWORD);

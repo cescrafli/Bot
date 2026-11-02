@@ -82,6 +82,10 @@ export interface ParsedDocument {
   totalPages?: number;
   truncated: boolean;
   characterCount: number;
+  previewDataUrl?: string; // Data URL untuk pratinjau gambar & pemrosesan kanvas sisi klien
+  originalPreviewDataUrl?: string; // Data URL foto asli sebelum diedit (untuk perbandingan & reset)
+  transformedPreviewDataUrl?: string; // Data URL hasil manipulasi visual terkini
+  subjectBox?: { ymin: number; xmin: number; ymax: number; xmax: number }; // Koordinat bounding box subjek utama hasil AI Vision
 }
 
 // =========================================================================
@@ -129,7 +133,8 @@ export function stripMarkdownFormatting(rawText: string): string {
  */
 export function buildSafeLiveDocumentContext(
   doc: ParsedDocument,
-  maxSafeChars: number = 20000
+  maxSafeChars: number = 20000,
+  silent: boolean = true
 ): string {
   const content = doc.markdownContent || "";
   const totalChars = doc.characterCount || content.length;
@@ -149,6 +154,10 @@ export function buildSafeLiveDocumentContext(
     injectedText = `${head}\n\n... [Bagian isi tengah dokumen (halaman 2 s.d ${Math.max(2, pages - 2)}) tersimpan lengkap di memori Celyn (${totalChars.toLocaleString("id-ID")} karakter). Teks lengkap siap digunakan untuk analisis mendalam, perangkuman bab spesifik, atau ekspor.] ...\n\n${tail}`;
   }
 
+  const instructionText = silent
+    ? `INSTRUKSI RESPON WAJIB: Dokumen '${doc.fileName}' (${pages} halaman, ${totalChars.toLocaleString("id-ID")} karakter) telah tersimpan di memori konteks aktifmu. Resap dan pelajari seluruh isinya secara menyeluruh. Celyn berada dalam mode UPLOAD-THEN-WAIT: JANGAN langsung merangkum atau membaca isi dokumen jika pengguna belum meminta. Jika pengguna memberikan pertanyaan, tugas, atau instruksi terkait dokumen ini (seperti soal ujian, analisis data, revisi, terjemahan, atau ekspor), jawablah secara langsung, komprehensif, dan tuntas! Jika pengguna belum memberikan perintah, tunggu instruksi selanjutnya.`
+    : `INSTRUKSI RESPON WAJIB: Dokumen '${doc.fileName}' (${pages} halaman, ${totalChars.toLocaleString("id-ID")} karakter) baru saja diunggah oleh pengguna dan seluruh teks lengkapnya telah tersimpan di memorimu. Sapa pengguna secara hangat dan konfirmasi singkat bahwa dokumen '${doc.fileName}' sudah kamu terima dan baca tuntas, lalu tanyakan dengan ramah apa yang ingin dibahas atau diolah dari dokumen ini (misal dirangkum, diedit, dianalisis, atau diekspor). JANGAN membaca seluruh isi dokumen kata per kata.`;
+
   return `[PENGGUNA MENGUNGGAH DOKUMEN: ${doc.fileName}]
 Informasi Dokumen: ${pages} Halaman, ${totalChars.toLocaleString("id-ID")} Karakter${isTruncatedForLive ? " (Dokumen Komprehensif / Lengkap)" : ""}.
 Berikut adalah intisari isi dokumen yang baru saja dibaca:
@@ -157,7 +166,7 @@ Berikut adalah intisari isi dokumen yang baru saja dibaca:
 ${injectedText}
 </document_context>
 
-INSTRUKSI RESPON WAJIB: Dokumen '${doc.fileName}' (${pages} halaman, ${totalChars.toLocaleString("id-ID")} karakter) baru saja diunggah oleh pengguna dan seluruh teks lengkapnya telah tersimpan di memorimu. Segera respon secara lisan dengan hangat, ramah, dan natural dalam Bahasa Indonesia bahwa kamu sudah membaca tuntas dokumen '${doc.fileName}' tersebut (sebutkan topik/judul utamanya jika tampak dari isi dokumen), lalu tanyakan kepada pengguna dokumen ini mau diapakan (contohnya: mau dirangkum poin-poin utamanya, dicari rekomendasi terapi atau bab tertentu, diedit isinya, atau diekspor ke PDF/Word/Excel). JANGAN membaca seluruh isi dokumen kata per kata, cukup sapa dan tanyakan rencana pengguna terhadap dokumen ini.`;
+${instructionText}`;
 }
 
 /**

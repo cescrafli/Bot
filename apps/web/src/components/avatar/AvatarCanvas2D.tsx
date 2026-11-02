@@ -138,8 +138,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       "/celyn_torso_rig_surprised_closed.png",
       "/celyn_torso_rig_shy.png",
       "/celyn_torso_rig_shy_closed.png",
-      "/celyn_arm_l_clean.png",
-      "/celyn_arm_r_clean.png",
     ].forEach((src) => {
       const img = new Image();
       img.src = src;
@@ -512,11 +510,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           <AvatarFaceOverlay
             emotion={emotion}
             isSpeaking={isSpeaking}
-            mouthOpen={mouthOpen}
             intonation={intonation}
-            mouthPivotX={rigConfig.mouthPivotX}
-            mouthPivotY={rigConfig.mouthPivotY}
-            mouthScale={rigConfig.mouthScale}
           />
 
           {/* ============================================================= */}
@@ -617,22 +611,6 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           {/* ============================================================= */}
           {rigConfig.showPivots && (
             <div className="absolute inset-0 w-full h-full pointer-events-none z-40">
-              {/* Bahu Kiri */}
-              <div
-                className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-500 bg-emerald-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: `${rigConfig.armPivotLX}%`, top: `${rigConfig.armPivotLY}%` }}
-                title="Sendi Bahu Kiri"
-              >
-                AL
-              </div>
-              {/* Bahu Kanan */}
-              <div
-                className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-500 bg-emerald-400 shadow-md flex items-center justify-center text-[7px] font-black text-black"
-                style={{ left: `${rigConfig.armPivotRX}%`, top: `${rigConfig.armPivotRY}%` }}
-                title="Sendi Bahu Kanan"
-              >
-                AR
-              </div>
               {/* Mulut */}
               <div
                 className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-400 bg-pink-300 shadow-md flex items-center justify-center text-[7px] font-black text-black"

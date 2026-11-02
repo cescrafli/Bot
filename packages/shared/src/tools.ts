@@ -146,6 +146,53 @@ export const CELYN_CORE_TOOLS: ToolDeclaration[] = [
       required: ["query"],
     },
   },
+  {
+    name: "edit_image",
+    description:
+      "Edit, manipulasi, ubah latar belakang, tambahkan objek di belakang subjek, atau kontrol tampilan foto di layar sesuai perintah pengguna (seperti: 'tambah pohon di belakangnya', 'ubah warna latar belakang jadi biru/merah', 'putar 90 derajat', 'crop 1:1', 'tolong hide foto', 'tampilkan kembali fotonya', 'kembalikan ke foto asli').",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        action: {
+          type: "STRING",
+          description:
+            "Aksi pengeditan: 'add_object' (tambah pohon/benda di belakang subjek), 'replace_background' (ganti suasana/latar belakang), 'background_color' (ganti warna latar belakang polos misal biru/merah), 'transform' (putar, crop, filter hitam-putih, watermark), 'hide' (sembunyikan foto dari layar), 'show' (tampilkan foto di layar), atau 'reset' (kembalikan ke foto asli)",
+        },
+        instruction: {
+          type: "STRING",
+          description:
+            "Instruksi detail pengeditan atau penjelasan perubahan yang diinginkan pengguna",
+        },
+        docId: {
+          type: "STRING",
+          description:
+            "Nama file foto yang ingin diedit (opsional, jika tidak disebutkan otomatis menargetkan foto aktif terakhir)",
+        },
+        backgroundColor: {
+          type: "STRING",
+          description:
+            "Kode warna atau nama warna latar belakang yang diinginkan (misal: 'biru', 'merah', 'putih', '#2563eb')",
+        },
+        rotation: {
+          type: "NUMBER",
+          description: "Sudut rotasi gambar: 90, -90, atau 180 (opsional)",
+        },
+        aspectRatio: {
+          type: "STRING",
+          description: "Rasio aspek crop: 'original', '1:1', '16:9', atau '4:3' (opsional)",
+        },
+        grayscale: {
+          type: "BOOLEAN",
+          description: "True jika ingin diubah menjadi hitam-putih (opsional)",
+        },
+        watermarkText: {
+          type: "STRING",
+          description: "Teks cap atau watermark yang ingin disematkan pada gambar (opsional)",
+        },
+      },
+      required: ["action", "instruction"],
+    },
+  },
 ];
 
 export interface ExpertPersonaInfo {
@@ -301,11 +348,41 @@ export function inferExpertPersona(query: string): ExpertPersonaInfo {
 }
 
 /**
- * Roadmap Fitur Masa Depan: Edit Foto & Manipulasi Gambar AI
+ * Pengolahan dan Manipulasi Gambar di Studio Gambar Celyn
  */
+export interface ImageAdjustments {
+  brightness?: number; // -100 to 100 (default 0)
+  contrast?: number; // -100 to 100 (default 0)
+  saturation?: number; // -100 to 100 (default 0)
+  grayscale?: boolean; // hitam putih
+  invert?: boolean; // inversi warna
+}
+
+export interface ImageCropPreset {
+  aspectRatio?: "original" | "1:1" | "16:9" | "4:3" | "3:4" | "custom";
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface ImageAnnotation {
+  text: string;
+  x: number;
+  y: number;
+  color?: string;
+  fontSize?: number;
+}
+
 export interface EditImageParams {
   fileName: string;
-  instruction: string;
+  instruction?: string;
+  rotation?: 0 | 90 | 180 | 270 | -90;
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+  crop?: ImageCropPreset;
+  adjustments?: ImageAdjustments;
+  annotations?: ImageAnnotation[];
   maskPrompt?: string;
   outputFormat?: "png" | "jpeg" | "webp";
 }

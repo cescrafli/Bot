@@ -139,6 +139,13 @@ function isTechnicalOrGenericQuestion(text) {
   return false;
 }
 
+function cleanJson(text) {
+  if (!text) return "";
+  let t = String(text).trim();
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  return t.trim();
+}
+
 function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   if (!rawText || typeof rawText !== "string") return "";
   let clean = rawText.trim();
@@ -176,13 +183,29 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   if (isDrink || isFood) {
     const action = isDrink ? "minum" : "makan";
     const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
-    let item = cleanSubjectAndAux(clean);
-    const verbStrip = /^(?:suka|sukanya|doyan|makan|minum)\s+/i;
-    while (verbStrip.test(item)) {
-      item = item.replace(verbStrip, "").trim();
+    let item = "";
+
+    const verbMatch = clean.match(
+      /\b(?:lebih\s+)?(?:suka|sukanya|doyan|paling suka|favorit|gemar|hobi)\s+(?:banget\s+)?(?:(?:minum|makan|ngopi|nyemil)\s+)?([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi|\s+deh|\s+tolong|\s+ya)/i
+    );
+    const nounMatch = clean.match(
+      /\b(?:(?:makanan|minuman|kopi)\s+)?(?:kesukaan|favorit|paling pas di lidah|pas di lidah|cocok di lidah)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+bukan\s+|\s+karena|\s+deh|\s+tolong|\s+ya)/i
+    );
+
+    if (verbMatch && verbMatch[1]) {
+      item = cleanSubjectAndAux(verbMatch[1]);
+    } else if (nounMatch && nounMatch[1]) {
+      item = cleanSubjectAndAux(nounMatch[1]);
+    } else {
+      item = cleanSubjectAndAux(clean);
+      const verbStrip = /^(?:suka|sukanya|doyan|makan|minum)\s+/i;
+      while (verbStrip.test(item)) {
+        item = item.replace(verbStrip, "").trim();
+      }
+      item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
+      item = cleanSubjectAndAux(item);
     }
-    item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
-    item = cleanSubjectAndAux(item);
+
     if (item.length >= 2 && !INVALID_ITEM_RE.test(item)) {
       return `${subjek} suka ${action} ${item} (${tag})`;
     }
@@ -508,10 +531,28 @@ export default async function handler(req, res) {
       .map((r) => `${r.role === "user" ? "Pengguna" : "Celyn"}: ${r.content}`)
       .join("\n");
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
+    const customKey = (req.headers["x-gemini-key"] || "").trim();
+    const rawEnvKeys = [
+      process.env.GEMINI_API_KEYS,
+      process.env.GEMINI_API_KEY,
+      process.env.GEMINI_API_KEY_FALLBACK,
+      process.env.GEMINI_API_KEY_SECRET,
+    ]
+      .filter(Boolean)
+      .join(",");
+    const envKeys = rawEnvKeys
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    const sortedEnvKeys = [...new Set(envKeys)].sort((a, b) => {
+      if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
+      if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
+      return 0;
+    });
+    const candidateKeys = customKey ? [customKey, ...sortedEnvKeys] : sortedEnvKeys;
 
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1alpha" } });
+    if (candidateKeys.length === 0) return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
+
     const prompt = `Analisis transkrip obrolan singkat antara Pengguna (Rafli) dan Celyn berikut:
 
 ${transcript}
@@ -533,14 +574,32 @@ Format output WAJIB JSON:
   "newFacts": ["fakta 1"]
 }`;
 
-    const modelName = process.env.TEXT_MODEL || "gemini-3-flash-preview";
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: prompt,
-      config: { responseMimeType: "application/json" },
-    });
+    const modelsToTry = [
+      process.env.TEXT_MODEL,
+      "gemini-3.8-flash",
+      "gemini-2.5-flash",
+      "gemini-3-flash-preview",
+    ].filter(Boolean);
+    const uniqueModels = [...new Set(modelsToTry)];
 
-    const parsed = JSON.parse(response.text || "{}");
+    let parsed = {};
+    for (const key of candidateKeys) {
+      for (const m of uniqueModels) {
+        try {
+          const ai = new GoogleGenAI({ apiKey: key, httpOptions: { apiVersion: "v1alpha" } });
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (response?.text) {
+            parsed = JSON.parse(cleanJson(response.text));
+            break;
+          }
+        } catch (callErr) {}
+      }
+      if (parsed && (parsed.summary || parsed.userMood)) break;
+    }
     const wibNow = getWibTimestamp();
 
     if (parsed.summary) {

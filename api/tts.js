@@ -382,9 +382,17 @@ function inferIndonesianProsody(text, emotion) {
       volume = "+3%";
       break;
     case "sad":
-      rate = "-2%";
-      pitch = "-1Hz";
-      volume = "-2%";
+      if (
+        /\b(sabar ya|iyaaa|iyaa|tetap semangat|semangat ya|istirahat dulu|tenang ya|jangan sedih|jangan dipikirin|aku temani|aku dengerin|pelan-pelan|tarik napas)\b/i.test(text)
+      ) {
+        rate = "+0%";
+        pitch = "+0Hz";
+        volume = "+0%";
+      } else {
+        rate = "-2%";
+        pitch = "-1Hz";
+        volume = "-2%";
+      }
       break;
     case "neutral":
     default:
@@ -447,11 +455,44 @@ function cleanAndEscapeForSsml(rawText) {
 }
 
 function buildExpressiveSsml(rawText, options = {}) {
-  const voice = typeof options === "string" ? options : options.voice || DEFAULT_VOICE;
+  let voice = typeof options === "string" ? options : options.voice || options.voiceName || DEFAULT_VOICE;
+  const lowerVoice = String(voice).toLowerCase();
+
+  // Kustomisasi prosodi nada & kecepatan untuk uji coba persona suara Live (Aoede, Zephyr, Leda, Kore)
+  let customRate = typeof options === "object" ? options.rate : "";
+  let customPitch = typeof options === "object" ? options.pitch : "";
+
+  if (lowerVoice.includes("aoede")) {
+    customPitch = customPitch || "+2Hz";
+    customRate = customRate || "+5%";
+  } else if (lowerVoice.includes("zephyr")) {
+    customPitch = customPitch || "-3Hz";
+    customRate = customRate || "-4%";
+  } else if (lowerVoice.includes("leda")) {
+    customPitch = customPitch || "+0Hz";
+    customRate = customRate || "+2%";
+  } else if (lowerVoice.includes("kore")) {
+    customPitch = customPitch || "+4Hz";
+    customRate = customRate || "+8%";
+  }
+
+  if (
+    lowerVoice.includes("ardi") ||
+    lowerVoice.includes("male") ||
+    lowerVoice.includes("pria") ||
+    lowerVoice.includes("puck") ||
+    lowerVoice.includes("charon") ||
+    lowerVoice.includes("fenrir") ||
+    lowerVoice.includes("guy") ||
+    lowerVoice.includes("brian") ||
+    !lowerVoice.startsWith("id-id")
+  ) {
+    voice = DEFAULT_VOICE;
+  }
   const emotion = typeof options === "object" ? options.emotion : "neutral";
   const dyn = inferIndonesianProsody(rawText, emotion);
-  const rate = (typeof options === "object" && options.rate) || dyn.rate;
-  const pitch = (typeof options === "object" && options.pitch) || dyn.pitch;
+  const rate = customRate || dyn.rate;
+  const pitch = customPitch || dyn.pitch;
   const volume = (typeof options === "object" && options.volume) || dyn.volume;
 
   let escapedText = cleanAndEscapeForSsml(rawText);
@@ -785,7 +826,7 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     text = req.query?.text || "";
-    voice = req.query?.voice || DEFAULT_VOICE;
+    voice = req.query?.voice || req.query?.voiceName || DEFAULT_VOICE;
     emotion = req.query?.emotion || "neutral";
     rate = req.query?.rate || "";
     pitch = req.query?.pitch || "";
@@ -802,7 +843,7 @@ export default async function handler(req, res) {
       body = req.body;
     }
     text = body.text || "";
-    voice = body.voice || DEFAULT_VOICE;
+    voice = body.voice || body.voiceName || DEFAULT_VOICE;
     emotion = body.emotion || "neutral";
     rate = body.rate || "";
     pitch = body.pitch || "";

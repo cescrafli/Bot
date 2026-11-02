@@ -184,13 +184,29 @@ function summarizeFactEssence(rawText, defaultCategory = "catatan") {
   if (isDrink || isFood) {
     const action = isDrink ? "minum" : "makan";
     const tag = isDrink ? "minuman/kopi kesukaan" : "makanan kesukaan";
-    let item = cleanSubjectAndAux(clean);
-    const verbStrip = /^(?:suka|sukanya|doyan|makan|minum)\s+/i;
-    while (verbStrip.test(item)) {
-      item = item.replace(verbStrip, "").trim();
+    let item = "";
+
+    const verbMatch = clean.match(
+      /\b(?:lebih\s+)?(?:suka|sukanya|doyan|paling suka|favorit|gemar|hobi)\s+(?:banget\s+)?(?:(?:minum|makan|ngopi|nyemil)\s+)?([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+karena|\s+tapi|\s+deh|\s+tolong|\s+ya)/i
+    );
+    const nounMatch = clean.match(
+      /\b(?:(?:makanan|minuman|kopi)\s+)?(?:kesukaan|favorit|paling pas di lidah|pas di lidah|cocok di lidah)(?:ku|nya)?(?:\s+(?:saya|aku|gue|gw|celyn|jocelyn|rafli|dia|kamu|orang terkasih|kita))?\s*(?:adalah|itu|yaitu|ialah|yakni|berupa)?\s+([^.,!?\n]+?)(?:[\.,!\?]|$|\s+dan\s+|\s+bukan\s+|\s+karena|\s+deh|\s+tolong|\s+ya)/i
+    );
+
+    if (verbMatch && verbMatch[1]) {
+      item = cleanSubjectAndAux(verbMatch[1]);
+    } else if (nounMatch && nounMatch[1]) {
+      item = cleanSubjectAndAux(nounMatch[1]);
+    } else {
+      item = cleanSubjectAndAux(clean);
+      const verbStrip = /^(?:suka|sukanya|doyan|makan|minum)\s+/i;
+      while (verbStrip.test(item)) {
+        item = item.replace(verbStrip, "").trim();
+      }
+      item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
+      item = cleanSubjectAndAux(item);
     }
-    item = item.replace(/(?:makanan|minuman|kopi)?\s*(?:kesukaan|favorit)(?:ku|nya)?/i, "").trim();
-    item = cleanSubjectAndAux(item);
+
     if (item.length >= 2 && !INVALID_ITEM_RE.test(item)) {
       return `${subjek} suka ${action} ${item} (${tag})`;
     }

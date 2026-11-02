@@ -14,6 +14,212 @@ interface TranscriptDrawerProps {
   onClear: () => void;
 }
 
+function renderInlineTokens(text: string): React.ReactNode[] {
+  const tokenRegex = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(https?:\/\/[^\s<]+)|(\*\*([^*]+)\*\*)|(`([^`]+)`)/g;
+  const elements: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      elements.push(text.slice(lastIndex, match.index));
+    }
+
+    if (match[1]) {
+      // [Judul](url)
+      const title = match[2];
+      const url = match[3];
+      elements.push(
+        <a
+          key={match.index}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-rose-400 hover:text-rose-300 underline font-medium break-all"
+        >
+          {title}
+        </a>
+      );
+    } else if (match[4]) {
+      // Raw URL
+      const url = match[4];
+      elements.push(
+        <a
+          key={match.index}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-rose-400 hover:text-rose-300 underline break-all"
+        >
+          {url}
+        </a>
+      );
+    } else if (match[5]) {
+      // **tebal**
+      elements.push(
+        <strong key={match.index} className="font-semibold text-white">
+          {match[6]}
+        </strong>
+      );
+    } else if (match[7]) {
+      // `kode`
+      elements.push(
+        <code key={match.index} className="bg-slate-900/60 px-1 py-0.5 rounded text-[11px] font-mono text-rose-300">
+          {match[8]}
+        </code>
+      );
+    }
+
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    elements.push(text.slice(lastIndex));
+  }
+
+  return elements;
+}
+
+function FormattedTranscriptText({ content }: { content: string }) {
+  if (!content) return null;
+
+  // Split content by lines to detect markdown tables, headings, and bullet points
+  const lines = content.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const currentLine = lines[i];
+    const trimmed = currentLine.trim();
+
+    // 1. Deteksi Tabel Markdown: baris yang diawali dan diakhiri dengan '|'
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+
+      if (tableLines.length >= 2) {
+        const parseRow = (line: string) =>
+          line
+            .slice(1, -1)
+            .split("|")
+            .map((c) => c.trim());
+
+        const headers = parseRow(tableLines[0]);
+        const isSeparator = (line: string) => /^\|(\s*:?-+:?\s*\|)+$/.test(line);
+        const dataLines = isSeparator(tableLines[1]) ? tableLines.slice(2) : tableLines.slice(1);
+        const rows = dataLines.map(parseRow);
+
+        blocks.push(
+          <div
+            key={`table-${blocks.length}`}
+            className="my-2.5 overflow-x-auto rounded-xl border border-white/10 bg-slate-950/70 shadow-sm no-scrollbar"
+          >
+            <table className="w-full text-[11px] text-left border-collapse min-w-[260px]">
+              <thead>
+                <tr className="border-b border-white/10 bg-white/[0.04]">
+                  {headers.map((h, hIdx) => (
+                    <th key={hIdx} className="px-2.5 py-1.5 font-bold text-rose-300">
+                      {renderInlineTokens(h)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {rows.map((row, rIdx) => (
+                  <tr key={rIdx} className="hover:bg-white/[0.02] transition-colors">
+                    {row.map((cell, cIdx) => (
+                      <td key={cIdx} className="px-2.5 py-1.5 text-slate-200">
+                        {renderInlineTokens(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+    }
+
+    // 2. Deteksi Heading
+    if (trimmed.startsWith("### ")) {
+      blocks.push(
+        <h4
+          key={`h3-${blocks.length}`}
+          className="text-xs font-bold text-rose-300 mt-2.5 mb-1 flex items-center gap-1.5"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" />
+          <span>{renderInlineTokens(trimmed.replace(/^###\s+/, ""))}</span>
+        </h4>
+      );
+      i++;
+      continue;
+    }
+
+    if (trimmed.startsWith("## ")) {
+      blocks.push(
+        <h3
+          key={`h2-${blocks.length}`}
+          className="text-xs sm:text-sm font-bold text-white mt-3 mb-1 border-b border-white/10 pb-1"
+        >
+          {renderInlineTokens(trimmed.replace(/^##\s+/, ""))}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+
+    if (trimmed.startsWith("# ")) {
+      blocks.push(
+        <h2
+          key={`h1-${blocks.length}`}
+          className="text-sm font-extrabold text-white mt-3.5 mb-1.5"
+        >
+          {renderInlineTokens(trimmed.replace(/^#\s+/, ""))}
+        </h2>
+      );
+      i++;
+      continue;
+    }
+
+    // 3. Deteksi Bullet Points
+    if (/^[*-]\s+/.test(trimmed)) {
+      const listItems: string[] = [];
+      while (i < lines.length && /^[*-]\s+/.test(lines[i].trim())) {
+        listItems.push(lines[i].trim().replace(/^[*-]\s+/, ""));
+        i++;
+      }
+      blocks.push(
+        <ul key={`ul-${blocks.length}`} className="my-1.5 space-y-1 pl-1">
+          {listItems.map((item, itemIdx) => (
+            <li key={itemIdx} className="flex items-start gap-1.5 text-xs text-slate-200 leading-relaxed">
+              <span className="text-rose-400 select-none mt-0.5">•</span>
+              <span className="flex-1">{renderInlineTokens(item)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // 4. Paragraf Teks Biasa
+    if (trimmed.length > 0) {
+      blocks.push(
+        <p key={`p-${blocks.length}`} className="my-1 whitespace-pre-wrap leading-relaxed">
+          {renderInlineTokens(currentLine)}
+        </p>
+      );
+    }
+    i++;
+  }
+
+  return <div className="space-y-0.5">{blocks}</div>;
+}
+
 export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
   isOpen,
   transcripts,
@@ -76,7 +282,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
         className="fixed inset-0 z-45 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200"
         aria-hidden="true"
       />
-      <div className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-md h-[100dvh] glass-panel border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 safe-top safe-bottom">
+      <div className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl h-[100dvh] glass-panel border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 safe-top safe-bottom">
         {/* Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-white/10 bg-slate-900/60 shrink-0">
           <div className="flex items-center gap-2 text-sm font-bold text-white">
@@ -152,7 +358,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
                   </button>
                 </div>
               </div>
-              <p className="whitespace-pre-wrap">{t.text}</p>
+              <FormattedTranscriptText content={t.text} />
             </div>
           ))
         )}

@@ -217,8 +217,10 @@ export default async function handler(req, res) {
   }
 
   const model = process.env.GEMINI_MODEL || "gemini-3.8-live";
-  const requestedVoice = req.query?.voice || (req.body && typeof req.body === "object" ? req.body.voice : "");
-  const voice = requestedVoice || process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "Aoede";
+  const BANNED_MALE_VOICES = new Set(["puck", "charon", "fenrir", "orus", "id-id-ardineural"]);
+  const requestedVoice = String(req.query?.voice || (req.body && typeof req.body === "object" ? req.body.voice : "")).trim();
+  const isMale = BANNED_MALE_VOICES.has(requestedVoice.toLowerCase());
+  const voice = !isMale && requestedVoice ? requestedVoice : (process.env.GEMINI_VOICE || process.env.GEMINI_VOICE_NAME || "Aoede");
 
   // 1. Kunci kustom dari klien (jika pengguna memasukkan di Pengaturan)
   const customKey = (
@@ -229,18 +231,26 @@ export default async function handler(req, res) {
   ).trim();
 
   // 2. Kumpulan kunci dari Environment Variables
-  const rawEnvKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
+  const rawEnvKeys = [
+    process.env.GEMINI_API_KEYS,
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_FALLBACK,
+    process.env.GEMINI_API_KEY_SECRET,
+  ]
+    .filter(Boolean)
+    .join(",");
   const envKeys = rawEnvKeys
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean);
 
-  let candidateKeys = [];
-  if (customKey) {
-    candidateKeys = [customKey];
-  } else if (envKeys.length > 0) {
-    candidateKeys = envKeys;
-  }
+  const sortedEnvKeys = [...new Set(envKeys)].sort((a, b) => {
+    if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
+    if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
+    return 0;
+  });
+
+  const candidateKeys = customKey ? [customKey, ...sortedEnvKeys] : sortedEnvKeys;
 
   if (candidateKeys.length === 0) {
     return res.status(500).json({
