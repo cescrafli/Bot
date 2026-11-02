@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from "react";
-import { X, Trash2, Download, MessageSquare } from "lucide-react";
+import React, { useRef, useEffect, useState } from "react";
+import { X, Trash2, Download, MessageSquare, Copy, Check } from "lucide-react";
 
 interface TranscriptItem {
   speaker: "user" | "celyn";
@@ -21,6 +21,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
   onClear,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (isOpen && messagesEndRef.current) {
@@ -30,16 +31,39 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
 
   if (!isOpen) return null;
 
-  const handleExport = () => {
-    const textContent = transcripts
-      .map((t) => `[${t.time}] ${t.speaker === "celyn" ? "Celyn" : "Anda"}: ${t.text}`)
-      .join("\n\n");
-    const blob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
+  const handleCopyBubble = (text: string, index: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
+  const handleExport = (format: "md" | "txt" = "md") => {
+    const dateStr = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Jakarta" }).format(new Date());
+    const wibFormatted = new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Jakarta",
+      dateStyle: "full",
+      timeStyle: "medium",
+    }).format(new Date());
+
+    let content = "";
+    if (format === "md") {
+      content = `# Riwayat Percakapan Celyn AI\n\n- **Waktu Ekspor**: ${wibFormatted} WIB\n- **Total Pesan**: ${transcripts.length}\n\n---\n\n`;
+      content += transcripts
+        .map((t) => `### [${t.time}] ${t.speaker === "celyn" ? "✨ Celyn" : "👤 Anda"}\n\n${t.text}\n`)
+        .join("\n---\n\n");
+    } else {
+      content = transcripts
+        .map((t) => `[${t.time}] ${t.speaker === "celyn" ? "Celyn" : "Anda"}: ${t.text}`)
+        .join("\n\n");
+    }
+
+    const blob = new Blob([content], {
+      type: format === "md" ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const dateStr = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Jakarta" }).format(new Date());
-    a.download = `celyn-chat-${dateStr}.txt`;
+    a.download = `celyn-chat-${dateStr}.${format}`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -63,11 +87,12 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
             {transcripts.length > 0 && (
               <>
                 <button
-                  onClick={handleExport}
-                  className="p-2 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  title="Download Riwayat Teks"
+                  onClick={() => handleExport("md")}
+                  className="px-2.5 py-1.5 rounded-xl hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1 text-xs border border-white/5"
+                  title="Unduh Laporan Markdown (.md)"
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-3.5 h-3.5 text-rose-400" />
+                  <span>.MD</span>
                 </button>
                 <button
                   onClick={onClear}
@@ -102,7 +127,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
           transcripts.map((t, idx) => (
             <div
               key={idx}
-              className={`flex flex-col max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
+              className={`flex flex-col max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed group ${
                 t.speaker === "celyn"
                   ? "self-start bg-slate-800/80 border border-rose-500/20 text-slate-100"
                   : "self-end ml-auto bg-rose-600/20 border border-rose-500/30 text-rose-100"
@@ -112,7 +137,20 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
                 <span className="font-semibold">
                   {t.speaker === "celyn" ? "✨ Celyn" : "👤 Anda"}
                 </span>
-                <span>{t.time}</span>
+                <div className="flex items-center gap-1.5">
+                  <span>{t.time}</span>
+                  <button
+                    onClick={() => handleCopyBubble(t.text, idx)}
+                    className="p-0.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    title="Salin pesan ini"
+                  >
+                    {copiedIndex === idx ? (
+                      <Check className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3 h-3 opacity-60 group-hover:opacity-100" />
+                    )}
+                  </button>
+                </div>
               </div>
               <p className="whitespace-pre-wrap">{t.text}</p>
             </div>

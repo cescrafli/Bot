@@ -1,4 +1,5 @@
 import { createClient } from "@libsql/client";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 function getWibTimestamp() {
   try {
@@ -794,10 +795,47 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
   return { action: "inserted", fact: cleanFact };
 }
 
+function verifyAdminAuth(req, body) {
+  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
+  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
+
+  const authHeader = req.headers["authorization"] || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const parts = token.split(".");
+    if (parts.length === 2) {
+      try {
+        const [payloadB64, sigB64] = parts;
+        const expectedSig = createHmac("sha256", secret).update(payloadB64).digest();
+        const givenSig = Buffer.from(sigB64, "base64url");
+        if (givenSig.length === expectedSig.length && timingSafeEqual(givenSig, expectedSig)) {
+          const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+          if (payload.exp && payload.exp > Date.now() / 1000 && payload.m === "jocelyn") {
+            return true;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  const authPass =
+    req.headers["x-admin-password"] ||
+    req.query?.password ||
+    (body && body.password);
+  if (authPass) {
+    const trimmed = String(authPass).trim();
+    if (trimmed === expectedPassword || trimmed === "admin") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-password, x-gemini-key");
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
@@ -811,14 +849,8 @@ export default async function handler(req, res) {
     }
   }
 
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
-  const authPass =
-    req.headers["x-admin-password"] ||
-    req.query?.password ||
-    (body && body.password);
-
-  // Zero-leak check: Hanya simpan jika kata sandi adalah admin
-  if (String(authPass).trim() !== "admin" && String(authPass).trim() !== expectedPassword) {
+  // Zero-leak check: Hanya simpan jika sesi adalah admin
+  if (!verifyAdminAuth(req, body)) {
     return res.status(200).json({ ok: false, message: "Ignored for non-admin" });
   }
 

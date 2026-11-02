@@ -15,8 +15,11 @@ import {
   Image as ImageIcon,
   HelpCircle,
   Check,
+  Eye,
+  Copy,
 } from "lucide-react";
 import { ParsedDocument, DocumentKind } from "@celyn/shared";
+import { getStoredAuthPassword, getStoredAuthToken } from "../../hooks/useAuth.js";
 
 interface DocumentModalProps {
   isOpen: boolean;
@@ -55,6 +58,8 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [editLanguage, setEditLanguage] = useState("English");
   const [editInstruction, setEditInstruction] = useState("");
   const [isProcessingInPlace, setIsProcessingInPlace] = useState(false);
+  const [previewingDoc, setPreviewingDoc] = useState<ParsedDocument | null>(null);
+  const [copiedDoc, setCopiedDoc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -107,13 +112,15 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setIsProcessingInPlace(true);
     setErrorMessage(null);
     try {
-      const password = localStorage.getItem("celyn_auth_password") || "admin";
-      const token = localStorage.getItem("celyn_auth_token");
+      const password = getStoredAuthPassword() || "admin";
+      const token = getStoredAuthToken();
+      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-admin-password": password,
       };
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (customKey) headers["x-gemini-key"] = customKey;
 
       const res = await fetch("/api/documents/process", {
         method: "POST",
@@ -370,6 +377,27 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              if (previewingDoc?.fileName === doc.fileName) {
+                                setPreviewingDoc(null);
+                              } else {
+                                setPreviewingDoc(doc);
+                                setCopiedDoc(false);
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
+                              previewingDoc?.fileName === doc.fileName
+                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                                : "text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                            title="Lihat isi hasil ekstraksi / Vision OCR"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Lihat Isi</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
                               if (editingDoc?.fileName === doc.fileName) {
                                 setEditingDoc(null);
                               } else {
@@ -489,6 +517,52 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                                 </>
                               )}
                             </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Inline Document Extraction / OCR Preview */}
+                      {previewingDoc?.fileName === doc.fileName && (
+                        <div className="mt-1 p-3 rounded-xl bg-slate-950/80 border border-cyan-500/30 space-y-2.5 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Hasil Ekstraksi & OCR Teks ({doc.characterCount.toLocaleString()} karakter)</span>
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(doc.markdownContent);
+                                  setCopiedDoc(true);
+                                  setTimeout(() => setCopiedDoc(false), 2000);
+                                }}
+                                className="px-2 py-0.5 rounded-md bg-white/5 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-200 border border-white/10 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                              >
+                                {copiedDoc ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span className="text-emerald-400">Tersalin!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Salin Teks</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewingDoc(null)}
+                                className="text-slate-400 hover:text-white text-xs cursor-pointer p-0.5"
+                                title="Tutup pratinjau"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto p-2.5 rounded-lg bg-slate-900/90 border border-white/5 text-[11px] font-mono text-slate-200 whitespace-pre-wrap leading-relaxed select-text no-scrollbar">
+                            {doc.markdownContent || "(Dokumen tidak memuat teks)"}
                           </div>
                         </div>
                       )}

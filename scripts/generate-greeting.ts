@@ -15,15 +15,11 @@ async function generateGreetingAudio() {
   });
 
   const outMp3 = path.resolve(process.cwd(), "apps/web/public/celyn_test_greeting.mp3");
-  const outWav = path.resolve(process.cwd(), "apps/web/public/celyn_test_greeting.wav");
 
   fs.writeFileSync(outMp3, mp3Buffer);
-  // Simpan juga sebagai fallback wav (browser audio context dapat men-decode mp3 data apapun ekstensinya)
-  fs.writeFileSync(outWav, mp3Buffer);
 
   console.log("✅ Berhasil menyimpan audio tes GadisNeural ke:");
   console.log("   -", outMp3, `(${mp3Buffer.length} bytes)`);
-  console.log("   -", outWav, `(${mp3Buffer.length} bytes)`);
 }
 
 generateGreetingAudio().catch((err) => {

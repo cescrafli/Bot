@@ -10,9 +10,17 @@ import {
   ReportPayload,
   ReportPayloadSchema,
   inferExpertPersona,
+  getWibFormattedString,
 } from "@celyn/shared";
 import { config } from "../config.js";
 import { documentWriterService } from "./DocumentWriterService.js";
+
+function cleanJson(text: string): string {
+  if (!text) return "";
+  let t = String(text).trim();
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  return t.trim();
+}
 
 export interface GenerateDocumentParams {
   kind: DocumentKind;
@@ -101,10 +109,10 @@ export class DocumentService {
     totalChunks: number;
     reduce?: boolean;
   }): Promise<DocumentSection[]> {
-    const model = config.docGenerateModel || "gemini-3-flash-preview";
+    const model = config.docGenerateModel || "gemini-3.8-flash";
     const prompt = buildDocumentChunkPrompt(params);
     const res = await this.callGeminiJson(model, prompt);
-    const parsed = JSON.parse(res.text || "{}");
+    const parsed = JSON.parse(cleanJson(res.text || "{}"));
     const sections = Array.isArray(parsed?.sections) ? parsed.sections : [];
     return ReportPayloadSchema.parse({ title: "x", sections: sections.length ? sections : [{ heading: "", paragraphs: [] }] })
       .sections;
@@ -146,13 +154,14 @@ export class DocumentService {
    */
   async generateDocument(params: GenerateDocumentParams): Promise<GeneratedDocumentResult> {
     const { kind, title, instruction, context } = params;
-    const model = config.docGenerateModel || "gemini-3-flash-preview";
+    const model = config.docGenerateModel || "gemini-3.8-flash";
     const safeTitle = (title || "Dokumen")
       .replace(/[\\/:*?"<>|]/g, "_")
       .trim()
       .slice(0, 50) || "Dokumen";
 
     const expert = inferExpertPersona(`${title} ${instruction}`);
+    const wibDateStr = getWibFormattedString(new Date());
 
     if (kind === "xlsx") {
       // 1. GENERATE EXCEL VIA GEMINI JSON DENGAN PERSONA PAKAR SENIOR
@@ -161,6 +170,8 @@ Tugas Anda: Membuat data lembar kerja Excel (XLSX) profesional tingkat tinggi ya
 Judul/Nama Dokumen Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
 Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
+Waktu Acuan (WIB / Jakarta, UTC+7): ${wibDateStr}
+PENTING ZONA WAKTU: Gunakan waktu acuan Jakarta (WIB, UTC+7) di atas sebagai patokan resmi hari, tanggal, dan rentang waktu. JANGAN PERNAH mengikuti waktu UTC server.
 ${context ? `Konteks/Data Acuan:\n${context}` : ""}
 
 PANDUAN RISET & DESAIN EXCEL TINGKAT AHLI:
@@ -189,7 +200,7 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
 }`;
 
       const res = await this.callGeminiJson(model, prompt);
-      const parsed = JSON.parse(res.text || "{}");
+      const parsed = JSON.parse(cleanJson(res.text || "{}"));
       const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
 
       const buffer = await documentWriterService.createExcel(validated);
@@ -208,6 +219,8 @@ Tugas Anda: Menyusun ${docTypeLabel} profesional tingkat tinggi (High-Caliber Pr
 Judul Dokumen/Riset: "${title}"
 Instruksi Pengguna: "${instruction}"
 Fokus Keahlian (${expert.fieldLabel}): ${expert.promptGuide}
+Waktu Acuan (WIB / Jakarta, UTC+7): ${wibDateStr}
+PENTING ZONA WAKTU: Gunakan waktu acuan Jakarta (WIB, UTC+7) di atas sebagai patokan resmi hari, tanggal, dan rentang waktu. JANGAN PERNAH mengikuti waktu UTC server.
 ${context ? `Konteks/Materi Acuan:\n${context}` : ""}
 
 PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:
@@ -219,8 +232,8 @@ PANDUAN RISET & PENULISAN DOKUMEN TINGKAT AHLI:
    - Rekomendasi Strategis & Rencana Tindak Lanjut
    - Kesimpulan Ahli
    - Sumber Referensi & Catatan Metodologi
-3. Setiap section harus memuat 'paragraphs' mendalam (2-4 paragraf berbobot) dan/atau 'bulletPoints' tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
-4. 'table': (Opsional) Tabel data pendukung dengan 'headers' dan 'rows' jika relevan.
+3. Setiap section harus memuat 1-2 paragraf padat-berbobot dan 2-3 temuan kunci (bulletPoints) tajam. JANGAN masukkan tag markdown seperti ** atau ## ke dalam teks paragraf.
+4. TABEL DATA WAJIB DISERTAKAN: Sertakan minimal 1 objek "table" di bagian analisis/fakta kunci yang memuat data terstruktur dengan "headers" dan "rows" (misalnya: data pergerakan harian, perbandingan metrik kinerja saham/sektor, atau indikator finansial/teknikal). Jika pengguna meminta chart atau grafik perkembangan (seperti perkembangan mingguan dari hari ke hari atau perbandingan saham), sajikan tabel matriks komprehensif harian dan perbandingan emiten sebagai representasi visual data yang terstruktur.
 
 KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
 {
@@ -240,7 +253,7 @@ KEMBALIKAN HANYA JSON SESUAI SKEMA BERIKUT:
 }`;
 
       const res = await this.callGeminiJson(model, prompt);
-      const parsed = JSON.parse(res.text || "{}");
+      const parsed = JSON.parse(cleanJson(res.text || "{}"));
       const validated: ReportPayload = ReportPayloadSchema.parse(parsed);
 
       let buffer: Buffer;
@@ -319,7 +332,7 @@ PETUNJUK:
 }`;
 
       const res = await this.callGeminiJson(model, prompt);
-      const parsed = JSON.parse(res.text || "{}");
+      const parsed = JSON.parse(cleanJson(res.text || "{}"));
       const validated: ExcelPayload = ExcelPayloadSchema.parse(parsed);
       const buffer = await documentWriterService.createExcel(validated);
       return {
@@ -369,7 +382,7 @@ KEMBALIKAN HANYA JSON VALID SESUAI SKEMA REPORTPAYLOAD:
 }`;
 
       const res = await this.callGeminiJson(model, prompt);
-      const parsed = JSON.parse(res.text || "{}");
+      const parsed = JSON.parse(cleanJson(res.text || "{}"));
       const validated: ReportPayload = ReportPayloadSchema.parse(parsed);
 
       let buffer: Buffer;

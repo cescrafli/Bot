@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { inferExpertPersona } from "@celyn/shared";
+import { inferExpertPersona, getWibFormattedString } from "@celyn/shared";
 import { config } from "../config.js";
 
 export interface ResearchSource {
@@ -50,6 +50,8 @@ export class ResearchService {
     ].filter((m): m is string => Boolean(m));
     const modelName = candidateModels[0] || "gemini-3.8-flash";
 
+    const wibDateStr = getWibFormattedString(new Date());
+
     try {
       // Execute generative search with search grounding & expert persona
       const response = await this.ai.models.generateContent({
@@ -57,27 +59,35 @@ export class ResearchService {
         contents: [
           {
             text: `Anda adalah ${expert.persona}.
-Lakukan riset mendalam, teliti, berbasis data riil, komprehensif, dan sempurna tanpa terkecuali untuk topik berikut:
+Sajikan laporan riset mendalam tingkat pakar (Deep Research & Comprehensive Analysis) yang berbasis data riil, tajam, terstruktur, dan didukung banyak sumber terpercaya untuk topik berikut:
 Topik/Pertanyaan: "${query}"
 Bidang Keahlian: ${expert.fieldLabel}
+Waktu Acuan Riset (WIB / Jakarta, UTC+7): ${wibDateStr}
+Panduan Analisis: ${expert.promptGuide}
+PENTING ZONA WAKTU: Gunakan waktu acuan Jakarta (WIB, UTC+7) di atas sebagai patokan resmi hari, tanggal, dan rentang "minggu ini". JANGAN PERNAH mengikuti waktu UTC server.
 
-STANDAR RISET PROFESIONAL TINGKAT TINGGI (ULTRA-DEEP & THOROUGH):
-1. BUKAN RISET ASAL-ASALAN: Sajikan analisis tingkat pakar paling berwibawa, berbobot, berbasis fakta riil, dan terverifikasi. Dilarang keras memberikan jawaban dangkal, sekadar definisi umum, atau kesimpulan klise.
-2. FOKUS KEAHLIAN SPESIFIK (${expert.fieldLabel}):
-${expert.promptGuide}
-3. KEDALAMAN ANALISIS & DATA RIIL:
-   - Sertakan metrik kuantitatif, angka perbandingan, persentase, valuasi, atau regulasi spesifik yang relevan.
-   - Bahas dinamika historis singkat, kondisi riil saat ini, dan proyeksi/implikasi ke depan.
-   - Kupas dari berbagai sudut pandang (multi-angle analysis) termasuk peluang, tantangan, dan skenario alternatif.
-4. STRUKTUR LAPORAN RISET:
-   - ## Ringkasan Eksekutif (Executive Summary)
-   - ### Analisis Mendalam & Fakta Kunci
-   - ### Evaluasi Peluang & Mitigasi Risiko
-   - ### Rekomendasi Strategis & Tindakan Ahli
-   - ### Sumber Referensi & Catatan Verifikasi
-5. JANGAN mengarang data atau angka. Jika data masih bersifat estimasi atau terdapat dinamika pasar/regulasi, sebutkan secara terbuka dan objektif.
-6. Cantumkan tautan / URL sumber rujukan asli secara eksplisit dalam format markdown: [Nama Sumber](https://url-sumber).
-7. Buat daftar sumber di bagian akhir di bawah heading '### Sumber Referensi'.`,
+7 KETENTUAN EMAS RISET MENDALAM:
+1. Telusuri topik secara menyeluruh dari multi-sudut pandang (jangan puas dengan 1-2 pencarian sekilas).
+2. Kumpulkan sebanyak dan seberagam mungkin fakta dan angka riil dari sumber primer/terpercaya.
+3. Rangkum temuan menjadi sintesis runtut dan jelaskan poin pentingnya dengan bahasa yang mudah dipahami.
+4. Jika mencakup pergerakan mingguan (seperti pasar modal/saham/ekonomi), paparkan dinamika hari ke hari serta performa sektor/emiten unggulan.
+5. Evaluasi peluang dan mitigasi risiko secara objektif dan terukur.
+6. Berikan rekomendasi konkret aplikatif bagi pengambil keputusan.
+7. Cantumkan seluruh referensi rujukan dalam format tautan markdown [Nama Sumber/Institusi](https://url-sumber).
+
+STRUKTUR LAPORAN RISET MENDALAM:
+## Ringkasan Eksekutif
+Sintesis temuan utama dan ikhtisar kondisi terkini dalam bahasa yang jernih dan terstruktur.
+### Fakta Kunci, Data Kuantitatif & Dinamika Harian
+Data terukur, persentase perubahan, metrik finansial/teknikal, dan katalis pendorong riil.
+### Analisis Komparatif Sektoral / Pemetaan Masalah
+Perbandingan performa sektor, pemangku kepentingan, atau entitas terkait.
+### Evaluasi Peluang & Mitigasi Risiko
+Peluang strategis dan identifikasi potensi risiko serta langkah mitigasi preventif.
+### Rekomendasi Strategis Ahli
+Panduan langkah konkret dan aplikatif yang dapat langsung dieksekusi.
+### Sumber Referensi & Catatan Riset
+Tautan rujukan asli dalam format markdown [Nama Sumber](https://url-sumber).`,
           },
         ],
         config: {
@@ -88,13 +98,15 @@ ${expert.promptGuide}
 
       const text = response.text || "";
       const sources: ResearchSource[] = [];
+      const seenUrls = new Set<string>();
 
       // Extract grounding metadata if provided by API
       const candidate = (response as any)?.candidates?.[0];
       const groundingMeta = candidate?.groundingMetadata;
       if (groundingMeta?.groundingChunks && Array.isArray(groundingMeta.groundingChunks)) {
         for (const chunk of groundingMeta.groundingChunks) {
-          if (chunk.web?.uri) {
+          if (chunk.web?.uri && !seenUrls.has(chunk.web.uri)) {
+            seenUrls.add(chunk.web.uri);
             sources.push({
               title: chunk.web.title || new URL(chunk.web.uri).hostname,
               url: chunk.web.uri,
@@ -109,7 +121,8 @@ ${expert.promptGuide}
       while ((match = linkRegex.exec(text)) !== null) {
         const title = match[1].trim();
         const url = match[2].trim();
-        if (!sources.some((s) => s.url === url)) {
+        if (!seenUrls.has(url)) {
+          seenUrls.add(url);
           sources.push({ title, url });
         }
       }

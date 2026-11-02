@@ -199,6 +199,10 @@ export function useGeminiLive({
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
+    const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+    if (customKey) {
+      headers["x-gemini-key"] = customKey;
+    }
 
     fetch("/api/record", {
       method: "POST",
@@ -1430,12 +1434,18 @@ export function useGeminiLive({
     setStatusMessage("Sesi dihentikan.");
 
     if (wasDirect && getStoredAuthMode() === "jocelyn") {
+      const token = getStoredAuthToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-admin-password": getStoredAuthPassword() || "admin",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+      if (customKey) headers["x-gemini-key"] = customKey;
+
       fetch("/api/summarize", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-password": getStoredAuthPassword() || "admin",
-        },
+        headers,
         body: JSON.stringify({ sessionId: endingSessionId }),
       }).catch((e) => {
         console.warn("[SUMMARIZE] Gagal merangkum sesi serverless:", e);
@@ -2141,6 +2151,10 @@ export function useGeminiLive({
           };
           if (token) {
             uploadHeaders["Authorization"] = `Bearer ${token}`;
+          }
+          const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+          if (customKey) {
+            uploadHeaders["x-gemini-key"] = customKey;
           }
 
           let res: Response | null = null;

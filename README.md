@@ -8,6 +8,12 @@ Teman ngobrol visual AI interaktif cerdas yang bisa berbicara dua arah lewat sua
 
 ## Fitur Utama
 
+- 🔍 **Riset Mendalam & Analisis Pakar (7 Ketentuan Emas)**:
+  - **Peneliti Teliti & Komprehensif**: Melakukan riset topik menyeluruh berbasis data riil dengan persona pakar profesional senior secara otomatis.
+  - **Pencarian Web Real-Time (Search Grounding & Sitasi)**: Mengumpulkan banyak sumber primer terpercaya dan menyertakan sitasi tautan sumber langsung.
+  - **Visual & Matriks Data**: Dilengkapi tabel data komparatif, dinamika perkembangan harian, dan metrik kinerja sektor/saham saat diminta chart/grafik.
+  - **Multi-Key Failover Pool**: Mendukung rotasi otomatis multi-kunci API (`GEMINI_API_KEYS`) untuk mencegah kegagalan batas kuota 429.
+
 - 🎙️ **Real-Time Voice Streaming (24kHz HD Audio)**:
   - Berbincang dua arah secara langsung dengan latensi rendah layaknya telepon suara biasa.
   - Mendukung selaan alami (*real-time interruption handling*) kapan pun kamu mulai berbicara.
@@ -21,7 +27,7 @@ Teman ngobrol visual AI interaktif cerdas yang bisa berbicara dua arah lewat sua
   - **Dukungan Dokumen Raksasa hingga 500 MB**: Menggunakan *Client-Side In-Memory Engine* (Mozilla PDF.js) yang mengekstrak teks PDF langsung di memori peramban dalam 1–2 detik tanpa terhambat batas ukuran serverless atau CORS.
   - **Dual-Track Fallback**: File $\le$ 4.5 MB diproses dengan serverless Hybrid OCR Vision; file besar diproses instan di browser.
   - **Sapaan Proaktif Otomatis**: Begitu dokumen selesai diunggah, Celyn langsung menyapa, menyebut nama file, dan menawarkan bantuan (meringkas, menganalisis, menerjemahkan, atau mengedit).
-  - **Edit PDF In-Place**: Celyn mampu merevisi atau memodifikasi dokumen PDF secara langsung dan menghasilkan file PDF baru dengan tata letak rapi.
+  - **Edit PDF In-Place & Pratinjau Teks**: Celyn mampu merevisi atau memodifikasi dokumen PDF secara langsung dan menghasilkan file PDF baru. Pengguna juga dapat mempratinjau dan menyalin hasil Vision OCR secara instan di peramban.
   - **Ekspor Dokumen Baru**: Dapat menyusun dan mengunduh laporan PDF, Word (.docx), atau lembar kerja Excel (.xlsx) otomatis.
 
 - 🎭 **Visual Avatar Interaktif (2.5D Canvas & 3D VRM)**:
@@ -49,7 +55,7 @@ Proyek ini dibangun menggunakan npm workspaces monorepo:
 - **`apps/server`**: Backend Node.js, WebSocket Server, Document Writer/Reader Service, Memory Service, dan Edge TTS Proxy.
 - **`packages/shared`**: Modul bersama berisi aturan persona Celyn, sistem filter suara & emosi, skema Zod dokumen, dan logika autentikasi.
 - **`api/`**: Serverless functions untuk deployment Vercel (`/api/token`, `/api/documents/read`, `/api/documents/generate`, `/api/health`, dll).
-- **`scripts/`**: Suite pengujian otomatis komprehensif (`test-pipeline.ts`) mencakup 187 skenario uji unit dan integrasi.
+- **`scripts/`**: Suite pengujian otomatis komprehensif (`test-pipeline.ts`) mencakup 350+ skenario uji unit, integrasi, keamanan, dan paritas arsitektur.
 
 ---
 
@@ -58,7 +64,7 @@ Proyek ini dibangun menggunakan npm workspaces monorepo:
 ### 1. Kebutuhan Lingkungan
 - **Node.js** versi 18 atau lebih baru
 - **NPM** versi 9 atau lebih baru
-- **API Key** (dapatkan dari portal pengembang AI yang didukung)
+- **API Key** (dapatkan dari portal Google AI Studio)
 - *(Opsional)* URL Database Turso untuk memori jangka panjang
 
 ### 2. Pemasangan (Instalasi)
@@ -72,18 +78,22 @@ npm install
 Buat file `.env` di folder utama (root) proyek:
 
 ```env
-# Kredensial AI Live
+# Kredensial AI Live & Multi-Key Failover Pool
 GEMINI_API_KEY=isi_api_key_kamu_di_sini
+GEMINI_API_KEYS=key_1_di_sini,key_2_di_sini
 GEMINI_MODEL=gemini-3.8-live
 GEMINI_VOICE=Aoede
+RESEARCH_MODEL=gemini-3.8-flash
+TEXT_MODEL=gemini-3.8-flash
 
-# Database Turso (Opsional untuk fitur memori profil permanen)
-DATABASE_URL=libsql://nama-database.turso.io
-AUTH_TOKEN=token_rahasia_turso
+# Database Turso Cloud (Penyimpanan memori otonom profil pengguna)
+TURSO_DATABASE_URL=libsql://nama-database.turso.io
+TURSO_AUTH_TOKEN=token_rahasia_turso
 
-# Kata Sandi Sesi
+# Kata Sandi Sesi & Keamanan HMAC
 ADMIN_PASSWORD=admin
 USER_PASSWORD=login
+AUTH_SECRET=rahasia_salt_32_karakter_di_sini
 
 # Port Server Lokal
 PORT=3001
@@ -102,7 +112,7 @@ Buka peramban dan akses antarmuka Celyn di **`http://localhost:5173`**.
 | Perintah | Deskripsi |
 |---|---|
 | `npm run dev` | Menjalankan frontend web dan backend server secara bersamaan |
-| `npm run test:pipeline` | Menjalankan 187 uji otomatis (audio, suara perempuan, prompt 100% ID, dokumen, memori) |
+| `npm run test:pipeline` | Menjalankan 350+ uji otomatis (audio, suara perempuan, prompt 100% ID, dokumen, memori, paritas, riset) |
 | `npm run build` | Melakukan kompilasi produksi seluruh paket (TypeScript + Vite) |
 | `npm run db:check` | Memeriksa tabel dan baris memori yang tersimpan di database |
 

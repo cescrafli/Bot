@@ -2031,14 +2031,14 @@ async function runTtsTests() {
     "apps/server/src/index.ts mendaftarkan endpoint /api/research untuk konsistensi proxy mode"
   );
 
-  // D. Verifikasi api/documents-extract-file.js Multi-Key & Multi-Model
+  // D. Verifikasi ClientDocumentReader.ts In-Browser Extraction
   const docExtractCode = fs.readFileSync(
-    path.resolve(process.cwd(), "api/documents-extract-file.js"),
+    path.resolve(process.cwd(), "apps/web/src/services/ClientDocumentReader.ts"),
     "utf8"
   );
   assert(
-    docExtractCode.includes("candidateKeys") && docExtractCode.includes("gemini-3.8-flash"),
-    "api/documents-extract-file.js memiliki kandidat multi-key dan fallback gemini-3.8-flash"
+    docExtractCode.includes("extractPdfClientSide") && docExtractCode.includes("unpdf"),
+    "ClientDocumentReader.ts mengimplementasikan extractPdfClientSide in-browser untuk ekstraksi instan"
   );
 
   // E. Verifikasi api/documents-read.js Multi-Key & Multi-Model Foto OCR
@@ -2495,6 +2495,232 @@ async function runTtsTests() {
     updatedLiveCode.includes("researchSummary.slice(0, 4000)") &&
       updatedLiveCode.includes("7 Ketentuan Emas Peneliti Teliti Celyn"),
     "useGeminiLive.ts menyuntikkan data riset kaya hingga 4000 karakter dan 7 Ketentuan Emas ke sesi Live"
+  );
+
+  // --- SECTION 38: Full Project Audit, Supply Chain & Zero-Leak Script Hygiene ---
+  console.log("\n🧪 --- SECTION 38: Full Project Audit, Supply Chain & Zero-Leak Script Hygiene ---");
+
+  // A. Verifikasi Minimatch Override (0 Vulnerabilities)
+  const freshRootPkg = JSON.parse(
+    fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8")
+  );
+  assert(
+    freshRootPkg.overrides && freshRootPkg.overrides["minimatch"] === "^11.0.1",
+    "package.json memiliki overrides minimatch: ^11.0.1 untuk menutup 8 celah keamanan GHSA-g3hv-75wg-m249"
+  );
+
+  // B. Verifikasi Pembersihan Total 9 Skrip Scratch/Debug dari Folder scripts/
+  const scriptsDir = path.resolve(process.cwd(), "scripts");
+  const bannedScratchScripts = [
+    "insert-sate-maranggi.ts",
+    "check-fish-memory.ts",
+    "cleanup-duplicates.ts",
+    "test-fish-extraction.ts",
+    "test-tolong-ingatin.ts",
+    "test-topic-recall.ts",
+    "audit-memory-pipeline.ts",
+    "test-auto-memory.ts",
+    "test-deduplication.ts",
+  ];
+  const lingeringScripts = bannedScratchScripts.filter((s) => fs.existsSync(path.resolve(scriptsDir, s)));
+  assert(
+    lingeringScripts.length === 0,
+    `Folder scripts/ bersih dari skrip scratch kebocoran privasi (0 ditemukan dari ${bannedScratchScripts.length} kandidat)`
+  );
+
+  // C. Verifikasi Eliminasi Aset Redundan celyn_test_greeting.wav & Dead Serverless Endpoints
+  const wavAssetPath = path.resolve(process.cwd(), "apps/web/public/celyn_test_greeting.wav");
+  const uploadUrlApiPath = path.resolve(process.cwd(), "api/documents-upload-url.js");
+  const extractFileApiPath = path.resolve(process.cwd(), "api/documents-extract-file.js");
+  assert(
+    !fs.existsSync(wavAssetPath),
+    "Aset audio duplikat celyn_test_greeting.wav telah dibuang dari apps/web/public/"
+  );
+  assert(
+    !fs.existsSync(uploadUrlApiPath) && !fs.existsSync(extractFileApiPath),
+    "Serverless endpoint usang (documents-upload-url & documents-extract-file) telah dihapus dari api/"
+  );
+
+  // D. Verifikasi Paritas ResearchService Backend Lokal
+  const localResearchCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/ResearchService.ts"),
+    "utf8"
+  );
+  assert(
+    localResearchCode.includes("getWibFormattedString") &&
+      localResearchCode.includes("seenUrls") &&
+      localResearchCode.includes("7 KETENTUAN EMAS RISET MENDALAM"),
+    "ResearchService.ts backend lokal menyertakan acuan waktu WIB, 7 Ketentuan Emas, dan deduplikasi tautan"
+  );
+
+  // E. Verifikasi Paritas DocumentWriterService Backend Lokal
+  const localDocWriterCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/DocumentWriterService.ts"),
+    "utf8"
+  );
+  assert(
+    localDocWriterCode.includes("normalizeTableRow"),
+    "DocumentWriterService.ts backend lokal mengimplementasikan normalizeTableRow untuk ketahanan tabel"
+  );
+
+  // F. Verifikasi Sinkronisasi apps/server/package.json
+  const freshServerPkg = JSON.parse(
+    fs.readFileSync(path.resolve(process.cwd(), "apps/server/package.json"), "utf8")
+  );
+  assert(
+    freshServerPkg.dependencies?.["docx"] === "^9.15.0" &&
+      freshServerPkg.dependencies?.["mammoth"] === "^1.13.0" &&
+      freshServerPkg.dependencies?.["turndown"] === "^7.2.4" &&
+      freshServerPkg.dependencies?.["word-extractor"] === "^1.0.4",
+    "apps/server/package.json memiliki dependensi docx, mammoth, turndown, dan word-extractor yang sinkron dengan root"
+  );
+
+  // G. Verifikasi Serverless Auth Parity (api/record.js, api/remember.js, api/summarize.js)
+  const freshRecordCode = fs.readFileSync(path.resolve(process.cwd(), "api/record.js"), "utf8");
+  const freshRememberCode = fs.readFileSync(path.resolve(process.cwd(), "api/remember.js"), "utf8");
+  const freshSummarizeCode = fs.readFileSync(path.resolve(process.cwd(), "api/summarize.js"), "utf8");
+  assert(
+    freshRecordCode.includes("verifyAdminAuth") &&
+      freshRememberCode.includes("verifyAdminAuth") &&
+      freshSummarizeCode.includes("verifyAdminAuth"),
+    "api/record.js, api/remember.js, dan api/summarize.js mendukung otentikasi Bearer token HMAC admin"
+  );
+
+  // H. Verifikasi CORS Header Hardening pada Seluruh Serverless Endpoints
+  const freshReadCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-read.js"), "utf8");
+  const freshTtsCode = fs.readFileSync(path.resolve(process.cwd(), "api/tts.js"), "utf8");
+  assert(
+    freshRecordCode.includes("x-gemini-key") &&
+      freshRememberCode.includes("x-gemini-key") &&
+      freshSummarizeCode.includes("x-gemini-key") &&
+      freshReadCode.includes("x-gemini-key") &&
+      freshTtsCode.includes("x-gemini-key"),
+    "Seluruh Serverless Functions api/*.js mengizinkan x-gemini-key dan Authorization pada Access-Control-Allow-Headers"
+  );
+
+  // I. Verifikasi Status Message Karakter UTF-8 di useGeminiLive.ts
+  assert(
+    updatedLiveCode.includes('"Siaga • Siap Berbicara"') &&
+      !updatedLiveCode.includes("Siaga ? Siap Berbicara"),
+    "apps/web/src/hooks/useGeminiLive.ts memiliki karakter pemisah bullet UTF-8 bersih ('Siaga • Siap Berbicara')"
+  );
+
+  // J. Verifikasi Dokumentasi .env.example Mutakhir
+  const envExampleCode = fs.readFileSync(path.resolve(process.cwd(), ".env.example"), "utf8");
+  assert(
+    envExampleCode.includes("GEMINI_API_KEYS=") &&
+      envExampleCode.includes("RESEARCH_MODEL=gemini-3.8-flash") &&
+      envExampleCode.includes("DOC_GENERATE_MODEL=gemini-3.8-flash"),
+    ".env.example mencantumkan konfigurasi mutakhir GEMINI_API_KEYS multi-key pool dan model gemini-3.8-flash"
+  );
+
+  // --- SECTION 39: Deep-Dive Phase 2 Audit, Frontend Auth/Key Parity & UX Enhancements ---
+  console.log("\n🧪 --- SECTION 39: Deep-Dive Phase 2 Audit, Frontend Auth/Key Parity & UX Enhancements ---");
+
+  // A. Verifikasi Eliminasi Rute Mati di apps/server/src/index.ts
+  const latestServerIndex = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/index.ts"),
+    "utf8"
+  );
+  assert(
+    !latestServerIndex.includes('"/api/documents/upload-url"') &&
+      !latestServerIndex.includes('"/api/documents/extract-file"'),
+    "apps/server/src/index.ts bersih dari rute mati upload-url & extract-file"
+  );
+
+  // B. Verifikasi apps/server/src/config.ts Multi-Key Sorting & Model Upgrade
+  const serverConfigCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/config.ts"),
+    "utf8"
+  );
+  assert(
+    serverConfigCode.includes('a.startsWith("AIzaSy")') &&
+      serverConfigCode.includes('"gemini-3.8-flash"'),
+    "apps/server/src/config.ts memprioritaskan kunci standar AIzaSy... dan mengadopsi model gemini-3.8-flash"
+  );
+
+  // C. Verifikasi DocumentService.ts Backend Lokal (cleanJson, WIB, Table Instruction)
+  const localDocSvcCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/DocumentService.ts"),
+    "utf8"
+  );
+  assert(
+    localDocSvcCode.includes("cleanJson") &&
+      localDocSvcCode.includes("getWibFormattedString") &&
+      localDocSvcCode.includes("TABEL DATA WAJIB DISERTAKAN"),
+    "DocumentService.ts backend lokal menyertakan sanitasi cleanJson, waktu WIB, dan instruksi tabel data riil"
+  );
+
+  // D. Verifikasi DocumentReaderService.ts 4-Dimensional Micro-OCR Prompt
+  const localDocReaderCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/server/src/services/DocumentReaderService.ts"),
+    "utf8"
+  );
+  assert(
+    localDocReaderCode.includes("PEMBACAAN TEKS & ANGKA DETAIL (OCR PARIPURNA)") &&
+      localDocReaderCode.includes("DEKOMPOSISI VISUAL, GRAFIK & DIAGRAM") &&
+      localDocReaderCode.includes("SINTESIS RISET & KESIMPULAN BERDASARKAN GAMBAR"),
+    "DocumentReaderService.ts backend lokal mengadopsi prompt Micro-OCR 4 Dimensi identik dengan serverless"
+  );
+
+  // E. Verifikasi DocumentModal.tsx Auth/Key Parity & Preview Feature
+  const docModalCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/modals/DocumentModal.tsx"),
+    "utf8"
+  );
+  assert(
+    docModalCode.includes("getStoredAuthPassword") &&
+      docModalCode.includes("getStoredAuthToken") &&
+      docModalCode.includes("celyn_custom_gemini_key") &&
+      docModalCode.includes("previewingDoc") &&
+      docModalCode.includes("Salin Teks"),
+    "DocumentModal.tsx menggunakan helper auth resmi, meneruskan custom key, dan memiliki fitur pratinjau/salin OCR"
+  );
+
+  // F. Verifikasi TranscriptDrawer.tsx Copy Bubble & Markdown Export
+  const transcriptCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/components/chat/TranscriptDrawer.tsx"),
+    "utf8"
+  );
+  assert(
+    transcriptCode.includes("handleCopyBubble") &&
+      transcriptCode.includes('handleExport("md")') &&
+      transcriptCode.includes("Riwayat Percakapan Celyn AI"),
+    "TranscriptDrawer.tsx memiliki fitur salin pesan per bubble dan ekspor laporan terstruktur Markdown (.md)"
+  );
+
+  // G. Verifikasi useGeminiLive.ts Headers Parity (x-gemini-key & Bearer auth)
+  const latestLiveCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/src/hooks/useGeminiLive.ts"),
+    "utf8"
+  );
+  assert(
+    latestLiveCode.includes('headers["x-gemini-key"] = customKey') &&
+      latestLiveCode.includes('uploadHeaders["x-gemini-key"] = customKey') &&
+      latestLiveCode.includes("/api/summarize"),
+    "useGeminiLive.ts secara konsisten menyertakan header x-gemini-key dan Authorization pada upload dan summarize"
+  );
+
+  // H. Verifikasi apps/web/index.html Favicon MIME Type
+  const htmlCode = fs.readFileSync(
+    path.resolve(process.cwd(), "apps/web/index.html"),
+    "utf8"
+  );
+  assert(
+    htmlCode.includes('<link rel="icon" type="image/png" href="/celyn_avatar.png" />'),
+    "apps/web/index.html menggunakan MIME type yang tepat (image/png) untuk favicon celyn_avatar.png"
+  );
+
+  // I. Verifikasi README.md Dokumentasi Mutakhir
+  const readmeCode = fs.readFileSync(
+    path.resolve(process.cwd(), "README.md"),
+    "utf8"
+  );
+  assert(
+    readmeCode.includes("TURSO_DATABASE_URL") &&
+      readmeCode.includes("350+ skenario uji") &&
+      readmeCode.includes("gemini-3.8-flash"),
+    "README.md memuat dokumentasi akurat TURSO_DATABASE_URL, 350+ skenario uji, dan model gemini-3.8-flash"
   );
 
   // Ringkasan

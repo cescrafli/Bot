@@ -9,11 +9,23 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-const rawGeminiKeys = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "";
-const geminiApiKeys = rawGeminiKeys
+const rawGeminiKeys = [
+  process.env.GEMINI_API_KEYS,
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_FALLBACK,
+  process.env.GEMINI_API_KEY_SECRET,
+]
+  .filter(Boolean)
+  .join(",");
+const parsedKeys = rawGeminiKeys
   .split(",")
   .map((k) => k.trim())
   .filter(Boolean);
+const geminiApiKeys = [...new Set(parsedKeys)].sort((a, b) => {
+  if (a.startsWith("AIzaSy") && !b.startsWith("AIzaSy")) return -1;
+  if (!a.startsWith("AIzaSy") && b.startsWith("AIzaSy")) return 1;
+  return 0;
+});
 const primaryGeminiApiKey = geminiApiKeys[0] || "";
 
 export const config = {
@@ -24,7 +36,8 @@ export const config = {
   geminiApiKey: primaryGeminiApiKey,
   geminiApiKeys,
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",
-  textModel: process.env.TEXT_MODEL || "gemini-3-flash-preview",
+  textModel: process.env.TEXT_MODEL || "gemini-3.8-flash",
+  researchModel: process.env.RESEARCH_MODEL || process.env.TEXT_MODEL || "gemini-3.8-flash",
   geminiVoice: process.env.GEMINI_VOICE || "Aoede",
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
     .split(",")
@@ -36,8 +49,8 @@ export const config = {
   sessionMaxDurationMs: 30 * 60 * 1000, // 30 menit durasi maksimal sesi live
   sessionWarningDurationMs: 25 * 60 * 1000, // 25 menit peringatan durasi
   docMaxUploadMb: parseInt(process.env.DOC_MAX_UPLOAD_MB || "0", 10), // 0 = unlimited / disk streaming
-  docOcrModel: process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview",
-  docGenerateModel: process.env.DOC_GENERATE_MODEL || process.env.TEXT_MODEL || "gemini-3-flash-preview",
+  docOcrModel: process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL || "gemini-3.8-flash",
+  docGenerateModel: process.env.DOC_GENERATE_MODEL || process.env.TEXT_MODEL || "gemini-3.8-flash",
   docMaxContextChars: parseInt(process.env.DOC_MAX_CONTEXT_CHARS || "60000", 10),
 };
 

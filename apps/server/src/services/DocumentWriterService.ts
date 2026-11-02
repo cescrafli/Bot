@@ -55,6 +55,25 @@ try {
   console.warn("[DocumentWriter] Inisialisasi font pdfmake fallback:", e?.message);
 }
 
+function normalizeTableRow(row: any, headers: string[]): string[] {
+  if (Array.isArray(row)) {
+    return headers.map((_, idx) => (row[idx] != null ? String(row[idx]) : ""));
+  }
+  if (row && typeof row === "object") {
+    return headers.map((h, idx) => {
+      if (row[h] != null) return String(row[h]);
+      const lowerH = String(h).toLowerCase().trim();
+      for (const [k, v] of Object.entries(row)) {
+        if (k.toLowerCase().trim() === lowerH) return String(v);
+      }
+      const vals = Object.values(row);
+      if (vals[idx] != null) return String(vals[idx]);
+      return "";
+    });
+  }
+  return headers.map(() => "");
+}
+
 export class DocumentWriterService {
   /**
    * 1. MEMBUAT LEMBAR KERJA EXCEL RAPI (.xlsx)
@@ -303,11 +322,12 @@ export class DocumentWriterService {
           ),
         });
 
-        const dataRows = sec.table.rows.map((r, rIdx) => {
+        const dataRows = (sec.table.rows || []).map((r, rIdx) => {
           const isEven = rIdx % 2 === 1;
+          const normalizedCells = normalizeTableRow(r, sec.table!.headers);
           return new TableRow({
-            children: sec.table!.headers.map((_, cIdx) => {
-              const cellText = stripMarkdownFormatting(r[cIdx] || "");
+            children: normalizedCells.map((cellVal) => {
+              const cellText = stripMarkdownFormatting(cellVal || "");
               return new TableCell({
                 shading: isEven ? { fill: "F8FAFC" } : undefined,
                 children: [
@@ -414,12 +434,13 @@ export class DocumentWriterService {
           style: "tableHeader",
         }));
 
-        const cleanRows = sec.table.rows.map((row) =>
-          sec.table!.headers.map((_, cIdx) => ({
-            text: stripMarkdownFormatting(row[cIdx] || ""),
+        const cleanRows = (sec.table.rows || []).map((row) => {
+          const normalizedCells = normalizeTableRow(row, sec.table!.headers);
+          return normalizedCells.map((cellVal) => ({
+            text: stripMarkdownFormatting(cellVal || ""),
             style: "tableCell",
-          }))
-        );
+          }));
+        });
 
         content.push({
           margin: [0, 8, 0, 14],
