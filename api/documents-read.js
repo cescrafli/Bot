@@ -95,6 +95,12 @@ function isValidTextBuffer(buffer) {
   return true;
 }
 
+const withTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout setelah ${ms}ms`)), ms)),
+  ]);
+
 function decodeTextBuffer(buffer) {
   if (!buffer || buffer.length === 0) return "";
   // UTF-16 LE BOM
@@ -274,35 +280,44 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
   if (isImage) {
     if (keys.length > 0) {
       const modelsToTry = [
+        "gemini-2.5-flash",
         process.env.DOC_VISION_MODEL || process.env.TEXT_MODEL,
         "gemini-3.8-flash",
         "gemini-3-flash-preview",
       ].filter(Boolean);
       const uniqueModels = [...new Set(modelsToTry)];
 
+      const startTime = Date.now();
+      const MAX_IMAGE_TIME_BUDGET_MS = 12000;
       let visualText = "";
+
       for (const modelToTry of uniqueModels) {
+        if (Date.now() - startTime > MAX_IMAGE_TIME_BUDGET_MS - 2500) break;
         for (const key of keys) {
+          if (Date.now() - startTime > MAX_IMAGE_TIME_BUDGET_MS - 2500) break;
           try {
             const ai = new GoogleGenAI({ apiKey: key });
-            const resp = await ai.models.generateContent({
-              model: modelToTry,
-              contents: [
-                {
-                  inlineData: {
-                    data: buffer.toString("base64"),
-                    mimeType: mimeType || "image/jpeg",
+            const resp = await withTimeout(
+              ai.models.generateContent({
+                model: modelToTry,
+                contents: [
+                  {
+                    inlineData: {
+                      data: buffer.toString("base64"),
+                      mimeType: mimeType || "image/jpeg",
+                    },
                   },
-                },
-                {
-                  text: `Anda adalah asisten peneliti dan analis visual tingkat pakar Celyn. Lakukan pembacaan dan analisis mendalam terhadap foto/gambar '${fileName}' ini dengan ketelitian mikro:
+                  {
+                    text: `Anda adalah asisten peneliti dan analis visual tingkat pakar Celyn. Lakukan pembacaan dan analisis mendalam terhadap foto/gambar '${fileName}' ini dengan ketelitian mikro:
 1. PEMBACAAN TEKS & ANGKA DETAIL (OCR PARIPURNA): Baca dan transkripsikan SELURUH teks, angka, simbol matematika/keuangan, satuan, label sumbu grafik, indikator teknikal, kode, dan detail kecil tanpa ada yang terlewat. Pertahankan struktur aslinya (sajikan dalam format Markdown Table jika berupa tabel data atau kisi matriks).
 2. DEKOMPOSISI VISUAL, GRAFIK & DIAGRAM: Bedah konten visual secara presisi (identifikasi jenis diagram/chart, arah tren garis/candlestick, level support/resistance, label perbandingan, diagram alur/arsitektur, atau skema konsep).
 3. SINTESIS RISET & KESIMPULAN BERDASARKAN GAMBAR: Formulasikan temuan visual menjadi data terstruktur dan ringkasan eksekutif yang siap digunakan langsung sebagai dasar riset komprehensif, perhitungan akurat, atau perumusan jawaban profesional.
 4. DETEKSI SOAL, TUGAS, ATAU INSTRUKSI: Jika gambar berisi soal ujian, latihan hitungan, studi kasus, atau pertanyaan tugas, uraikan setiap butir soal secara lengkap beserta angka, pilihan jawaban (jika ada), dan instruksi pengerjaannya agar dapat diselesaikan secara solutif dan runtut.`,
-                },
-              ],
-            });
+                  },
+                ],
+              }),
+              6500
+            );
             const text = (resp?.text || "").trim();
             if (text) {
               visualText = text;
@@ -331,7 +346,7 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
     return {
       fileName,
       mimeType: mimeType || "image/jpeg",
-      markdownContent: `(File foto/gambar '${fileName}' berhasil diunggah)`,
+      markdownContent: `Foto '${fileName}' berhasil diunggah dan siap dianalisis atau diedit oleh Celyn.`,
       usedOcr: false,
       totalPages: 1,
       pages: 1,
@@ -370,32 +385,40 @@ async function extractDoc(buffer, fileName, mimeType, apiKeysInput) {
 
     if (keys.length > 0) {
       const modelsToTry = [
+        "gemini-2.5-flash",
         process.env.DOC_OCR_MODEL || process.env.TEXT_MODEL,
         "gemini-3.8-flash",
-        "gemini-2.5-flash",
         "gemini-3-flash-preview",
       ].filter(Boolean);
       const uniqueModels = [...new Set(modelsToTry)];
 
+      const pdfStartTime = Date.now();
+      const MAX_PDF_TIME_BUDGET_MS = 14000;
       let ocrText = "";
+
       for (const modelToTry of uniqueModels) {
+        if (Date.now() - pdfStartTime > MAX_PDF_TIME_BUDGET_MS - 3000) break;
         for (const key of keys) {
+          if (Date.now() - pdfStartTime > MAX_PDF_TIME_BUDGET_MS - 3000) break;
           try {
             const ai = new GoogleGenAI({ apiKey: key });
-            const resp = await ai.models.generateContent({
-              model: modelToTry,
-              contents: [
-                {
-                  inlineData: {
-                    data: buffer.toString("base64"),
-                    mimeType: "application/pdf",
+            const resp = await withTimeout(
+              ai.models.generateContent({
+                model: modelToTry,
+                contents: [
+                  {
+                    inlineData: {
+                      data: buffer.toString("base64"),
+                      mimeType: "application/pdf",
+                    },
                   },
-                },
-                {
-                  text: "Ekstrak seluruh teks dari file PDF ini secara lengkap dan akurat. Pertahankan struktur judul, paragraf, dan tabel dalam format Markdown.",
-                },
-              ],
-            });
+                  {
+                    text: "Ekstrak seluruh teks dari file PDF ini secara lengkap dan akurat. Pertahankan struktur judul, paragraf, dan tabel dalam format Markdown.",
+                  },
+                ],
+              }),
+              7000
+            );
             const text = (resp?.text || "").trim();
             if (text) {
               ocrText = text;

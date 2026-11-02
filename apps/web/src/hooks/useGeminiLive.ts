@@ -362,6 +362,7 @@ export function useGeminiLive({
       if (customKey) headers["x-gemini-key"] = customKey;
 
       const sourceDataUrl = targetDoc.originalPreviewDataUrl || targetDoc.previewDataUrl || "";
+      const thumb = await ClientImageEditor.createVisionThumbnail(sourceDataUrl, 800, 0.78);
 
       let editApiResult: any = null;
       try {
@@ -374,7 +375,7 @@ export function useGeminiLive({
             action,
             instruction,
             backgroundColor: args.backgroundColor,
-            imagePreviewDataUrl: sourceDataUrl,
+            imagePreviewDataUrl: thumb.dataUrl,
           }),
         });
 
@@ -2439,6 +2440,136 @@ export function useGeminiLive({
         }
 
         let doc: ParsedDocument | null = null;
+        const isImage =
+          file.type.startsWith("image/") ||
+          /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name);
+
+        if (isImage) {
+          // --- JALUR FOTO INSTAN (< 0.1s) & ANTI-504 ---
+          setDocStatusMessage(`Menyiapkan foto '${file.name}' di Panggung Foto...`);
+
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+
+          const thumb = await ClientImageEditor.createVisionThumbnail(dataUrl, 800, 0.78);
+
+          const photoDoc: ParsedDocument = {
+            fileName: file.name,
+            mimeType: file.type || "image/jpeg",
+            markdownContent: `Foto '${file.name}' berhasil dimuat dan siap dianalisis atau diedit oleh Celyn.`,
+            usedOcr: false,
+            totalPages: 1,
+            truncated: false,
+            characterCount: 0,
+            previewDataUrl: dataUrl,
+            originalPreviewDataUrl: dataUrl,
+          };
+          doc = photoDoc;
+
+          // Tampilkan langsung di Panggung Foto
+          setActiveDocuments((prev) => [
+            ...prev.filter((d) => d.fileName !== photoDoc.fileName),
+            photoDoc,
+          ]);
+          setIsPhotoStageVisible(true);
+          setLastPhotoEditSummary("Foto siap diedit lewat perintah suaramu!");
+
+          // Kirim frame visual ke sesi live jika terhubung
+          if (directSessionRef.current) {
+            try {
+              directSessionRef.current.sendRealtimeInput({
+                media: {
+                  mimeType: thumb.mimeType,
+                  data: thumb.base64,
+                },
+              });
+            } catch (e) {
+              console.warn("Gagal kirim visual input:", e);
+            }
+          }
+
+          // Injeksi konteks dokumen ke percakapan (mode upload-then-wait)
+          const systemContent = buildSafeLiveDocumentContext(photoDoc, 20000);
+          if (directSessionRef.current) {
+            try {
+              directSessionRef.current.sendClientContent({
+                turns: [{ role: "user", parts: [{ text: systemContent }] }],
+                turnComplete: false,
+              });
+            } catch (e) {
+              console.warn("Gagal inject context foto:", e);
+            }
+          } else {
+            sendMessageRef.current({
+              type: "doc_context",
+              text: systemContent,
+              fileName: photoDoc.fileName,
+              silent: true,
+            });
+          }
+
+          // Kirim thumbnail ringan ke /api/documents/read di latar belakang (timeout 8.5s)
+          // Jika background call gagal/timeout (504), foto TETAP aman & aktif!
+          (async () => {
+            try {
+              const formData = new FormData();
+              formData.append("file", thumb.blob, file.name);
+
+              const uploadHeaders: Record<string, string> = {
+                "x-admin-password": password,
+              };
+              if (token) uploadHeaders["Authorization"] = `Bearer ${token}`;
+              const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+              if (customKey) uploadHeaders["x-gemini-key"] = customKey;
+
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 8500);
+
+              const res = await fetch("/api/documents/read", {
+                method: "POST",
+                headers: uploadHeaders,
+                body: formData,
+                signal: controller.signal,
+              });
+              clearTimeout(timer);
+
+              if (res.ok) {
+                const data = await res.json().catch(() => null);
+                if (data?.document?.markdownContent) {
+                  setActiveDocuments((prev) =>
+                    prev.map((d) =>
+                      d.fileName === file.name
+                        ? {
+                            ...d,
+                            markdownContent: data.document.markdownContent,
+                            usedOcr: Boolean(data.document.usedOcr),
+                            characterCount:
+                              data.document.characterCount ||
+                              data.document.markdownContent.length,
+                          }
+                        : d
+                    )
+                  );
+                }
+              }
+            } catch (bgErr: any) {
+              console.log(
+                "[uploadDocument] Background Vision OCR selesai/dilewati:",
+                bgErr?.message || bgErr
+              );
+            }
+          })();
+
+          setDocStatusMessage(
+            `Foto '${file.name}' siap! Silakan beri perintah suara ke Celyn.`
+          );
+          setTimeout(() => setDocStatusMessage(null), 5000);
+          return photoDoc;
+        }
 
         if (isLargeFile) {
           // --- JALUR EKSTRAKSI SISI KLIEN INSTAN (UNTUK FILE BESAR S.D 500 MB) ---

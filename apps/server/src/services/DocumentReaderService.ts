@@ -119,6 +119,7 @@ export class DocumentReaderService {
     }
 
     const candidateModels = [
+      "gemini-2.5-flash",
       (config as any).visionModel,
       config.textModel,
       "gemini-3.8-flash",
@@ -129,31 +130,36 @@ export class DocumentReaderService {
     const base64Data = buffer.toString("base64");
     let text = "";
     let lastErr: any = null;
+    const startServerTime = Date.now();
 
     for (const model of uniqueModels) {
+      if (Date.now() - startServerTime > 10000) break;
       try {
-        const res = await this.ai.models.generateContent({
-          model,
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: mimeType || "image/jpeg",
-                    data: base64Data,
+        const res = (await Promise.race([
+          this.ai.models.generateContent({
+            model,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: mimeType || "image/jpeg",
+                      data: base64Data,
+                    },
                   },
-                },
-                {
-                  text: `Anda adalah asisten analisis visual, peneliti teliti, dan OCR cerdas Celyn. Lakukan analisis foto/gambar/grafik/dokumen '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
+                  {
+                    text: `Anda adalah asisten analisis visual, peneliti teliti, dan OCR cerdas Celyn. Lakukan analisis foto/gambar/grafik/dokumen '${fileName}' ini secara mendalam, lengkap, dan sempurna tanpa terlewat:
 1. PEMBACAAN TEKS & ANGKA DETAIL (OCR PARIPURNA): Baca dan transkripsikan SELURUH teks, angka, simbol matematika/keuangan, satuan, label sumbu grafik, indikator teknikal, kode, dan detail kecil tanpa ada yang terlewat. Pertahankan struktur aslinya (sajikan dalam format Markdown Table jika berupa tabel data atau kisi matriks).
 2. DEKOMPOSISI VISUAL, GRAFIK & DIAGRAM: Bedah konten visual secara presisi (identifikasi jenis diagram/chart, arah tren garis/candlestick, level support/resistance, label perbandingan, diagram alur/arsitektur, atau skema konsep).
 3. SINTESIS RISET & KESIMPULAN BERDASARKAN GAMBAR: Formulasikan temuan visual menjadi data terstruktur dan ringkasan eksekutif yang siap digunakan langsung sebagai dasar riset komprehensif, perhitungan akurat, atau perumusan jawaban profesional.`,
-                },
-              ],
-            },
-          ],
-        });
+                  },
+                ],
+              },
+            ],
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout OCR")), 6500)),
+        ])) as any;
 
         text = (res?.text || "").trim();
         if (text) break;

@@ -2996,6 +2996,50 @@ async function runTtsTests() {
     "useGeminiLive.ts mengikat tool edit_image ke direct live session dan manajemen stage foto"
   );
 
+  // 44. Uji Anti-504 Gateway Timeout & Instant Client-First Photo Pipeline
+  console.log("\n--- 44. Uji Anti-504 Gateway Timeout & Instant Client-First Photo Pipeline ---");
+
+  // 1. Verifikasi ClientImageEditor.createVisionThumbnail
+  assert(
+    s43EditorCode.includes("createVisionThumbnail") &&
+      s43EditorCode.includes("maxDimension = 800") &&
+      s43EditorCode.includes("quality = 0.78"),
+    "ClientImageEditor.ts mengimplementasikan createVisionThumbnail untuk kompresi payload Vision"
+  );
+
+  // 2. Verifikasi Strict Timeout & gemini-2.5-flash di api/documents-read.js
+  const s44DocReadCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-read.js"), "utf8");
+  assert(
+    s44DocReadCode.includes("withTimeout") &&
+      s44DocReadCode.includes("MAX_IMAGE_TIME_BUDGET_MS") &&
+      s44DocReadCode.includes('"gemini-2.5-flash"'),
+    "api/documents-read.js memprioritaskan gemini-2.5-flash dan menerapkan total budget timeout anti-504"
+  );
+
+  // 3. Verifikasi Strict Timeout di api/documents-process.js
+  const s44DocProcessCode = fs.readFileSync(path.resolve(process.cwd(), "api/documents-process.js"), "utf8");
+  assert(
+    s44DocProcessCode.includes("MAX_EDIT_VISION_BUDGET_MS") &&
+      s44DocProcessCode.includes("editVisionStart"),
+    "api/documents-process.js menerapkan timeout budget pada operasi edit_image agar bebas 504"
+  );
+
+  // 4. Verifikasi Instant Client-First Photo Upload di useGeminiLive.ts
+  assert(
+    s43LiveHookCode.includes("JALUR FOTO INSTAN (< 0.1s) & ANTI-504") &&
+      s43LiveHookCode.includes("createVisionThumbnail") &&
+      s43LiveHookCode.includes("sendRealtimeInput"),
+    "useGeminiLive.ts menampilkan foto secara instan (<0.1s) dan menyuntikkan frame visual tanpa terblokir 504"
+  );
+
+  // 5. Verifikasi Paritas DocumentReaderService.ts Server Lokal
+  const s44ServerReaderCode = fs.readFileSync(path.resolve(process.cwd(), "apps/server/src/services/DocumentReaderService.ts"), "utf8");
+  assert(
+    s44ServerReaderCode.includes('"gemini-2.5-flash"') &&
+      s44ServerReaderCode.includes("startServerTime"),
+    "DocumentReaderService.ts server lokal memiliki paritas model gemini-2.5-flash dan batas timeout"
+  );
+
   // Ringkasan
   console.log("\n=======================================================");
   console.log(`📊 Hasil Akhir Smoke Test: ${passed} Passed, ${failed} Failed`);

@@ -677,16 +677,23 @@ KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
         }
         contents.push({ text: visionPrompt });
 
+        const editVisionStart = Date.now();
+        const MAX_EDIT_VISION_BUDGET_MS = 10000;
+
         for (const key of candidateKeys) {
+          if (Date.now() - editVisionStart > MAX_EDIT_VISION_BUDGET_MS - 2500) break;
           try {
             const ai = new GoogleGenAI({ apiKey: key });
-            const resp = await ai.models.generateContent({
-              model: visionModel,
-              contents,
-              config: {
-                responseMimeType: "application/json",
-              },
-            });
+            const resp = await withTimeout(
+              ai.models.generateContent({
+                model: visionModel,
+                contents,
+                config: {
+                  responseMimeType: "application/json",
+                },
+              }),
+              6000
+            );
             const rawText = cleanJson(resp.text || "");
             if (rawText) {
               const parsed = JSON.parse(rawText);
