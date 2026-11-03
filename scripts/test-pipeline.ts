@@ -3043,14 +3043,23 @@ async function runTtsTests() {
   // 45. Uji Precision Voice Photo Editor & Selective Part Recoloring
   console.log("\n--- 45. Uji Precision Voice Photo Editor & Selective Part Recoloring ---");
 
-  // 1. Verifikasi recolorTargetPart di ClientImageEditor.ts
+  // 1. Verifikasi ClientImageEditor.recolorTargetPart dengan BFS Region Growing & Foliage/Suit Barriers
   const s45EditorCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/services/ClientImageEditor.ts"), "utf8");
   assert(
     s45EditorCode.includes("recolorTargetPart") &&
       s45EditorCode.includes("targetBoxes") &&
       s45EditorCode.includes("excludeBoxes") &&
-      s45EditorCode.includes("isTargetWhite"),
-    "ClientImageEditor.ts mengimplementasikan recolorTargetPart dengan 4-Gate Protection & Shading Transfer"
+      s45EditorCode.includes("isTargetWhite") &&
+      s45EditorCode.includes("isHairCandidate") &&
+      s45EditorCode.includes("seedQueue"),
+    "ClientImageEditor.ts mengimplementasikan recolorTargetPart dengan Unbounded BFS Region Growing & Precision Spatial Barriers"
+  );
+
+  // 1b. Verifikasi Foliage & Suit Barrier di ClientImageEditor
+  assert(
+    s45EditorCode.includes("isFoliage") &&
+      s45EditorCode.includes("isSuit"),
+    "ClientImageEditor.ts mengimplementasikan Foliage (rumput/bunga) dan Suit (jas/bahu) barriers"
   );
 
   // 2. Verifikasi withTimeout di top-level api/documents-process.js

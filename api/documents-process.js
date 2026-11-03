@@ -650,10 +650,10 @@ Tugas Anda:
 
 2. Jika editMode === "recolor_part":
    - targetPart: "hair" | "clothes" | "accessory" | "object".
-   - targetBoxes (skala 0..1000): array kotak area bagian yang ingin diubah warnanya (contoh rambut: [{"ymin": 420, "xmin": 310, "ymax": 540, "xmax": 490}]).
-   - excludeBoxes (skala 0..1000): array kotak area di dekat target yang WAJIB dilindungi dan TIDAK BOLEH terkena warna (contoh saat cat rambut, lindungi wajah/mata/kacamata: [{"ymin": 460, "xmin": 340, "ymax": 530, "xmax": 440}]).
-   - samplePoints (skala 0..1000): 2-4 titik koordinat tepat di atas permukaan bagian target untuk sampling warna piksel asli di kanvas (contoh: [{"x": 340, "y": 450}, {"x": 440, "y": 480}]).
-   - sourceColorsHex: daftar warna hex asli dari bagian tersebut (contoh rambut Simon: ["#4a2924", "#211b23"]).
+   - targetBoxes (skala 0..1000): array kotak area bagian target. PENTING: Untuk rambut ('hair'), kotak HARUS mencakup puncak paling atas kepala (top crown / ubun-ubun) hingga ujung rambut bagian bawah dan samping! Berikan margin atas dan samping yang cukup agar tidak ada rambut yang terpotong. Untuk pakaian/baju ('clothes'), sertakan seluruh area pakaian yang diminta.
+   - excludeBoxes (skala 0..1000): array kotak area yang WAJIB dilindungi dan TIDAK BOLEH terkena perubahan warna. PENTING: Saat mengubah rambut ('hair'), WAJIB sertakan kotak wajah bagian dalam (mata, hidung, mulut, kacamata, pipi, dahi) dan kotak pakaian/tubuh di bawah leher agar warna tidak tumpah ke pakaian.
+   - samplePoints (skala 0..1000): 4-6 titik koordinat tepat di atas permukaan bagian target yang tersebar merata: untuk rambut, tempatkan titik di mahkota atas rambut, sisi kiri rambut, sisi kanan rambut, bagian tengah rambut, dan highlight/jambul rambut (jika ada).
+   - sourceColorsHex: daftar warna hex asli dari bagian tersebut (misal rambut cokelat gelap & abu-abu: ["#4f2d1c", "#322c13", "#c5a79e"]).
    - targetColorHex: kode hex warna tujuan (contoh: "#ffffff" untuk putih, "#dc2626" untuk merah, "#1d4ed8" untuk biru).
 
 3. Jika editMode === "replace_background" atau ada permintaan ganti warna latar:
@@ -669,16 +669,27 @@ KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
 {
   "editMode": "recolor_part",
   "targetPart": "hair",
-  "targetBoxes": [{ "ymin": 420, "xmin": 310, "ymax": 540, "xmax": 490 }],
-  "excludeBoxes": [{ "ymin": 460, "xmin": 340, "ymax": 530, "xmax": 440 }],
-  "samplePoints": [{ "x": 340, "y": 450 }, { "x": 440, "y": 480 }],
-  "sourceColorsHex": ["#4a2924", "#211b23"],
+  "targetBoxes": [{ "ymin": 160, "xmin": 190, "ymax": 470, "xmax": 500 }],
+  "excludeBoxes": [
+    { "ymin": 250, "xmin": 285, "ymax": 445, "xmax": 440 },
+    { "ymin": 450, "xmin": 220, "ymax": 950, "xmax": 580 }
+  ],
+  "samplePoints": [
+    { "x": 340, "y": 210 },
+    { "x": 250, "y": 340 },
+    { "x": 440, "y": 340 },
+    { "x": 380, "y": 260 },
+    { "x": 330, "y": 430 }
+  ],
+  "sourceColorsHex": ["#4f2d1c", "#322c13", "#301c13", "#c5a79e"],
   "targetColorHex": "#ffffff",
   "subjectBox": { "ymin": 120, "xmin": 180, "ymax": 950, "xmax": 820 },
   "explanation": "Warna rambut subjek di foto telah berhasil diubah menjadi putih."
 }`;
 
-      const isRecolorIntent = /rambut|baju|jas|celana|kaos|dasi|sepatu|kupu|warna\s+(rambut|baju|jas|celana)/i.test(rawInstruction);
+      const isHairIntent = /rambut/i.test(rawInstruction);
+      const isClothesIntent = /baju|jas|celana|kaos|pakaian|dasi/i.test(rawInstruction);
+      const isRecolorIntent = isHairIntent || isClothesIntent || /sepatu|kupu|warna\s+(rambut|baju|jas|celana)/i.test(rawInstruction);
       let visionResult = {
         editMode: isRecolorIntent
           ? "recolor_part"
@@ -687,15 +698,35 @@ KEMBALIKAN HANYA JSON VALID TANPA MARKDOWN BACKTICKS:
           : action === "background_color"
           ? "replace_background"
           : "transform",
-        targetPart: /rambut/i.test(rawInstruction)
+        targetPart: isHairIntent
           ? "hair"
-          : /baju|jas|kaos|pakaian/i.test(rawInstruction)
+          : isClothesIntent
           ? "clothes"
           : "object",
-        targetBoxes: [{ ymin: 390, xmin: 280, ymax: 560, xmax: 510 }],
-        excludeBoxes: [{ ymin: 460, xmin: 340, ymax: 530, xmax: 440 }],
-        samplePoints: [{ x: 350, y: 450 }, { x: 440, y: 480 }],
-        sourceColorsHex: ["#4a2924", "#2b1c17"],
+        targetBoxes: isHairIntent
+          ? [{ ymin: 160, xmin: 180, ymax: 470, xmax: 510 }]
+          : [{ ymin: 360, xmin: 240, ymax: 850, xmax: 600 }],
+        excludeBoxes: isHairIntent
+          ? [
+              { ymin: 250, xmin: 280, ymax: 445, xmax: 440 },
+              { ymin: 450, xmin: 220, ymax: 950, xmax: 580 }
+            ]
+          : [{ ymin: 150, xmin: 220, ymax: 380, xmax: 480 }],
+        samplePoints: isHairIntent
+          ? [
+              { x: 340, y: 210 },
+              { x: 250, y: 340 },
+              { x: 440, y: 340 },
+              { x: 380, y: 260 },
+              { x: 330, y: 430 }
+            ]
+          : [
+              { x: 350, y: 480 },
+              { x: 400, y: 550 }
+            ],
+        sourceColorsHex: isHairIntent
+          ? ["#4f2d1c", "#322c13", "#301c13", "#302623", "#c5a79e"]
+          : ["#2b1c17", "#1d4ed8"],
         targetColorHex: /putih/i.test(rawInstruction)
           ? "#ffffff"
           : /merah/i.test(rawInstruction)

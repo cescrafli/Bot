@@ -334,13 +334,28 @@ export class ClientImageEditor {
       resolveIndonesianColor(backgroundColor) ||
       (backgroundColor ? backgroundColor : "#ffffff");
     const targetRgb = parseHexToRgb(resolvedTargetHex) || [255, 255, 255];
-    const isTargetWhite = targetRgb[0] >= 225 && targetRgb[1] >= 225 && targetRgb[2] >= 225;
+    const isTargetWhite = targetRgb[0] >= 220 && targetRgb[1] >= 220 && targetRgb[2] >= 220;
 
     // Normalisasi Target Boxes (skala 0..1000 -> koordinat piksel)
-    const activeBoxes =
+    const rawTargetBoxes =
       targetBoxes && targetBoxes.length > 0
         ? targetBoxes
-        : [{ ymin: 360, xmin: 260, ymax: 580, xmax: 520 }];
+        : [{ ymin: 160, xmin: 180, ymax: 470, xmax: 510 }];
+
+    // Untuk target "hair", berikan auto-expansion ke atas dan samping agar mahkota & ujung rambut tidak terpotong
+    const activeBoxes = rawTargetBoxes.map((b) => {
+      if (targetPart === "hair") {
+        const h = b.ymax - b.ymin;
+        const w = b.xmax - b.xmin;
+        return {
+          ymin: Math.max(0, b.ymin - Math.round(h * 0.15)),
+          ymax: Math.min(1000, b.ymax + Math.round(h * 0.05)),
+          xmin: Math.max(0, b.xmin - Math.round(w * 0.06)),
+          xmax: Math.min(1000, b.xmax + Math.round(w * 0.06)),
+        };
+      }
+      return b;
+    });
 
     const pixelTargetBoxes = activeBoxes.map((b) => ({
       minX: Math.max(0, Math.floor((b.xmin / 1000) * width)),
@@ -349,8 +364,18 @@ export class ClientImageEditor {
       maxY: Math.min(height - 1, Math.ceil((b.ymax / 1000) * height)),
     }));
 
-    // Normalisasi Exclude Boxes (wajah / mata / kacamata)
-    const pixelExcludeBoxes = (excludeBoxes || []).map((b) => ({
+    // Normalisasi Exclude Boxes (wajah / mata / kacamata / tubuh)
+    const rawExcludeBoxes =
+      excludeBoxes && excludeBoxes.length > 0
+        ? excludeBoxes
+        : targetPart === "hair"
+        ? [
+            { ymin: 250, xmin: 280, ymax: 445, xmax: 440 },
+            { ymin: 450, xmin: 220, ymax: 950, xmax: 580 },
+          ]
+        : [];
+
+    const pixelExcludeBoxes = rawExcludeBoxes.map((b) => ({
       minX: Math.max(0, Math.floor((b.xmin / 1000) * width)),
       maxX: Math.min(width - 1, Math.ceil((b.xmax / 1000) * width)),
       minY: Math.max(0, Math.floor((b.ymin / 1000) * height)),
@@ -364,117 +389,224 @@ export class ClientImageEditor {
       if (rgb) sourceClusters.push(rgb);
     }
 
-    // Ambil sampel piksel kanvas aktual pada samplePoints
+    // Ambil sampel piksel kanvas aktual pada samplePoints (termasuk 3x3 patch)
     for (const pt of samplePoints || []) {
       const px = Math.max(0, Math.min(width - 1, Math.round((pt.x / 1000) * width)));
       const py = Math.max(0, Math.min(height - 1, Math.round((pt.y / 1000) * height)));
-      const pIdx = (py * width + px) * 4;
-      sourceClusters.push([data[pIdx], data[pIdx + 1], data[pIdx + 2]]);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const sx = Math.max(0, Math.min(width - 1, px + dx));
+          const sy = Math.max(0, Math.min(height - 1, py + dy));
+          const pIdx = (sy * width + sx) * 4;
+          sourceClusters.push([data[pIdx], data[pIdx + 1], data[pIdx + 2]]);
+        }
+      }
     }
 
-    // Jika belum ada klaster warna sumber, lakukan auto-sampling di target box
+    // Jika belum ada klaster warna sumber, lakukan auto-sampling di bagian atas target box
     if (sourceClusters.length === 0) {
       for (const box of pixelTargetBoxes) {
         const midX = Math.round((box.minX + box.maxX) / 2);
-        const midY = Math.round((box.minY + box.maxY) / 2);
-        const pIdx = (midY * width + midX) * 4;
+        const sampleY = Math.round(box.minY + (box.maxY - box.minY) * 0.35);
+        const pIdx = (sampleY * width + midX) * 4;
         sourceClusters.push([data[pIdx], data[pIdx + 1], data[pIdx + 2]]);
       }
     }
 
-    // Kumpulkan sampel latar belakang luar di sekitar cincin target box (Gate 3)
-    const exteriorBgSamples: Array<[number, number, number]> = [];
-    for (const box of pixelTargetBoxes) {
-      const margin = Math.max(12, Math.round(width * 0.03));
-      for (let x = Math.max(0, box.minX - margin); x <= Math.min(width - 1, box.maxX + margin); x += 6) {
-        const topY = Math.max(0, box.minY - 8);
-        const idx = (topY * width + x) * 4;
-        exteriorBgSamples.push([data[idx], data[idx + 1], data[idx + 2]]);
+    // Ambang batas toleransi warna
+    const toleranceThreshold = 100;
+    const featherRange = 25;
+
+    // Helper: Periksa apakah piksel memenuhi kriteria bagian rambut / target
+    const isHairCandidate = (x: number, y: number): boolean => {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+      if (a < 30) return false;
+
+      // Ink / Line-art outline preservation (pertahankan garis kontur hitam)
+      const maxVal = Math.max(r, g, b);
+      if (maxVal < 22) return false;
+
+      // Exclude Box Check (Wajah / Kacamata / Pakaian di bawah leher)
+      for (const eb of pixelExcludeBoxes) {
+        if (x >= eb.minX && x <= eb.maxX && y >= eb.minY && y <= eb.maxY) {
+          // Kulit wajah
+          const isSkin = r > 125 && g > 80 && r > g && g > b && r - b > 20;
+          // Kacamata / lensa terang
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          const isGlasses = lum > 110 && Math.abs(r - g) < 25 && Math.abs(g - b) < 25;
+          // Pakaian / jas
+          const isClothing = (b > r && b >= g) || (r > 60 && r > g * 2.2);
+          if (isSkin || isGlasses || isClothing) {
+            return false;
+          }
+        }
       }
-      for (let y = box.minY; y <= box.maxY; y += 8) {
-        const leftX = Math.max(0, box.minX - 8);
-        const rightX = Math.min(width - 1, box.maxX + 8);
-        const idxL = (y * width + leftX) * 4;
-        const idxR = (y * width + rightX) * 4;
-        exteriorBgSamples.push([data[idxL], data[idxL + 1], data[idxL + 2]]);
-        exteriorBgSamples.push([data[idxR], data[idxR + 1], data[idxR + 2]]);
+
+      // Foliage / Rumput / Pemandangan hijau di luar kepala
+      const isFoliage =
+        g >= 32 &&
+        (g >= r * 0.68 || g >= b * 2.0) &&
+        r < 115 &&
+        b < 50 &&
+        g > b + 14;
+      if (isFoliage) return false;
+
+      // Pakaian / Jas di bawah batas dagu/leher (y > 45% atau di bawah box)
+      const normY = Math.round((y / height) * 1000);
+      if (normY >= 448) {
+        const isSuit = (b > r && b >= g) || (r > 60 && r > g * 2.2);
+        if (isSuit) return false;
+      }
+
+      // Kriteria Warna Rambut:
+      // 1. Rambut cokelat hangat / espresso
+      const isBrown =
+        r >= 35 &&
+        r <= 105 &&
+        g >= 14 &&
+        g <= 65 &&
+        b >= 5 &&
+        b <= 50 &&
+        (r >= g * 1.15 || maxVal < 48);
+
+      // 2. Jambul uban / streak rambut depan (abu-abu/krem terang)
+      const isStreak =
+        r >= 145 &&
+        r <= 235 &&
+        g >= 130 &&
+        g <= 210 &&
+        b >= 120 &&
+        b <= 200 &&
+        Math.abs(r - g) < 42 &&
+        Math.abs(g - b) < 42 &&
+        (r - b < 38 || b > 120);
+
+      // 3. Bayangan rambut gelap
+      const isShadow = maxVal >= 22 && maxVal <= 52 && g < 42;
+
+      // 4. Helai rambut yang sudah sempat diputihkan
+      const isWhitenedStrand = r > 180 && g > 180 && b > 180 && normY >= 200 && normY <= 465;
+
+      // 5. Jarak warna ke klaster sumber yang terdeteksi
+      let closeToCluster = false;
+      for (const sc of sourceClusters) {
+        if (colorDist(r, g, b, sc[0], sc[1], sc[2]) <= toleranceThreshold) {
+          closeToCluster = true;
+          break;
+        }
+      }
+
+      return isBrown || isStreak || isShadow || isWhitenedStrand || closeToCluster;
+    };
+
+    // Masker piksel rambut/target (1 = harus diwarnai)
+    const targetMask = new Uint8Array(width * height);
+    const weightMask = new Float32Array(width * height);
+
+    if (targetPart === "hair") {
+      // 1. Kumpulkan semua piksel rambut di dalam target boxes
+      const seedQueue: number[] = [];
+      for (const tb of pixelTargetBoxes) {
+        for (let y = tb.minY; y <= tb.maxY; y++) {
+          for (let x = tb.minX; x <= tb.maxX; x++) {
+            if (isHairCandidate(x, y)) {
+              const pIdx = y * width + x;
+              targetMask[pIdx] = 1;
+              weightMask[pIdx] = 1.0;
+              seedQueue.push(pIdx);
+            }
+          }
+        }
+      }
+
+      // 2. BFS Region Growing: Perluas ke seluruh helai rambut yang terhubung (8-connected)
+      let head = 0;
+      while (head < seedQueue.length) {
+        const curr = seedQueue[head++];
+        const cx = curr % width;
+        const cy = Math.floor(curr / width);
+
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+              const nIdx = ny * width + nx;
+              if (!targetMask[nIdx] && isHairCandidate(nx, ny)) {
+                targetMask[nIdx] = 1;
+                weightMask[nIdx] = 1.0;
+                seedQueue.push(nIdx);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Untuk bagian non-rambut (pakaian, aksesoris, objek)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let insideTarget = false;
+          for (const tb of pixelTargetBoxes) {
+            if (x >= tb.minX && x <= tb.maxX && y >= tb.minY && y <= tb.maxY) {
+              insideTarget = true;
+              break;
+            }
+          }
+          if (!insideTarget) continue;
+
+          let insideExclude = false;
+          for (const eb of pixelExcludeBoxes) {
+            if (x >= eb.minX && x <= eb.maxX && y >= eb.minY && y <= eb.maxY) {
+              insideExclude = true;
+              break;
+            }
+          }
+          if (insideExclude) continue;
+
+          const idx = (y * width + x) * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const a = data[idx + 3];
+          if (a < 30) continue;
+
+          const maxVal = Math.max(r, g, b);
+          if (maxVal < 22) continue;
+
+          let minSourceDist = 9999;
+          for (const sc of sourceClusters) {
+            const d = colorDist(r, g, b, sc[0], sc[1], sc[2]);
+            if (d < minSourceDist) minSourceDist = d;
+          }
+
+          if (minSourceDist <= toleranceThreshold + featherRange) {
+            const pIdx = y * width + x;
+            targetMask[pIdx] = 1;
+            weightMask[pIdx] =
+              minSourceDist <= toleranceThreshold
+                ? 1.0
+                : (toleranceThreshold + featherRange - minSourceDist) / featherRange;
+          }
+        }
       }
     }
 
-    // Ambang batas toleransi warna
-    const toleranceThreshold = 95;
-    const featherRange = 35;
-
-    // Proses piksel di seluruh kanvas
+    // Terapkan Pewarnaan Baru ke Semua Piksel yang Ditandai
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        // Gate 1: Cek apakah piksel berada di dalam salah satu target box
-        let insideTarget = false;
-        for (const tb of pixelTargetBoxes) {
-          if (x >= tb.minX && x <= tb.maxX && y >= tb.minY && y <= tb.maxY) {
-            insideTarget = true;
-            break;
-          }
-        }
-        if (!insideTarget) continue;
+        const pIdx = y * width + x;
+        if (!targetMask[pIdx]) continue;
 
-        // Gate 1b: Cek apakah piksel berada di dalam exclude box (wajah/kacamata)
-        let insideExclude = false;
-        for (const eb of pixelExcludeBoxes) {
-          if (x >= eb.minX && x <= eb.maxX && y >= eb.minY && y <= eb.maxY) {
-            insideExclude = true;
-            break;
-          }
-        }
-        if (insideExclude) continue;
-
-        const idx = (y * width + x) * 4;
+        const idx = pIdx * 4;
         const r = data[idx];
         const g = data[idx + 1];
         const b = data[idx + 2];
-        const a = data[idx + 3];
-        if (a < 30) continue;
-
-        // Gate 2: Ink / Line-art outline preservation (pertahankan garis kontur hitam)
-        const maxVal = Math.max(r, g, b);
-        if (maxVal < 26) continue;
-
-        // Gate 3: Face Skin & Glasses Rejection khusus saat mengecat rambut
-        if (targetPart === "hair") {
-          const isSkinTone = r > 140 && g > 100 && r > g && g > b && r - b > 20;
-          if (isSkinTone) continue;
-          if (r > 215 && g > 215 && b > 215) continue;
-        }
-
-        // Gate 4: Bandingkan jarak warna ke klaster sumber vs latar belakang luar
-        let minSourceDist = 9999;
-        for (const sc of sourceClusters) {
-          const d = colorDist(r, g, b, sc[0], sc[1], sc[2]);
-          if (d < minSourceDist) minSourceDist = d;
-        }
-
-        // Jika ada sampel latar luar, tolak piksel yang lebih condong ke latar (misal rumput di sela rambut)
-        if (exteriorBgSamples.length > 0) {
-          let minExteriorDist = 9999;
-          for (let i = 0; i < exteriorBgSamples.length; i += 2) {
-            const eb = exteriorBgSamples[i];
-            const d = colorDist(r, g, b, eb[0], eb[1], eb[2]);
-            if (d < minExteriorDist) minExteriorDist = d;
-          }
-          if (minExteriorDist < minSourceDist * 0.96) {
-            continue;
-          }
-        }
-
-        if (minSourceDist > toleranceThreshold + featherRange) {
-          continue;
-        }
-
-        // Hitung bobot percampuran (feathering halus)
-        const weight =
-          minSourceDist <= toleranceThreshold
-            ? 1.0
-            : (toleranceThreshold + featherRange - minSourceDist) / featherRange;
+        const weight = weightMask[pIdx];
 
         // Hitung Luminance asli
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
@@ -484,11 +616,11 @@ export class ClientImageEditor {
         let newB = b;
 
         if (isTargetWhite) {
-          // Luminance-Preserving Shading Transfer untuk Putih Perak Berdimensi
-          const normalizedLum = Math.min(1, Math.max(0, (lum - 20) / 95));
-          newR = Math.round(208 + normalizedLum * 47);
-          newG = Math.round(214 + normalizedLum * 41);
-          newB = Math.round(226 + normalizedLum * 29);
+          // Luminance-Preserving Shading Transfer untuk Putih Salju Bersih & Perak Berdimensi
+          const normalizedLum = Math.min(1, Math.max(0, (lum - 20) / 75));
+          newR = Math.round(232 + normalizedLum * 23);
+          newG = Math.round(236 + normalizedLum * 19);
+          newB = Math.round(244 + normalizedLum * 11);
         } else {
           // Transfer warna dengan preservasi kontras pencahayaan
           const lumFactor = Math.max(0.25, lum / 128);
