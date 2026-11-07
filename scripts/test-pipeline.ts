@@ -59,6 +59,7 @@ import { documentWriterService } from "../apps/server/src/services/DocumentWrite
 import { documentService } from "../apps/server/src/services/DocumentService.js";
 import { researchService } from "../apps/server/src/services/ResearchService.js";
 import { documentReaderService } from "../apps/server/src/services/DocumentReaderService.js";
+import { recolorHairSoftMatte } from "../apps/web/src/services/hairMatte.js";
 
 console.log("🧪 [Smoke Test] Memulai Pengujian Pipeline Celyn AI BOT...\n");
 
@@ -3081,25 +3082,79 @@ async function runTtsTests() {
   // 45. Uji Precision Voice Photo Editor & Selective Part Recoloring
   console.log("\n--- 45. Uji Precision Voice Photo Editor & Selective Part Recoloring ---");
 
-  // 1. Verifikasi ClientImageEditor.recolorTargetPart dengan BFS Region Growing & Foliage/Suit Barriers
+  // 1. Verifikasi ClientImageEditor.recolorTargetPart memakai soft-matte rambut (v5)
   const s45EditorCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/services/ClientImageEditor.ts"), "utf8");
   assert(
     s45EditorCode.includes("recolorTargetPart") &&
       s45EditorCode.includes("targetBoxes") &&
       s45EditorCode.includes("excludeBoxes") &&
       s45EditorCode.includes("isTargetWhite") &&
-      s45EditorCode.includes("isHairCandidate") &&
-      s45EditorCode.includes("seedQueue"),
-    "ClientImageEditor.ts mengimplementasikan recolorTargetPart dengan Unbounded BFS Region Growing & Precision Spatial Barriers"
+      s45EditorCode.includes("recolorHairSoftMatte"),
+    "ClientImageEditor.ts mendelegasikan pewarnaan rambut ke recolorHairSoftMatte (soft-matte + shading terjaga)"
   );
 
-  // 1b. Verifikasi Foliage & Suit Barrier di ClientImageEditor
+  // 1b. Verifikasi barrier foliage/tanah/kulit & tidak ada konstanta spesifik gambar di modul matte
+  const s45MatteCode = fs.readFileSync(path.resolve(process.cwd(), "apps/web/src/services/hairMatte.ts"), "utf8");
   assert(
-    s45EditorCode.includes("isFoliage") &&
-      s45EditorCode.includes("isSuit") &&
-      s45EditorCode.includes("isDirt"),
-    "ClientImageEditor.ts mengimplementasikan Foliage, Suit, dan Yellow-Ochre Dirt barriers"
+    s45MatteCode.includes("isFoliageOrDirt") &&
+      s45MatteCode.includes("isWarmSkin") &&
+      !/normX|normY|verifiedHairSeeds|0\.465|0\.458/.test(s45MatteCode),
+    "hairMatte.ts memiliki barrier foliage/tanah/kulit dan bebas konstanta koordinat khusus gambar"
   );
+
+  // 1c. Uji perilaku soft-matte pada gambar sintetis (rambut cokelat bershading + kulit + rumput)
+  {
+    const W = 140;
+    const H = 120;
+    const img = new Uint8ClampedArray(W * H * 4);
+    const setPx = (x: number, y: number, r: number, g: number, b: number) => {
+      const i = (y * W + x) * 4;
+      img[i] = r; img[i + 1] = g; img[i + 2] = b; img[i + 3] = 255;
+    };
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const noise = (x * 7 + y * 13) % 5;
+        setPx(x, y, 58 + noise, 72 + noise, 20); // rumput zaitun
+      }
+    }
+    const cx = 70, cy = 60;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d <= 36) setPx(x, y, 10, 6, 3); // kontur tinta
+        if (d <= 35) {
+          const r = Math.round(60 + 20 * Math.sin(x / 4)); // shading rambut
+          setPx(x, y, r, Math.round(r * 0.42), Math.round(r * 0.2));
+          if ((x + y) % 11 === 0) setPx(x, y, 22, 9, 4); // garis helai internal
+        }
+        if (Math.hypot((x - cx) / 20, (y - (cy + 6)) / 24) <= 1) setPx(x, y, 191, 129, 88); // wajah
+      }
+    }
+    const original = new Uint8ClampedArray(img);
+    const res = recolorHairSoftMatte(
+      img, W, H, [{ minX: cx - 40, maxX: cx + 40, minY: cy - 40, maxY: cy + 40 }], [255, 255, 255], []
+    );
+    let grassChanged = 0;
+    let skinChanged = 0;
+    let hairLum: number[] = [];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        const d = Math.hypot(x - cx, y - cy);
+        const same = img[i] === original[i] && img[i + 1] === original[i + 1] && img[i + 2] === original[i + 2];
+        if (d > 39 && !same) grassChanged++;
+        const inFace = Math.hypot((x - cx) / 20, (y - (cy + 6)) / 24) <= 1;
+        if (inFace && !same) skinChanged++;
+        if (!inFace && d <= 30 && img[i] > 150) hairLum.push(0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2]);
+      }
+    }
+    const meanL = hairLum.reduce((a, b) => a + b, 0) / Math.max(1, hairLum.length);
+    const stdL = Math.sqrt(hairLum.reduce((a, b) => a + (b - meanL) ** 2, 0) / Math.max(1, hairLum.length));
+    assert(res.corePixels > 500 && res.coloredPixels > 500, `Soft-matte menemukan & mewarnai inti rambut sintetis (${res.coloredPixels} px)`);
+    assert(grassChanged === 0, `Soft-matte tidak mengubah satu pun piksel rumput di luar rambut (${grassChanged} berubah)`);
+    assert(skinChanged === 0, `Soft-matte tidak mengubah piksel kulit wajah (${skinChanged} berubah)`);
+    assert(meanL > 190 && stdL >= 5, `Rambut menjadi putih namun tetap berdimensi (mean ${meanL.toFixed(0)}, std ${stdL.toFixed(1)})`);
+  }
 
   // 2. Verifikasi withTimeout di top-level api/documents-process.js
   assert(

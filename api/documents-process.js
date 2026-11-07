@@ -650,7 +650,7 @@ Tugas Anda:
 
 2. Jika editMode === "recolor_part":
    - targetPart: "hair" | "clothes" | "accessory" | "object".
-   - targetBoxes (skala 0..1000): array kotak area bagian target. PENTING: Untuk rambut ('hair'), kotak HARUS mencakup puncak paling atas kepala (top crown / ubun-ubun) hingga ujung rambut bagian bawah dan samping! Berikan margin atas dan samping yang cukup agar tidak ada rambut yang terpotong. Untuk pakaian/baju ('clothes'), sertakan seluruh area pakaian yang diminta.
+   - targetBoxes (skala 0..1000): array kotak area bagian target. PENTING: Untuk rambut ('hair'), kotak HARUS mencakup puncak paling atas kepala (top crown / ubun-ubun) hingga ujung rambut bagian bawah dan samping! Berikan margin atas dan samping yang cukup agar tidak ada rambut yang terpotong. Kotak harus KETAT di sekitar rambut saja (jangan melebar ke latar, bunga, tanah, atau pakaian). Untuk pakaian/baju ('clothes'), sertakan seluruh area pakaian yang diminta.
    - excludeBoxes (skala 0..1000): array kotak area yang WAJIB dilindungi dan TIDAK BOLEH terkena perubahan warna. PENTING: Saat mengubah rambut ('hair'), WAJIB sertakan kotak wajah bagian dalam (mata, hidung, mulut, kacamata, pipi, dahi) dan kotak pakaian/tubuh di bawah leher agar warna tidak tumpah ke pakaian.
    - samplePoints (skala 0..1000): 4-6 titik koordinat tepat di atas permukaan bagian target yang tersebar merata: untuk rambut, tempatkan titik di mahkota atas rambut, sisi kiri rambut, sisi kanan rambut, bagian tengah rambut, dan highlight/jambul rambut (jika ada).
    - sourceColorsHex: daftar warna hex asli dari bagian tersebut (misal rambut cokelat gelap & abu-abu: ["#4f2d1c", "#322c13", "#c5a79e"]).
