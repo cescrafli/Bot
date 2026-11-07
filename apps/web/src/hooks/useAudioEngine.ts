@@ -22,6 +22,7 @@ export function useAudioEngine({
   const [intonation, setIntonation] = useState(0);
 
   const isPlayingRef = useRef(false);
+  const lastPlaybackEndTimeRef = useRef(0);
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
@@ -318,14 +319,15 @@ export function useAudioEngine({
           (s) => s !== source
         );
         if (activeSourcesRef.current.length === 0) {
-          // Grace period 400ms untuk mencegah status flapping dan kebocoran gema speaker ke mikrofon
+          // Grace period 750ms untuk mencegah status flapping dan kebocoran gema speaker ke mikrofon
           if (stopPlayingTimerRef.current) clearTimeout(stopPlayingTimerRef.current);
           stopPlayingTimerRef.current = setTimeout(() => {
             if (activeSourcesRef.current.length === 0) {
               setIsPlaying(false);
               isPlayingRef.current = false;
+              lastPlaybackEndTimeRef.current = Date.now();
             }
-          }, 400);
+          }, 750);
         }
       };
     },
@@ -443,6 +445,7 @@ export function useAudioEngine({
     }
     setIsPlaying(false);
     isPlayingRef.current = false;
+    lastPlaybackEndTimeRef.current = Date.now();
     setVolume(0);
   }, []);
 
@@ -540,6 +543,13 @@ export function useAudioEngine({
         // Tidak sensitif terhadap bising, hanya aktif jika ada orang bicara / gumaman "hmmm" / "aaa"
         // =========================================================================
         bargeInStreakRef.current = 0;
+
+        // Post-Speech Echo Guard: 800ms setelah Celyn selesai bicara, jangan buka gerbang untuk noise/echo rendah
+        const timeSincePlayback = Date.now() - lastPlaybackEndTimeRef.current;
+        const isEchoTailWindow = timeSincePlayback < 800;
+        if (isEchoTailWindow && (!analysis.isHumanVoice || analysis.rms < 0.055)) {
+          return;
+        }
 
         if (analysis.isHumanVoice || analysis.isSustainedVocal) {
           // Gerbang terbuka: jika baru aktif, flush pre-roll buffer (256ms = 4 frame @ 64ms) agar awalan kata tidak hilang

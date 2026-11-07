@@ -1590,6 +1590,44 @@ async function runTtsTests() {
     "Seluruh variasi tag emosi {emotion: happy}, [emotion:...], (emotion:...) terhapus tuntas"
   );
 
+  // Uji Pembersihan Kebocoran Nama Tool & Normalisasi Spasi Tanda Baca
+  const dirtyToolLeak =
+    "set_expression Halo!Malem banget nih belum istirahat.Semoga kamu selalu sehat dan bahagia terus dalam menjalani harimu,pokoknya harus tetap semangat ya! Eh btw,ini aku lagi ngobrol bareng Rafli atau Celyn nih?";
+  const cleanToolLeak = stripVoiceMetadataTags(dirtyToolLeak);
+  assert(
+    !cleanToolLeak.includes("set_expression") &&
+    cleanToolLeak.startsWith("Halo! Malem") &&
+    cleanToolLeak.includes("istirahat. Semoga") &&
+    cleanToolLeak.includes("harimu, pokoknya") &&
+    cleanToolLeak.includes("btw, ini"),
+    `stripVoiceMetadataTags membersihkan kebocoran tool set_expression dan merapikan spasi tanda baca: "${cleanToolLeak}"`
+  );
+
+  const dirtyToolLeakArgs = "set_expression(emotion='happy') Wah asyik banget nih!";
+  const cleanToolLeakArgs = stripVoiceMetadataTags(dirtyToolLeakArgs);
+  assert(
+    cleanToolLeakArgs === "Wah asyik banget nih!",
+    "stripVoiceMetadataTags membersihkan kebocoran tool dengan argumen fungsi inline"
+  );
+
+  // Uji Konteks Khusus Unggahan Foto/Gambar Visual vs Dokumen Teks
+  const photoDocContext = buildSafeLiveDocumentContext({
+    fileName: "Simon Petrikov.jpg",
+    mimeType: "image/jpeg",
+    markdownContent: "Analisis visual gambar Simon Petrikov",
+    usedOcr: false,
+    totalPages: 1,
+    truncated: false,
+    characterCount: 100,
+    previewDataUrl: "data:image/jpeg;base64,...",
+  }, 20000, false);
+  assert(
+    photoDocContext.includes("[PENGGUNA MENGUNGGAH FOTO/GAMBAR: Simon Petrikov.jpg]") &&
+    !photoDocContext.includes("dirangkum poin-poin pentingnya") &&
+    photoDocContext.includes("INSTRUKSI RESPON VISUAL:"),
+    "buildSafeLiveDocumentContext secara cerdas mendeteksi file foto visual dan tidak menyuruh merangkum dokumen"
+  );
+
   const docReadMod = await import("../api/documents-read.js");
   assert(
     docReadMod.config?.api?.bodyParser === false,
@@ -3058,8 +3096,9 @@ async function runTtsTests() {
   // 1b. Verifikasi Foliage & Suit Barrier di ClientImageEditor
   assert(
     s45EditorCode.includes("isFoliage") &&
-      s45EditorCode.includes("isSuit"),
-    "ClientImageEditor.ts mengimplementasikan Foliage (rumput/bunga) dan Suit (jas/bahu) barriers"
+      s45EditorCode.includes("isSuit") &&
+      s45EditorCode.includes("isDirt"),
+    "ClientImageEditor.ts mengimplementasikan Foliage, Suit, dan Yellow-Ochre Dirt barriers"
   );
 
   // 2. Verifikasi withTimeout di top-level api/documents-process.js

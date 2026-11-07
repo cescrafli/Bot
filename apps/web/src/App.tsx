@@ -671,6 +671,9 @@ export function App() {
         onClose={() => live.setIsPhotoStageVisible(false)}
         onOpenStudio={() => setIsDocumentModalOpen(true)}
         onReset={live.resetActivePhoto}
+        onQuickAction={(instruction) => {
+          live.sendText(`tolong edit foto ini: ${instruction}`);
+        }}
       />
 
       {/* Modal Manajemen Dokumen (PDF, Word, Excel) */}

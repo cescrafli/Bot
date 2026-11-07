@@ -487,7 +487,12 @@ export function stripVoiceMetadataTags(raw: string): string {
     .replace(/\[pause\]|\[sigh\]|\[laughter\]|\[giggle\]|\[chuckle\]|\[breath\]|\[whisper\]/gi, "")
     // 3. Token aksi atau emosi kata tunggal dalam kurung kurawal, misal: {happy}, {smile}, {tertawa}
     .replace(/\{[a-zA-Z0-9_-]+\}/g, "")
-    // 4. Bersihkan spasi berlebih atau baris kosong yang tercipta akibat penghapusan tag
+    // 4. Bersihkan kebocoran nama tool / function calls internal yang tidak sengaja terucap/tertulis
+    .replace(/\b(?:set_?expression|point_at_screen|remember_fact|create_document|process_document|research|edit_image)\s*(?:\([^)]*\)|:[^\s]*|\{[^}]*\})?\s*/gi, "")
+    // 5. Normalisasi spasi tanda baca: pastikan ada spasi setelah tanda baca jika langsung diikuti huruf
+    .replace(/([!?;:])([a-zA-Z0-9\u00C0-\u024F])/g, "$1 $2")
+    .replace(/([.,])([a-zA-Z\u00C0-\u024F])/g, "$1 $2")
+    // 6. Bersihkan spasi berlebih atau baris kosong yang tercipta akibat penghapusan tag
     .replace(/^[ \t]+|[ \t]+$/gm, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/^\s+/, "");

@@ -118,6 +118,12 @@ export class GeminiSession {
           // Aktifkan transkripsi dua arah real-time Bahasa Indonesia
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: false,
+              silenceDurationMs: 1100,
+            },
+          },
           systemInstruction: {
             parts: [
               {
@@ -252,6 +258,7 @@ export class GeminiSession {
                           "background_color",
                           "add_object",
                           "replace_background",
+                          "recolor_part",
                           "transform",
                           "hide",
                           "show",

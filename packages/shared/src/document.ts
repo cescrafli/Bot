@@ -140,6 +140,28 @@ export function buildSafeLiveDocumentContext(
   const totalChars = doc.characterCount || content.length;
   const pages = doc.totalPages || 1;
 
+  // Deteksi khusus jika dokumen adalah file foto / gambar visual
+  const isImage =
+    doc.mimeType?.startsWith("image/") ||
+    /\.(jpe?g|png|webp|gif|bmp|svg)$/i.test(doc.fileName) ||
+    Boolean(doc.previewDataUrl);
+
+  if (isImage) {
+    const photoInstruction = silent
+      ? `INSTRUKSI RESPON VISUAL: Foto/gambar '${doc.fileName}' telah berhasil dimuat dan tampil di layar pengguna. Resap detail visualnya secara menyeluruh. Celyn berada dalam mode UPLOAD-THEN-WAIT: Jangan langsung berbicara atau menyela jika pengguna belum meminta. Tunggu instruksi pengguna terkait gambar ini (seperti mengedit bagian tertentu, warna rambut, latar belakang, menambah objek, atau melihat detailnya).`
+      : `INSTRUKSI RESPON VISUAL: Foto/gambar '${doc.fileName}' baru saja diunggah dan tampil di layar. Konfirmasi hangat dan santai bahwa kamu sudah bisa melihat fotonya. Tanyakan dengan santai apa yang ingin dilakukan pada foto ini (misalnya mengedit warna rambut/baju, ganti warna latar belakang, menambah objek, atau melihat detailnya). JANGAN PERNAH menyebut foto sebagai "dokumen" dan JANGAN PERNAH menawarkan untuk "merangkum poin-poin penting" dari sebuah foto/gambar!`;
+
+    return `[PENGGUNA MENGUNGGAH FOTO/GAMBAR: ${doc.fileName}]
+Detail Gambar: '${doc.fileName}' ditampilkan di panggung visual layar.
+Berikut deskripsi visual gambar:
+
+<image_context fileName="${doc.fileName}">
+${content || "Foto/gambar visual telah siap di layar."}
+</image_context>
+
+${photoInstruction}`;
+  }
+
   let injectedText = content;
   let isTruncatedForLive = false;
 

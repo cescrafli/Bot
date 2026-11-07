@@ -18,6 +18,8 @@ function cleanSubtitleText(raw: string): string {
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   transcripts,
+  statusMessage,
+  status,
 }) => {
   const latestTranscript =
     transcripts.length > 0 ? transcripts[transcripts.length - 1] : null;
@@ -25,6 +27,12 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   const displaySubtitle = latestTranscript
     ? cleanSubtitleText(latestTranscript.text)
     : "";
+
+  const isBusy =
+    status === "thinking" ||
+    status === "researching" ||
+    status === "working" ||
+    status === "connecting";
 
   return (
     <div className="pointer-events-auto max-w-[min(36rem,calc(100vw-1.5rem))] w-full text-center z-20 mx-auto">
@@ -40,9 +48,14 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
               `"${displaySubtitle}"`
             )}
           </p>
+        ) : isBusy && statusMessage ? (
+          <p className="text-xs sm:text-sm font-light text-rose-200 leading-relaxed drop-shadow-sm flex items-center justify-center gap-2 animate-pulse">
+            <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping inline-block" />
+            <span>{statusMessage}</span>
+          </p>
         ) : (
-          <p className="text-xs sm:text-sm font-light text-slate-100 leading-relaxed drop-shadow-sm">
-            "Halo! Saya siap menemani aktivitas Anda hari ini. Ada yang bisa saya bantu rencanakan?"
+          <p className="text-xs sm:text-sm font-light text-slate-200 leading-relaxed drop-shadow-sm">
+            "Halo! Senang banget bisa nemenin kamu. Ada yang mau diobrolin atau diulik bareng nih?"
           </p>
         )}
       </div>

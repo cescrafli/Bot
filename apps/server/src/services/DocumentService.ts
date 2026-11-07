@@ -489,17 +489,19 @@ KEMBALIKAN HANYA JSON VALID:
 {
   "editMode": "recolor_part",
   "targetPart": "hair",
-  "targetBoxes": [{ "ymin": 160, "xmin": 190, "ymax": 470, "xmax": 500 }],
+  "targetBoxes": [{ "ymin": 210, "xmin": 220, "ymax": 455, "xmax": 465 }],
   "excludeBoxes": [
-    { "ymin": 250, "xmin": 285, "ymax": 445, "xmax": 440 },
-    { "ymin": 450, "xmin": 220, "ymax": 950, "xmax": 580 }
+    { "ymin": 330, "xmin": 315, "ymax": 450, "xmax": 420 },
+    { "ymin": 455, "xmin": 200, "ymax": 950, "xmax": 600 }
   ],
   "samplePoints": [
-    { "x": 340, "y": 210 },
-    { "x": 250, "y": 340 },
-    { "x": 440, "y": 340 },
-    { "x": 380, "y": 260 },
-    { "x": 330, "y": 430 }
+    { "x": 280, "y": 320 },
+    { "x": 340, "y": 235 },
+    { "x": 375, "y": 255 },
+    { "x": 405, "y": 290 },
+    { "x": 442, "y": 305 },
+    { "x": 275, "y": 420 },
+    { "x": 432, "y": 390 }
   ],
   "sourceColorsHex": ["#4f2d1c", "#322c13", "#301c13", "#c5a79e"],
   "targetColorHex": "#ffffff",
@@ -524,21 +526,23 @@ KEMBALIKAN HANYA JSON VALID:
         ? "clothes"
         : "object",
       targetBoxes: isHairIntent
-        ? [{ ymin: 160, xmin: 180, ymax: 470, xmax: 510 }]
+        ? [{ ymin: 210, xmin: 220, ymax: 455, xmax: 465 }]
         : [{ ymin: 360, xmin: 240, ymax: 850, xmax: 600 }],
       excludeBoxes: isHairIntent
         ? [
-            { ymin: 250, xmin: 280, ymax: 445, xmax: 440 },
-            { ymin: 450, xmin: 220, ymax: 950, xmax: 580 }
+            { ymin: 330, xmin: 315, ymax: 450, xmax: 420 },
+            { ymin: 455, xmin: 200, ymax: 950, xmax: 600 }
           ]
         : [{ ymin: 150, xmin: 220, ymax: 380, xmax: 480 }],
       samplePoints: isHairIntent
         ? [
-            { x: 340, y: 210 },
-            { x: 250, y: 340 },
-            { x: 440, y: 340 },
-            { x: 380, y: 260 },
-            { x: 330, y: 430 }
+            { x: 280, y: 320 },
+            { x: 340, y: 235 },
+            { x: 375, y: 255 },
+            { x: 405, y: 290 },
+            { x: 442, y: 305 },
+            { x: 275, y: 420 },
+            { x: 432, y: 390 }
           ]
         : [
             { x: 350, y: 480 },

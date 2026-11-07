@@ -428,6 +428,11 @@ function stripVoiceMetadataTags(raw) {
     .replace(/\{pause\}|\{sigh\}|\{laughter\}|\{giggle\}|\{chuckle\}|\{breath\}|\{whisper\}|\{gasp\}/gi, "")
     .replace(/\[pause\]|\[sigh\]|\[laughter\]|\[giggle\]|\[chuckle\]|\[breath\]|\[whisper\]/gi, "")
     .replace(/\{[a-zA-Z0-9_-]+\}/g, "")
+    // Bersihkan kebocoran nama tool / function calls internal
+    .replace(/\b(?:set_?expression|point_at_screen|remember_fact|create_document|process_document|research|edit_image)\s*(?:\([^)]*\)|:[^\s]*|\{[^}]*\})?\s*/gi, "")
+    // Normalisasi spasi tanda baca
+    .replace(/([!?;:])([a-zA-Z0-9\u00C0-\u024F])/g, "$1 $2")
+    .replace(/([.,])([a-zA-Z\u00C0-\u024F])/g, "$1 $2")
     .replace(/^[ \t]+|[ \t]+$/gm, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/^\s+/, "");

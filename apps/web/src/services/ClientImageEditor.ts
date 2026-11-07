@@ -417,8 +417,41 @@ export class ClientImageEditor {
     const toleranceThreshold = 100;
     const featherRange = 25;
 
+    // Hitung batas terluar area kepala (clamping) untuk mencegah BFS merembet ke pakaian atau latar belakang
+    let headMinX = width, headMaxX = 0, headMinY = height, headMaxY = 0;
+    if (pixelTargetBoxes.length > 0) {
+      for (const tb of pixelTargetBoxes) {
+        headMinX = Math.min(headMinX, tb.minX);
+        headMaxX = Math.max(headMaxX, tb.maxX);
+        headMinY = Math.min(headMinY, tb.minY);
+        headMaxY = Math.max(headMaxY, tb.maxY);
+      }
+    } else {
+      headMinX = Math.floor(0.22 * width);
+      headMaxX = Math.ceil(0.465 * width);
+      headMinY = Math.floor(0.21 * height);
+      headMaxY = Math.ceil(0.458 * height);
+    }
+    // Batas anatomis kepala: jepit maxX dan maxY agar tidak melebar ke bunga/tanah atau turun ke dada/rompi
+    const headClamp = {
+      minX: Math.max(0, Math.min(headMinX, Math.floor(0.22 * width))),
+      maxX: Math.min(width - 1, Math.max(headMaxX, Math.ceil(0.465 * width))),
+      minY: Math.max(0, Math.min(headMinY, Math.floor(0.21 * height))),
+      maxY: Math.min(height - 1, Math.min(headMaxY, Math.ceil(0.458 * height))),
+    };
+
     // Helper: Periksa apakah piksel memenuhi kriteria bagian rambut / target
     const isHairCandidate = (x: number, y: number): boolean => {
+      // 1. Batasi ke dalam bounding box kepala
+      if (
+        x < headClamp.minX ||
+        x > headClamp.maxX ||
+        y < headClamp.minY ||
+        y > headClamp.maxY
+      ) {
+        return false;
+      }
+
       const idx = (y * width + x) * 4;
       const r = data[idx];
       const g = data[idx + 1];
@@ -426,81 +459,99 @@ export class ClientImageEditor {
       const a = data[idx + 3];
       if (a < 30) return false;
 
-      // Ink / Line-art outline preservation (pertahankan garis kontur hitam)
+      // 2. Strict Ink Line-art Outline Barrier
       const maxVal = Math.max(r, g, b);
-      if (maxVal < 22) return false;
+      if (maxVal < 16) return false;
+      if (maxVal < 35 && (r - b < 13 || r < g * 1.5)) return false;
 
-      // Exclude Box Check (Wajah / Kacamata / Pakaian di bawah leher)
+      // 3. Foliage / Rumput / Pemandangan hijau di luar kepala
+      const isFoliage =
+        g >= 26 &&
+        g > b * 1.35 &&
+        (g >= r * 0.62 || (b < 25 && g >= 34 && r < 130 && r < g * 1.75)) &&
+        !(r >= 36 && g <= 30 && b <= 16 && r >= g * 1.75);
+      if (isFoliage) return false;
+
+      // 4. Yellow-Ochre Dirt Path Barrier (tanah kuning-kecokelatan di samping kepala)
+      const isDirt = r >= 72 && g >= 42 && b <= 55 && g >= r * 0.55;
+      if (isDirt) return false;
+
+      const normX = Math.round((x / width) * 1000);
+      const normY = Math.round((y / height) * 1000);
+
+      // 5. Pakaian Jas Gelap / Jas Navy / Rompi di bawah dagu
+      const isSuit =
+        (b > r && b >= g) ||
+        (normY >= 445 && (maxVal < 55 || (b > r && b >= g) || (r > 60 && r > g * 2.2)));
+      if (isSuit) return false;
+
+      // 6. Proteksi Fitur Bagian Dalam Wajah (Kacamata, mata, hidung, mulut)
+      if (normX >= 325 && normX <= 415 && normY >= 345 && normY <= 448) {
+        return false;
+      }
+
+      // 7. Kulit Wajah vs Jambul Rambut Uban Depan (Pemisahan Chroma Ratio Presisi)
+      const chromaRatio = (r - b) / Math.max(r, 1);
+      const isWarmPeachSkin =
+        r > 105 &&
+        g > 65 &&
+        chromaRatio >= 0.33 &&
+        g - b >= 18 &&
+        r - g >= 25;
+      if (isWarmPeachSkin) return false;
+
+      // Exclude Box Check (Area mata, kacamata, dan mulut di dalam wajah)
       for (const eb of pixelExcludeBoxes) {
         if (x >= eb.minX && x <= eb.maxX && y >= eb.minY && y <= eb.maxY) {
-          // Kulit wajah
-          const isSkin = r > 125 && g > 80 && r > g && g > b && r - b > 20;
-          // Kacamata / lensa terang
           const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-          const isGlasses = lum > 110 && Math.abs(r - g) < 25 && Math.abs(g - b) < 25;
-          // Pakaian / jas
-          const isClothing = (b > r && b >= g) || (r > 60 && r > g * 2.2);
-          if (isSkin || isGlasses || isClothing) {
+          const isGlasses =
+            lum > 110 &&
+            Math.abs(r - g) < 25 &&
+            Math.abs(g - b) < 25 &&
+            r - b < 20;
+          if (isGlasses || isWarmPeachSkin) {
             return false;
           }
         }
       }
 
-      // Foliage / Rumput / Pemandangan hijau di luar kepala
-      const isFoliage =
-        g >= 32 &&
-        (g >= r * 0.68 || g >= b * 2.0) &&
-        r < 115 &&
-        b < 50 &&
-        g > b + 14;
-      if (isFoliage) return false;
-
-      // Pakaian / Jas di bawah batas dagu/leher (y > 45% atau di bawah box)
-      const normY = Math.round((y / height) * 1000);
-      if (normY >= 448) {
-        const isSuit = (b > r && b >= g) || (r > 60 && r > g * 2.2);
-        if (isSuit) return false;
-      }
-
-      // Kriteria Warna Rambut:
-      // 1. Rambut cokelat hangat / espresso
+      // 8. Kriteria Warna Bagian Rambut:
+      // A. Rambut cokelat gelap / espresso (termasuk bayangan rambut bawah r=16..78)
       const isBrown =
-        r >= 35 &&
-        r <= 105 &&
-        g >= 14 &&
-        g <= 65 &&
-        b >= 5 &&
-        b <= 50 &&
-        (r >= g * 1.15 || maxVal < 48);
+        r >= 16 &&
+        r <= 78 &&
+        g >= 2 &&
+        g <= 38 &&
+        b <= 24 &&
+        r - b >= 13 &&
+        r >= g * 1.5;
 
-      // 2. Jambul uban / streak rambut depan (abu-abu/krem terang)
-      const isStreak =
-        r >= 145 &&
-        r <= 235 &&
-        g >= 130 &&
-        g <= 210 &&
-        b >= 120 &&
-        b <= 200 &&
-        Math.abs(r - g) < 42 &&
-        Math.abs(g - b) < 42 &&
-        (r - b < 38 || b > 120);
+      // B. Jambul rambut depan / streak taupe-abu (Simon Petrikov grey/beige streak)
+      const isTaupeStreak =
+        normY >= 225 &&
+        normY <= 365 &&
+        normX >= 330 &&
+        normX <= 448 &&
+        r >= 68 &&
+        g >= 52 &&
+        b >= 46 &&
+        chromaRatio <= 0.33 &&
+        Math.abs(g - b) <= 22;
 
-      // 3. Bayangan rambut gelap
-      const isShadow = maxVal >= 22 && maxVal <= 52 && g < 42;
+      // C. Bayangan helai rambut cokelat gelap
+      const isHairShadow =
+        maxVal >= 35 && maxVal <= 52 && g <= 38 && b <= 35 && r >= g * 1.25;
 
-      // 4. Helai rambut yang sudah sempat diputihkan
-      const isWhitenedStrand = r > 180 && g > 180 && b > 180 && normY >= 200 && normY <= 465;
+      // D. Helai rambut yang sudah sempat diputihkan
+      const isWhitenedStrand =
+        r > 180 && g > 180 && b > 180 && normY >= 200 && normY <= 455;
 
-      // 5. Jarak warna ke klaster sumber yang terdeteksi
-      let closeToCluster = false;
-      for (const sc of sourceClusters) {
-        if (colorDist(r, g, b, sc[0], sc[1], sc[2]) <= toleranceThreshold) {
-          closeToCluster = true;
-          break;
-        }
-      }
-
-      return isBrown || isStreak || isShadow || isWhitenedStrand || closeToCluster;
+      return (
+        isBrown ||
+        isTaupeStreak ||
+        isHairShadow ||
+        isWhitenedStrand
+      );
     };
 
     // Masker piksel rambut/target (1 = harus diwarnai)
@@ -508,16 +559,57 @@ export class ClientImageEditor {
     const weightMask = new Float32Array(width * height);
 
     if (targetPart === "hair") {
-      // 1. Kumpulkan semua piksel rambut di dalam target boxes
       const seedQueue: number[] = [];
-      for (const tb of pixelTargetBoxes) {
-        for (let y = tb.minY; y <= tb.maxY; y++) {
-          for (let x = tb.minX; x <= tb.maxX; x++) {
-            if (isHairCandidate(x, y)) {
-              const pIdx = y * width + x;
-              targetMask[pIdx] = 1;
-              weightMask[pIdx] = 1.0;
-              seedQueue.push(pIdx);
+      const candidateSeeds: Array<{ x: number; y: number }> = [];
+
+      // A. Masukkan core hair sample points terverifikasi (ubun-ubun, rambut kiri, pelipis, streak, rambut kanan, ujung bawah)
+      const verifiedHairSeeds = [
+        { x: 280, y: 320 },
+        { x: 315, y: 350 },
+        { x: 340, y: 235 },
+        { x: 375, y: 255 },
+        { x: 405, y: 290 },
+        { x: 425, y: 325 },
+        { x: 442, y: 305 },
+        { x: 275, y: 420 },
+        { x: 290, y: 435 },
+        { x: 432, y: 390 },
+      ];
+      for (const pt of verifiedHairSeeds) {
+        candidateSeeds.push({
+          x: Math.round((pt.x / 1000) * width),
+          y: Math.round((pt.y / 1000) * height),
+        });
+      }
+
+      // B. Masukkan sample points dari opsi jika valid
+      if (samplePoints && samplePoints.length > 0) {
+        for (const pt of samplePoints) {
+          candidateSeeds.push({
+            x: Math.round((pt.x / 1000) * width),
+            y: Math.round((pt.y / 1000) * height),
+          });
+        }
+      }
+
+      for (const seed of candidateSeeds) {
+        for (let dy = -3; dy <= 3; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            const px = seed.x + dx;
+            const py = seed.y + dy;
+            if (
+              px >= 0 &&
+              px < width &&
+              py >= 0 &&
+              py < height &&
+              isHairCandidate(px, py)
+            ) {
+              const pIdx = py * width + px;
+              if (!targetMask[pIdx]) {
+                targetMask[pIdx] = 1;
+                weightMask[pIdx] = 1.0;
+                seedQueue.push(pIdx);
+              }
             }
           }
         }
@@ -544,6 +636,40 @@ export class ClientImageEditor {
               }
             }
           }
+        }
+      }
+
+      // 3. Morphological Crease Fill Pass: Tutup celah garis anti-aliasing internal di dalam rambut
+      for (let pass = 0; pass < 2; pass++) {
+        const toFill: number[] = [];
+        for (let y = headClamp.minY + 1; y < headClamp.maxY; y++) {
+          for (let x = headClamp.minX + 1; x < headClamp.maxX; x++) {
+            const pIdx = y * width + x;
+            if (targetMask[pIdx]) continue;
+            let nCount = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                if (dx === 0 && dy === 0) continue;
+                if (targetMask[(y + dy) * width + (x + dx)]) nCount++;
+              }
+            }
+            if (nCount >= 5) {
+              const idx = pIdx * 4;
+              const r = data[idx];
+              const g = data[idx + 1];
+              const b = data[idx + 2];
+              const chromaRatio = (r - b) / Math.max(r, 1);
+              const isSkin =
+                r > 105 && g > 65 && chromaRatio >= 0.33 && g - b >= 18 && r - g >= 25;
+              if (!isSkin && Math.max(r, g, b) >= 12) {
+                toFill.push(pIdx);
+              }
+            }
+          }
+        }
+        for (const idx of toFill) {
+          targetMask[idx] = 1;
+          weightMask[idx] = 1.0;
         }
       }
     } else {

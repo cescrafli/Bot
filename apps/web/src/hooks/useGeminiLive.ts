@@ -513,7 +513,7 @@ export function useGeminiLive({
               !last.text.endsWith(" ") &&
               !cleanMsgText.startsWith(" ") &&
               !/^[.,!?;:)%]/.test(cleanMsgText) &&
-              /[a-zA-Z0-9]$/.test(last.text);
+              /[a-zA-Z0-9.,!?;:]$/.test(last.text);
             const sep = needsSpace ? " " : "";
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -794,6 +794,12 @@ export function useGeminiLive({
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: false,
+              silenceDurationMs: 1100,
+            },
+          },
           systemInstruction: {
             parts: [
               {
@@ -945,6 +951,7 @@ export function useGeminiLive({
                           "background_color",
                           "add_object",
                           "replace_background",
+                          "recolor_part",
                           "transform",
                           "hide",
                           "show",
@@ -1013,6 +1020,18 @@ export function useGeminiLive({
               bargeInMutedRef.current = false;
               backupPcmChunksRef.current = [];
               const userText = msg.serverContent.inputTranscription.text.trim();
+
+              // Filter noise gema mikrofon / artefak non-Latin 1-suku kata (misal: "से", "。", atau noise ketukan)
+              const isSpuriousNoise =
+                !userText ||
+                /^[\u0900-\u097F\u0400-\u04FF\u0E00-\u0E7F\s.,!?-]+$/.test(userText) ||
+                (userText.length <= 2 && !/[a-zA-Z0-9]/.test(userText));
+
+              if (isSpuriousNoise) {
+                console.log("🛡️ [Noise Filter] Mengabaikan inputTranscription noise/echo:", userText);
+                return;
+              }
+
               if (userText) {
                 directUserTurnBufferRef.current += (directUserTurnBufferRef.current ? " " : "") + userText;
                 handleServerMessage({
