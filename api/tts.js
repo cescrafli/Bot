@@ -428,11 +428,17 @@ function stripVoiceMetadataTags(raw) {
     .replace(/\{pause\}|\{sigh\}|\{laughter\}|\{giggle\}|\{chuckle\}|\{breath\}|\{whisper\}|\{gasp\}/gi, "")
     .replace(/\[pause\]|\[sigh\]|\[laughter\]|\[giggle\]|\[chuckle\]|\[breath\]|\[whisper\]/gi, "")
     .replace(/\{[a-zA-Z0-9_-]+\}/g, "")
-    // Bersihkan kebocoran nama tool / function calls internal
-    .replace(/\b(?:set_?expression|point_at_screen|remember_fact|create_document|process_document|research|edit_image)\s*(?:\([^)]*\)|:[^\s]*|\{[^}]*\})?\s*/gi, "")
-    // Normalisasi spasi tanda baca
-    .replace(/([!?;:])([a-zA-Z0-9\u00C0-\u024F])/g, "$1 $2")
-    .replace(/([.,])([a-zA-Z\u00C0-\u024F])/g, "$1 $2")
+    // Bersihkan kebocoran nama tool / function calls internal tanpa menghapus kata "research" biasa
+    .replace(/\b(?:set_?expression|set_avatar_pose|set_listening_state)(?:\s*\([^)]*\)|\s*\{[^}]*\}|\s*[:=]\s*[a-zA-Z0-9_-]+|\b)\s*/gi, "")
+    .replace(/\b(?:point_at_screen|remember_fact|create_document|generate_document|read_document|process_document|edit_image|edit_photo|web_search)(?:\s*\([^)]*\)|\s*\{[^}]*\}|\s*[:=]\s*[^\s,.!?]+)?\s*/gi, "")
+    .replace(/\bresearch\s*(?:\([^)]*\)|\{[^}]*\})\s*/gi, "")
+    // Normalisasi spasi tanda baca tanpa merusak ekstensi file, domain URL, atau jam (12:30)
+    .replace(/([!?;])([a-zA-Z0-9\u00C0-\u024F])/g, "$1 $2")
+    .replace(/(:)(?!\/\/|\d)([a-zA-Z\u00C0-\u024F])/g, "$1 $2")
+    .replace(
+      /([.,])(?!(?:jpg|jpeg|png|webp|gif|svg|pdf|docx?|xlsx?|pptx?|txt|csv|json|js|ts|tsx|jsx|md|html|css|zip|mp3|mp4|wav|com|id|org|net|io|ai|co|dev|app|edu|gov)\b)([a-zA-Z\u00C0-\u024F])/gi,
+      "$1 $2"
+    )
     .replace(/^[ \t]+|[ \t]+$/gm, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/^\s+/, "");
@@ -800,14 +806,98 @@ async function synthesizeEdgeTTSWithRetry(text, options = {}) {
  * Vercel Serverless Function: POST / GET /api/tts
  * Menyintesis kalimat Bahasa Indonesia menjadi suara Microsoft Edge Neural (id-ID-GadisNeural).
  */
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+function safeTimingMatch(a, b) {
+  const ba = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (!ba.length || ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function resolveApiAuthSecret() {
+  const configured = (process.env.AUTH_SECRET || "").trim();
+  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return null;
+  return "celyn-secret-session-key-2026";
+}
+
+function verifyTtsAuth(req) {
+  const secret = resolveApiAuthSecret();
+  const authHeader = req.headers["authorization"] || "";
+  if (secret && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const parts = token.split(".");
+    if (parts.length === 2) {
+      try {
+        const [payloadB64, sigB64] = parts;
+        const expectedSig = crypto.createHmac("sha256", secret).update(payloadB64).digest();
+        const givenSig = Buffer.from(sigB64, "base64url");
+        if (givenSig.length === expectedSig.length && crypto.timingSafeEqual(givenSig, expectedSig)) {
+          const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+          if (payload.exp && payload.exp > Date.now() / 1000 && (payload.m === "jocelyn" || payload.m === "default")) {
+            return true;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  const directPass = String(
+    req.headers["x-admin-password"] ||
+      req.query?.password ||
+      req.query?.key ||
+      ""
+  ).trim();
+  if (!directPass) return false;
+
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const adminPass = (process.env.ADMIN_PASSWORD || "").trim();
+  const userPass = (process.env.USER_PASSWORD || "").trim();
+
+  if (adminPass ? safeTimingMatch(directPass, adminPass) : (!isProd && safeTimingMatch(directPass.toLowerCase(), "admin"))) {
+    return true;
+  }
+  if (userPass ? safeTimingMatch(directPass, userPass) : (!isProd && safeTimingMatch(directPass.toLowerCase(), "login"))) {
+    return true;
+  }
+  return false;
+}
+
+function applyCors(req, res, methods = "GET, POST, OPTIONS") {
+  const origin = typeof req.headers?.origin === "string" ? req.headers.origin.trim() : "";
+  const allowed = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const host = typeof req.headers?.host === "string" ? req.headers.host.trim() : "";
+  const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
+  const isVercelUrl = Boolean(
+    origin &&
+      ((process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) ||
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL &&
+          origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`))
+  );
+  const isLocalDev =
+    process.env.NODE_ENV !== "production" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+  if (origin && (allowed.includes(origin) || isSameHost || isVercelUrl || isLocalDev)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", methods);
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-password, x-gemini-key");
+}
+
+export default async function handler(req, res) {
+  applyCors(req, res, "GET, POST, OPTIONS");
   res.setHeader("Cache-Control", "no-store");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
+  }
+
+  if (!verifyTtsAuth(req)) {
+    return res.status(401).json({ error: "Akses ditolak: Autentikasi diperlukan." });
   }
 
   const clientIp =

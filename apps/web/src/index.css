@@ -6,6 +6,9 @@
   --color-obsidian: #08080d;
   --color-deep-space: #0b0d14;
   --color-velvet-rose: #f43f5e;
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.72);
+  --text-muted: rgba(255, 255, 255, 0.56);
 }
 
 * {

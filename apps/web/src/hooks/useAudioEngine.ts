@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { analyzeHumanVoiceFrame } from "@celyn/shared";
+import { buildAuthHeaders } from "./useAuth";
 
 interface UseAudioEngineOptions {
   onAudioChunk: (b64PCM16k: string) => void;
@@ -121,13 +122,25 @@ export function useAudioEngine({
   }, [getOrCreateAudioContext]);
 
   // Animasi loop untuk membaca volume RMS dari AnalyserNode (untuk Lip-Sync)
-  // Dilengkapi Deadband Filter untuk mencegah 60 FPS re-render berlebihan saat hening
+  // Dilengkapi Deadband Filter & Idle-Pause (0 FPS saat Celyn diam untuk hemat baterai)
   useEffect(() => {
+    if (!isPlaying) {
+      if (lastVolumeRef.current !== 0 || lastIntonationRef.current !== 0) {
+        lastVolumeRef.current = 0;
+        lastIntonationRef.current = 0;
+        setVolume(0);
+        setIntonation(0);
+        onVolumeChange?.(0);
+        onIntonationChange?.(0);
+      }
+      return;
+    }
+
     const dataArray = new Uint8Array(128);
     const freqDataArray = new Uint8Array(128);
 
     const updateVolume = () => {
-      // Saat tidak memutar suara Celyn, kunci volume & intonasi ke 0 tanpa trigger re-render
+      // Saat playback sudah berhenti sebelum efek di-cleanup, kunci ke 0 & hentikan loop
       if (!isPlayingRef.current) {
         if (lastVolumeRef.current !== 0 || lastIntonationRef.current !== 0) {
           lastVolumeRef.current = 0;
@@ -137,7 +150,6 @@ export function useAudioEngine({
           onVolumeChange?.(0);
           onIntonationChange?.(0);
         }
-        animFrameRef.current = requestAnimationFrame(updateVolume);
         return;
       }
 
@@ -191,9 +203,12 @@ export function useAudioEngine({
 
     animFrameRef.current = requestAnimationFrame(updateVolume);
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
     };
-  }, [onVolumeChange, onIntonationChange]);
+  }, [isPlaying, onVolumeChange, onIntonationChange]);
 
   // Mengubah Int16Array PCM ke Base64 dengan chunked batch encoding (minim alokasi heap GC)
   const int16ToBase64 = (int16Array: Int16Array): string => {
@@ -414,25 +429,34 @@ export function useAudioEngine({
       return;
     }
 
+    // Ambil snapshot source aktif dan kosongkan ref segera secara sinkron
+    // agar chunk audio baru yang datang dalam jeda 40ms tidak ikut terhapus
+    const sourcesToStop = [...activeSourcesRef.current];
+    activeSourcesRef.current = [];
+    const stopEpoch = playbackEpochRef.current;
+
     // Jika ada audio yang sedang berputar, lakukan fade-out mikro 35ms untuk mencegah suara pop/klik
     if (audioCtxRef.current && masterGainRef.current) {
       const now = audioCtxRef.current.currentTime;
       try {
         masterGainRef.current.gain.cancelScheduledValues(now);
         masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, now);
-        masterGainRef.current.gain.linearRampToValueAtTime(0, now + 0.035);
+        masterGainRef.current.gain.linearRampToValueAtTime(0.0001, now + 0.035);
       } catch {}
     }
 
     setTimeout(() => {
-      for (const source of activeSourcesRef.current) {
+      for (const source of sourcesToStop) {
         try {
           source.stop();
           source.disconnect();
         } catch {}
       }
-      activeSourcesRef.current = [];
-      if (audioCtxRef.current && masterGainRef.current) {
+      if (
+        audioCtxRef.current &&
+        masterGainRef.current &&
+        playbackEpochRef.current === stopEpoch
+      ) {
         try {
           masterGainRef.current.gain.cancelScheduledValues(0);
           masterGainRef.current.gain.setValueAtTime(1, audioCtxRef.current.currentTime);
@@ -664,7 +688,7 @@ export function useAudioEngine({
             const testText = greetings[voiceId] || `Halo! Aku Celyn, senang menyapamu dengan suara ${voiceId}.`;
             const ttsRes = await fetch("/api/tts", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: buildAuthHeaders({ "Content-Type": "application/json" }),
               body: JSON.stringify({ text: testText, voiceName: voiceId }),
             });
             if (ttsRes.ok) {

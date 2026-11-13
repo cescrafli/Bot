@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { GeminiSession } from "./geminiSession.js";
 import { synthesizeEdgeTTS } from "./edgeTts.js";
 import { memoryService } from "./services/MemoryService.js";
-import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken, resolveVoiceId, isRateLimitError, parseRetryDelayMs, friendlyDocumentError } from "@celyn/shared";
+import { ClientMessage, DEFAULT_VOICE_NAME, normalizeEmotion, AuthMode, DocumentKind, signAuthToken, verifyAuthToken, verifyPasswordCredentials, resolveVoiceId, isRateLimitError, parseRetryDelayMs, friendlyDocumentError } from "@celyn/shared";
 import { parseMultipartUpload } from "./middlewares/upload.js";
 import { documentReaderService } from "./services/DocumentReaderService.js";
 import { documentService } from "./services/DocumentService.js";
@@ -70,15 +70,9 @@ function getReqAuth(req: http.IncomingMessage, bodyPasswordOrToken?: string): { 
     }
   }
 
-  const passLower = pass.toLowerCase();
-  const adminPass = config.adminPassword.toLowerCase();
-  const userPass = config.userPassword.toLowerCase();
-
-  if (passLower === "admin" || passLower === adminPass) {
-    return { valid: true, mode: "jocelyn" };
-  }
-  if (passLower === "login" || passLower === userPass) {
-    return { valid: true, mode: "default" };
+  const cred = verifyPasswordCredentials(pass, process.env);
+  if (cred.valid && cred.mode) {
+    return { valid: true, mode: cred.mode };
   }
 
   return { valid: false };
@@ -88,9 +82,36 @@ function getReqAuth(req: http.IncomingMessage, bodyPasswordOrToken?: string): { 
 const serverKeyCooldownMap = new Map<string, number>();
 let serverKeyRotationIndex = 0;
 
+function resolveCorsOrigin(req: http.IncomingMessage): string | null {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin.trim() : "";
+  if (!origin) return null;
+
+  if (config.allowedOrigins.includes(origin)) {
+    return origin;
+  }
+
+  const host = typeof req.headers.host === "string" ? req.headers.host.trim() : "";
+  if (host && (origin === `https://${host}` || origin === `http://${host}`)) {
+    return origin;
+  }
+
+  if (
+    process.env.NODE_ENV !== "production" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+  ) {
+    return origin;
+  }
+
+  return null;
+}
+
 const server = http.createServer((req, res) => {
-  // CORS Headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // CORS Headers (Strict Allowlist — tanpa wildcard *)
+  const allowedOrigin = resolveCorsOrigin(req);
+  if (allowedOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization, x-gemini-key");
 
@@ -139,16 +160,11 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       try {
         const parsed = JSON.parse(body || "{}");
-        const trimmed = String(parsed.password || "").trim().toLowerCase();
-        if (trimmed === "admin" || trimmed === config.adminPassword.toLowerCase()) {
-          const token = signAuthToken("jocelyn", config.authSecret);
+        const cred = verifyPasswordCredentials(String(parsed.password || ""), process.env);
+        if (cred.valid && cred.mode) {
+          const token = signAuthToken(cred.mode, config.authSecret);
           res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ valid: true, mode: "jocelyn", token }));
-        }
-        if (trimmed === "login" || trimmed === config.userPassword.toLowerCase()) {
-          const token = signAuthToken("default", config.authSecret);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ valid: true, mode: "default", token }));
+          return res.end(JSON.stringify({ valid: true, mode: cred.mode, token }));
         }
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ valid: false, error: "Kata sandi salah" }));
@@ -173,8 +189,15 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Endpoint Unduh Dokumen Hasil Proses Latar Belakang (RFC 6266)
+  // Endpoint Unduh Dokumen Hasil Proses Latar Belakang (RFC 6266) — Wajib Terautentikasi
   if (req.url?.startsWith("/api/documents/download")) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
     const parsedUrl = new URL(req.url, `http://localhost:${config.port}`);
     let jobId = parsedUrl.searchParams.get("id");
     if (!jobId) {
@@ -387,7 +410,7 @@ const server = http.createServer((req, res) => {
     const auth = getReqAuth(req);
     if (!auth.valid) {
       res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') atau token diperlukan." }));
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi atau token sesi yang valid diperlukan." }));
       return;
     }
 
@@ -487,8 +510,15 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Endpoint TTS Microsoft Edge Neural (id-ID-GadisNeural)
+  // Endpoint TTS Microsoft Edge Neural (id-ID-GadisNeural) — Wajib Terautentikasi
   if (req.url?.startsWith("/api/tts")) {
+    const auth = getReqAuth(req);
+    if (!auth.valid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Akses ditolak: Autentikasi diperlukan." }));
+      return;
+    }
+
     let rawBody = "";
     let bodyTooLarge = false;
     req.on("data", (chunk) => {
@@ -920,25 +950,24 @@ wss.on("connection", async (ws: AliveWebSocket, req) => {
   if (!isAuthorized) {
     const rawHeader = req.headers["x-admin-password"];
     const headerPass = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const authPass = (
+    const rawAuthPass = (
       headerPass ||
       parsedUrl.searchParams.get("password") ||
       parsedUrl.searchParams.get("key") ||
       ""
-    ).trim().toLowerCase();
+    ).trim();
 
-    const adminPass = config.adminPassword.toLowerCase();
-    const userPass = config.userPassword.toLowerCase();
+    if (rawAuthPass) {
+      const cred = verifyPasswordCredentials(rawAuthPass, process.env);
+      if (cred.valid && cred.mode) {
+        isAuthorized = true;
+        authMode = cred.mode;
+      }
+    }
 
-    if (authPass === "admin" || authPass === adminPass) {
-      isAuthorized = true;
-      authMode = "jocelyn";
-    } else if (authPass === "login" || authPass === userPass) {
-      isAuthorized = true;
-      authMode = "default";
-    } else if (authPass) {
-      console.warn(`⛔ [Auth Failed] Koneksi WebSocket ditolak: Password salah dari ${clientIp}`);
-      ws.send(JSON.stringify({ type: "error", message: "Akses ditolak: Kata sandi salah." }));
+    if (!isAuthorized) {
+      console.warn(`⛔ [Auth Failed] Koneksi WebSocket ditolak dari ${clientIp} (Kredensial tidak ada/tidak valid)`);
+      ws.send(JSON.stringify({ type: "error", message: "Akses ditolak: Autentikasi atau token sesi yang valid diperlukan." }));
       ws.close(1008, "Unauthorized");
       return;
     }
@@ -1007,6 +1036,7 @@ wss.on("connection", async (ws: AliveWebSocket, req) => {
     serverStats.activeConnections = Math.max(0, serverStats.activeConnections - 1);
     console.log(`❌ [Klien Keluar] ${clientIp} terputus (Tersisa: ${serverStats.activeConnections})`);
     session.close();
+    memoryService.cleanupSessionBuffer(session.sessionId);
   };
 
   ws.on("close", cleanup);

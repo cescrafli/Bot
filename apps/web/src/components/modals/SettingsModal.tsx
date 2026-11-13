@@ -79,6 +79,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Pengaturan Celyn"
         className="w-full max-w-md luxury-blur-panel rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-white/10 shadow-2xl space-y-4 sm:space-y-5 animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -100,8 +103,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
+            aria-label="Tutup pengaturan"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-full luxury-blur-panel flex items-center justify-center text-slate-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer"
             title="Tutup"
           >
             <X className="w-4 h-4" />
@@ -299,7 +304,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   type={showKey ? "text" : "password"}
                   value={customKey}
                   onChange={(e) => setCustomKey(e.target.value)}
-                  placeholder="Tempel kunci API (AIzaSy... atau AQ...)"
+                  placeholder="Masukkan kode akses API Celyn Engine..."
                   className="w-full px-3 py-1.5 pr-8 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400/50"
                 />
                 <button

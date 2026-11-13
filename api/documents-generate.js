@@ -19,14 +19,74 @@ import path from "node:path";
 import fs from "node:fs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+function safeTimingMatch(a, b) {
+  const ba = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (!ba.length || ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
+function resolveApiAuthSecret() {
+  const configured = (process.env.AUTH_SECRET || "").trim();
+  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return null;
+  return "celyn-secret-session-key-2026";
+}
+
+function verifyEnvPassword(rawPass) {
+  const trimmed = String(rawPass || "").trim();
+  if (!trimmed) return null;
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const adminPass = (process.env.ADMIN_PASSWORD || "").trim();
+  const userPass = (process.env.USER_PASSWORD || "").trim();
+
+  if (adminPass) {
+    if (safeTimingMatch(trimmed, adminPass)) return "jocelyn";
+  } else if (!isProd && safeTimingMatch(trimmed.toLowerCase(), "admin")) {
+    return "jocelyn";
+  }
+
+  if (userPass) {
+    if (safeTimingMatch(trimmed, userPass)) return "default";
+  } else if (!isProd && safeTimingMatch(trimmed.toLowerCase(), "login")) {
+    return "default";
+  }
+
+  return null;
+}
+
+function applyCors(req, res, methods = "POST, OPTIONS") {
+  const origin = typeof req.headers?.origin === "string" ? req.headers.origin.trim() : "";
+  const allowed = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const host = typeof req.headers?.host === "string" ? req.headers.host.trim() : "";
+  const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
+  const isVercelUrl = Boolean(
+    origin &&
+      ((process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) ||
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL &&
+          origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`))
+  );
+  const isLocalDev =
+    process.env.NODE_ENV !== "production" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+  if (origin && (allowed.includes(origin) || isSameHost || isVercelUrl || isLocalDev)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", methods);
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization, x-gemini-key");
+}
+
 function verifyAuth(req) {
-  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
-  const expectedUserPassword = process.env.USER_PASSWORD || "login";
+  const secret = resolveApiAuthSecret();
 
   // Check Bearer Token
   const authHeader = req.headers["authorization"] || "";
-  if (authHeader.startsWith("Bearer ")) {
+  if (secret && authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice(7).trim();
     const parts = token.split(".");
     if (parts.length === 2) {
@@ -46,14 +106,9 @@ function verifyAuth(req) {
 
   // Check direct password
   const directPass = req.headers["x-admin-password"] || req.query?.password || req.query?.key;
-  if (directPass) {
-    const trimmed = String(directPass).trim();
-    if (trimmed === expectedPassword || trimmed === "admin") {
-      return { valid: true, mode: "jocelyn" };
-    }
-    if (trimmed === expectedUserPassword || trimmed === "login") {
-      return { valid: true, mode: "default" };
-    }
+  const mode = verifyEnvPassword(directPass);
+  if (mode) {
+    return { valid: true, mode };
   }
 
   return { valid: false };
@@ -666,9 +721,7 @@ function friendlyError(err) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization, x-gemini-key");
+  applyCors(req, res, "POST, OPTIONS");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();

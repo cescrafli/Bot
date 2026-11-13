@@ -6,7 +6,13 @@ class GeminiAudioRecorderProcessor extends AudioWorkletProcessor {
     super();
     this.targetSampleRate = 16000;
     this.bufferSize = 1024; // Buffer ukuran 64ms pada 16kHz (Ultra-low latency)
-    this.outputBuffer = new Int16Array(this.bufferSize);
+    // Ping-pong double buffer untuk mengurangi alokasi GC (.slice) di thread audio real-time
+    this.buffers = [
+      new Int16Array(this.bufferSize),
+      new Int16Array(this.bufferSize),
+    ];
+    this.activeBufferIndex = 0;
+    this.outputBuffer = this.buffers[0];
     this.outputIndex = 0;
     this.phaseOffset = 0; // Akumulator kontinuitas fase antar blok
   }
@@ -42,7 +48,9 @@ class GeminiAudioRecorderProcessor extends AudioWorkletProcessor {
       this.outputBuffer[this.outputIndex++] = int16;
 
       if (this.outputIndex >= this.bufferSize) {
-        this.port.postMessage(this.outputBuffer.slice(0, this.bufferSize));
+        this.port.postMessage(this.outputBuffer);
+        this.activeBufferIndex = 1 - this.activeBufferIndex;
+        this.outputBuffer = this.buffers[this.activeBufferIndex];
         this.outputIndex = 0;
       }
 

@@ -56,6 +56,7 @@ export function App() {
   const quickFileInputRef = useRef<HTMLInputElement>(null);
 
   const liveRef = useRef<any>(null);
+  const pendingVoiceReconnectRef = useRef<string | null>(null);
 
   // Hook Audio Capture & Playback
   const audioEngine = useAudioEngine({
@@ -107,14 +108,23 @@ export function App() {
       setIsVoiceModalOpen(false);
       audioEngine.stopPlayback();
       if (live.isConnected) {
+        pendingVoiceReconnectRef.current = newVoice;
         live.disconnect();
-        setTimeout(() => {
-          live.connect(newVoice);
-        }, 200);
       }
     },
     [live, audioEngine]
   );
+
+  // Sambungkan ulang secara aman hanya setelah state koneksi lama benar-benar selesai tertutup
+  useEffect(() => {
+    if (!live.isConnected && pendingVoiceReconnectRef.current) {
+      const nextVoice = pendingVoiceReconnectRef.current;
+      pendingVoiceReconnectRef.current = null;
+      queueMicrotask(() => {
+        live.connect(nextVoice);
+      });
+    }
+  }, [live.isConnected, live]);
 
   // Uji coba suara: Jika voiceId spesifik diuji dari VoiceSelectorModal, uji suara tersebut; jika tanpa argumen dan live aktif, sapa langsung
   const handleTestSpeech = useCallback(
@@ -199,18 +209,50 @@ export function App() {
     }
   }, [screenCapture]);
 
-  // Keyboard Shortcuts (M: Mute/Unmute, S: Screen Share, V: Avatar 2D/3D, Spasi: Push-to-Talk)
+  // Keyboard Shortcuts (Esc: Tutup modal/drawer, M: Mute/Unmute, S: Screen Share, V: Avatar 2D/3D, Spasi: PTT)
   useEffect(() => {
+    const isAnyModalOpen =
+      isHistoryOpen ||
+      isHelpOpen ||
+      isVoiceModalOpen ||
+      isSettingsOpen ||
+      isDocumentModalOpen ||
+      isRigPanelOpen ||
+      live.isPhotoStageVisible;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!auth.isAuthenticated) return;
 
-      // Abaikan jika fokus pada input teks
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
+      if (e.key === "Escape") {
+        if (isDocumentModalOpen) { setIsDocumentModalOpen(false); e.preventDefault(); return; }
+        if (isSettingsOpen) { setIsSettingsOpen(false); e.preventDefault(); return; }
+        if (isVoiceModalOpen) { setIsVoiceModalOpen(false); e.preventDefault(); return; }
+        if (isHelpOpen) { setIsHelpOpen(false); e.preventDefault(); return; }
+        if (isRigPanelOpen) { setIsRigPanelOpen(false); e.preventDefault(); return; }
+        if (isHistoryOpen) { setIsHistoryOpen(false); e.preventDefault(); return; }
+        if (live.isPhotoStageVisible) { live.setIsPhotoStageVisible(false); e.preventDefault(); return; }
+        if (isTextInputOpen) { setIsTextInputOpen(false); e.preventDefault(); return; }
         return;
       }
+
+      // Abaikan jika fokus berada pada kontrol teks/pilihan
+      const target = e.target as HTMLElement | null;
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isEditingText = (el: HTMLElement | null) =>
+        Boolean(
+          el &&
+            (el.tagName === "INPUT" ||
+              el.tagName === "TEXTAREA" ||
+              el.tagName === "SELECT" ||
+              el.isContentEditable)
+        );
+      if (isEditingText(target) || isEditingText(activeEl)) {
+        return;
+      }
+
+      // Isolasi pintasan global agar M/S/V/Spasi tidak bocor saat modal atau drawer terbuka
+      if (isAnyModalOpen) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       if (e.code === "KeyM" && live.isConnected) {
         e.preventDefault();
@@ -230,7 +272,7 @@ export function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (!auth.isAuthenticated) return;
+      if (!auth.isAuthenticated || isAnyModalOpen) return;
 
       if (e.code === "Space" && isPushToTalk && live.isConnected) {
         if (audioEngine.isMicActive) {
@@ -249,11 +291,18 @@ export function App() {
     };
   }, [
     auth.isAuthenticated,
-    live.isConnected,
+    live,
     isPushToTalk,
     audioEngine,
     handleToggleMic,
     handleToggleScreenShare,
+    isHistoryOpen,
+    isHelpOpen,
+    isVoiceModalOpen,
+    isSettingsOpen,
+    isDocumentModalOpen,
+    isRigPanelOpen,
+    isTextInputOpen,
   ]);
 
   // Status sinkron dengan pemutaran audio riil dan mikrofon di browser
@@ -668,11 +717,40 @@ export function App() {
         doc={live.activePhotoDoc}
         isVisible={live.isPhotoStageVisible}
         statusText={live.lastPhotoEditSummary}
+        canUndo={live.canUndoPhoto}
         onClose={() => live.setIsPhotoStageVisible(false)}
         onOpenStudio={() => setIsDocumentModalOpen(true)}
+        onUndo={live.undoActivePhoto}
         onReset={live.resetActivePhoto}
         onQuickAction={(instruction) => {
-          live.sendText(`tolong edit foto ini: ${instruction}`);
+          const lower = instruction.toLowerCase();
+          if (/latar|background/i.test(lower)) {
+            const bgColor = lower.includes("biru")
+              ? "biru"
+              : lower.includes("merah")
+              ? "merah"
+              : lower.includes("putih")
+              ? "putih"
+              : lower.includes("hijau")
+              ? "hijau"
+              : undefined;
+            void live.handleExecutePhotoEdit({
+              action: bgColor ? "background_color" : "replace_background",
+              instruction,
+              backgroundColor: bgColor,
+            });
+          } else if (/hitam\s*putih|monokrom|grayscale/i.test(lower)) {
+            void live.handleExecutePhotoEdit({
+              action: "transform",
+              instruction,
+              grayscale: true,
+            });
+          } else {
+            void live.handleExecutePhotoEdit({
+              action: "recolor_part",
+              instruction,
+            });
+          }
         }}
       />
 
@@ -683,6 +761,7 @@ export function App() {
         activeDocuments={live.activeDocuments}
         onUploadDocument={live.uploadDocument}
         onRemoveDocument={live.removeDocument}
+        onApplyEditedInPlace={live.applyEditedDocumentInPlace}
         onGenerateDocument={live.generateDocument}
         isUploading={live.isUploadingDoc}
         isGenerating={live.isGeneratingDoc}

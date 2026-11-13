@@ -282,7 +282,12 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
         className="fixed inset-0 z-45 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200"
         aria-hidden="true"
       />
-      <div className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl h-[100dvh] glass-panel border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 safe-top safe-bottom">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Riwayat Percakapan Celyn"
+        className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl h-[100dvh] glass-panel border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 safe-top safe-bottom"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-white/10 bg-slate-900/60 shrink-0">
           <div className="flex items-center gap-2 text-sm font-bold text-white">
@@ -310,8 +315,10 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
               </>
             )}
             <button
+              type="button"
               onClick={onClose}
-              className="p-2 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              aria-label="Tutup riwayat percakapan"
+              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
               title="Tutup riwayat"
             >
               <X className="w-5 h-5" />

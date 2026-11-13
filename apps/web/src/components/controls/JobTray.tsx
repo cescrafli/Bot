@@ -1,5 +1,6 @@
 import React from "react";
 import { Download, CheckCircle2, AlertCircle, Loader2, FileText, Search, X } from "lucide-react";
+import { getStoredAuthToken } from "../../hooks/useAuth";
 
 export interface BackgroundJob {
   id: string;
@@ -23,6 +24,32 @@ export const JobTray: React.FC<JobTrayProps> = ({ jobs, onDismissJob }) => {
   const getJobIcon = (kind: BackgroundJob["kind"]) => {
     if (kind === "research") return <Search className="w-4 h-4 text-cyan-400" />;
     return <FileText className="w-4 h-4 text-rose-400" />;
+  };
+
+  const handleDownloadJob = async (job: BackgroundJob) => {
+    if (!job.downloadUrl) return;
+    try {
+      const token = getStoredAuthToken();
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(job.downloadUrl, { headers });
+      if (!res.ok) {
+        console.error("Gagal mengunduh dokumen:", res.status);
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = job.fileName || "dokumen_celyn";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2500);
+    } catch (err) {
+      console.error("Error mengunduh dokumen:", err);
+    }
   };
 
   return (
@@ -73,14 +100,14 @@ export const JobTray: React.FC<JobTrayProps> = ({ jobs, onDismissJob }) => {
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Siap diunduh</span>
               </span>
-              <a
-                href={job.downloadUrl}
-                download={job.fileName || "dokumen_celyn"}
+              <button
+                type="button"
+                onClick={() => void handleDownloadJob(job)}
                 className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Unduh</span>
-              </a>
+              </button>
             </div>
           )}
 

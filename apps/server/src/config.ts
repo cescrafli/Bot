@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,11 +29,21 @@ const geminiApiKeys = [...new Set(parsedKeys)].sort((a, b) => {
 });
 const primaryGeminiApiKey = geminiApiKeys[0] || "";
 
+const isProductionEnv = process.env.NODE_ENV === "production";
+const configuredAuthSecret = (process.env.AUTH_SECRET || "").trim();
+if (!configuredAuthSecret && isProductionEnv) {
+  console.warn(
+    "[SECURITY] ⚠️ AUTH_SECRET belum disetel di production! Menggunakan secret sementara per proses — harap konfigurasi AUTH_SECRET di environment."
+  );
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3001", 10),
-  adminPassword: process.env.ADMIN_PASSWORD || "admin",
-  userPassword: process.env.USER_PASSWORD || "login",
-  authSecret: process.env.AUTH_SECRET || "celyn-secret-session-key-2026",
+  adminPassword: process.env.ADMIN_PASSWORD || (isProductionEnv ? "" : "admin"),
+  userPassword: process.env.USER_PASSWORD || (isProductionEnv ? "" : "login"),
+  authSecret:
+    configuredAuthSecret ||
+    (isProductionEnv ? crypto.randomBytes(32).toString("hex") : "celyn-secret-session-key-2026"),
   geminiApiKey: primaryGeminiApiKey,
   geminiApiKeys,
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",

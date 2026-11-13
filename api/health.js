@@ -1,6 +1,70 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-// ─── Shared auth helpers ───────────────────────────────────────────────────
+// ─── Shared auth & CORS helpers ─────────────────────────────────────────────
+
+function safeTimingMatch(a, b) {
+  const ba = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (!ba.length || ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
+function resolveApiAuthSecret() {
+  const configured = (process.env.AUTH_SECRET || "").trim();
+  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") {
+    return null;
+  }
+  return "celyn-secret-session-key-2026";
+}
+
+function verifyEnvPassword(rawPass) {
+  const trimmed = String(rawPass || "").trim();
+  if (!trimmed) return null;
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const adminPass = (process.env.ADMIN_PASSWORD || "").trim();
+  const userPass = (process.env.USER_PASSWORD || "").trim();
+
+  if (adminPass) {
+    if (safeTimingMatch(trimmed, adminPass)) return "jocelyn";
+  } else if (!isProd && safeTimingMatch(trimmed.toLowerCase(), "admin")) {
+    return "jocelyn";
+  }
+
+  if (userPass) {
+    if (safeTimingMatch(trimmed, userPass)) return "default";
+  } else if (!isProd && safeTimingMatch(trimmed.toLowerCase(), "login")) {
+    return "default";
+  }
+
+  return null;
+}
+
+function applyCors(req, res, methods = "GET, POST, OPTIONS") {
+  const origin = typeof req.headers?.origin === "string" ? req.headers.origin.trim() : "";
+  const allowed = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const host = typeof req.headers?.host === "string" ? req.headers.host.trim() : "";
+  const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
+  const isVercelUrl = Boolean(
+    origin &&
+      ((process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) ||
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL &&
+          origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`))
+  );
+  const isLocalDev =
+    process.env.NODE_ENV !== "production" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+  if (origin && (allowed.includes(origin) || isSameHost || isVercelUrl || isLocalDev)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", methods);
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-password, x-gemini-key");
+}
 
 function signToken(mode, secret, ttlSec = 8 * 3600) {
   const now = Math.floor(Date.now() / 1000);
@@ -15,11 +79,10 @@ function signToken(mode, secret, ttlSec = 8 * 3600) {
 }
 
 function isAuthorized(req) {
-  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
-  const expectedPassword = (process.env.ADMIN_PASSWORD || "admin").trim().toLowerCase();
+  const secret = resolveApiAuthSecret();
 
   const authHeader = req.headers["authorization"] || "";
-  if (authHeader.startsWith("Bearer ")) {
+  if (secret && authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice(7).trim();
     const parts = token.split(".");
     if (parts.length === 2) {
@@ -37,22 +100,19 @@ function isAuthorized(req) {
     }
   }
 
-  const directPass = (
+  const directPass =
     req.headers["x-admin-password"] ||
     req.query?.password ||
     req.query?.key ||
-    ""
-  ).trim().toLowerCase();
+    "";
 
-  return directPass === "admin" || directPass === expectedPassword;
+  return verifyEnvPassword(directPass) === "jocelyn";
 }
 
 // ─── Auth-verify handler (previously api/auth-verify.js) ──────────────────
 
 async function handleAuthVerify(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-password, x-gemini-key");
+  applyCors(req, res, "POST, OPTIONS");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -64,20 +124,18 @@ async function handleAuthVerify(req, res) {
 
   try {
     const body = typeof req.body === "object" ? req.body : JSON.parse(req.body || "{}");
-    const trimmed = String(body.password || "").trim().toLowerCase();
-
-    const expectedAdmin = (process.env.ADMIN_PASSWORD || "admin").toLowerCase();
-    const expectedUser = (process.env.USER_PASSWORD || "login").toLowerCase();
-    const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
-
-    if (trimmed === "admin" || trimmed === expectedAdmin) {
-      const token = signToken("jocelyn", secret);
-      return res.status(200).json({ valid: true, mode: "jocelyn", token });
+    const secret = resolveApiAuthSecret();
+    if (!secret) {
+      return res.status(503).json({
+        valid: false,
+        error: "Konfigurasi keamanan AUTH_SECRET belum disetel pada server.",
+      });
     }
 
-    if (trimmed === "login" || trimmed === expectedUser) {
-      const token = signToken("default", secret);
-      return res.status(200).json({ valid: true, mode: "default", token });
+    const mode = verifyEnvPassword(body.password);
+    if (mode === "jocelyn" || mode === "default") {
+      const token = signToken(mode, secret);
+      return res.status(200).json({ valid: true, mode, token });
     }
 
     return res.status(401).json({ valid: false, error: "Kata sandi salah" });
@@ -106,7 +164,7 @@ export default async function handler(req, res) {
     return handleAuthVerify(req, res);
   }
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  applyCors(req, res, "GET, POST, OPTIONS");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
   // Public health response (anti-leak)

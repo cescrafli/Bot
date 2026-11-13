@@ -330,14 +330,34 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
     }
   }
 
-  // Domain C: Proyek & Pekerjaan yang Sedang Digarap
+  // Domain C: Proyek & Pekerjaan yang Sedang Digarap (hanya perbarui jika entitas proyek beririsan)
   const isProject = validCategory === "proyek" || /mengerjakan|proyek|project|pekerjaan|ngoding|garap/i.test(cleanFact);
   if (!existingTargetId && isProject) {
-    const candidate = await db.execute(
-      "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' OR fact LIKE '%pekerjaan%' LIMIT 1"
-    );
-    if (candidate.rows.length > 0) {
-      existingTargetId = Number(candidate.rows[0].id);
+    const projStop = new Set(["sedang", "mengerjakan", "membuat", "bikin", "menggarap", "ngoding", "proyek", "project", "pekerjaan", "aplikasi", "sistem", "website", "baru", "rafli", "pengguna"]);
+    const projTokens = cleanFact
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !projStop.has(w));
+    if (projTokens.length > 0) {
+      const candidates = await db.execute(
+        "SELECT id, fact FROM user_profile WHERE category = 'proyek' ORDER BY updated_at DESC LIMIT 15"
+      );
+      for (const row of candidates.rows) {
+        const rowTokens = new Set(
+          String(row.fact || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter((w) => w.length >= 3 && !projStop.has(w))
+        );
+        const shared = projTokens.filter((w) => rowTokens.has(w));
+        const unionCount = new Set([...projTokens, ...rowTokens]).size;
+        if (shared.length >= 2 || (shared.length >= 1 && unionCount > 0 && shared.length / unionCount >= 0.45)) {
+          existingTargetId = Number(row.id);
+          break;
+        }
+      }
     }
   }
 
@@ -367,25 +387,24 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
     }
   }
 
-  // Domain F: Jadwal & Pengingat Waktu
+  // Domain F: Jadwal & Pengingat Waktu (cocokkan berdasarkan jam DAN konteks kegiatan yang sama)
   const isSchedule = validCategory === "jadwal" || /jadwal|pengingat|agenda/i.test(cleanFact);
   if (!existingTargetId && isSchedule) {
     const timeMatch = cleanFact.match(/(?:jam|pukul)\s*(\d+(?::\d+)?)/i);
     if (timeMatch && timeMatch[1]) {
-      const candidate = await db.execute({
-        sql: "SELECT id, fact FROM user_profile WHERE (category = 'jadwal' OR fact LIKE '%jadwal%' OR fact LIKE '%pengingat%') AND fact LIKE ? LIMIT 1",
+      const candidates = await db.execute({
+        sql: "SELECT id, fact FROM user_profile WHERE (category = 'jadwal' OR fact LIKE '%jadwal%' OR fact LIKE '%pengingat%') AND fact LIKE ? LIMIT 10",
         args: [`%${timeMatch[1]}%`],
       });
-      if (candidate.rows.length > 0) {
-        existingTargetId = Number(candidate.rows[0].id);
-      }
-    }
-    if (!existingTargetId) {
-      const candidate = await db.execute(
-        "SELECT id, fact FROM user_profile WHERE category = 'jadwal' OR fact LIKE '%Pengingat kegiatan%' LIMIT 1"
-      );
-      if (candidate.rows.length > 0) {
-        existingTargetId = Number(candidate.rows[0].id);
+      const schedStop = new Set(["jadwal", "pengingat", "agenda", "kegiatan", "jam", "pukul", "pada", "hari", "besok", "nanti", "minggu", "rafli", "pengguna", "untuk", "dengan"]);
+      const newWords = new Set(cleanFact.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !schedStop.has(w)));
+      for (const row of candidates.rows) {
+        const oldWords = new Set(String(row.fact || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !schedStop.has(w)));
+        const overlap = [...newWords].filter((w) => oldWords.has(w)).length;
+        if (overlap >= 1) {
+          existingTargetId = Number(row.id);
+          break;
+        }
       }
     }
   }
@@ -401,34 +420,46 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
     }
   }
 
-  // Domain H: Pencocokan Kata Kunci Entitas Non-Stopwords
+  // Domain H: Jaccard Similarity Overlap pada Kategori yang Sama
   if (!existingTargetId) {
     const stopwords = new Set([
       "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
       "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
       "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
       "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman",
-      "catatan", "fakta", "informasi", "kegiatan", "penting", "karena", "untuk", "dengan", "dan"
+      "catatan", "fakta", "informasi", "kegiatan", "penting", "karena", "untuk", "dengan", "dan", "atau", "tidak", "bukan",
+      "hari", "besok", "rumah", "kantor", "waktu", "punya", "sudah", "akan", "bisa", "hobi", "kerja"
     ]);
-    const words = cleanFact
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length >= 3 && !stopwords.has(w));
+    const extractTokens = (txt) =>
+      Array.from(
+        new Set(
+          txt
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter((w) => w.length >= 3 && !stopwords.has(w))
+        )
+      );
 
-    for (const kw of words) {
-      const candidate = isCelyn
-        ? await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE fact LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
-            args: [`%${kw}%`],
-          })
-        : await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE fact NOT LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
-            args: [`%${kw}%`],
-          });
-      if (candidate.rows.length > 0) {
-        existingTargetId = Number(candidate.rows[0].id);
-        break;
+    const words = extractTokens(cleanFact);
+    if (words.length > 0) {
+      const scopeSql = isCelyn
+        ? "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE 'Celyn%' ORDER BY updated_at DESC LIMIT 30"
+        : "SELECT id, fact FROM user_profile WHERE category = ? AND fact NOT LIKE 'Celyn%' ORDER BY updated_at DESC LIMIT 30";
+      const candidates = await db.execute({ sql: scopeSql, args: [validCategory] });
+
+      for (const row of candidates.rows) {
+        const candidateWords = extractTokens(String(row.fact || ""));
+        if (candidateWords.length === 0) continue;
+        const candidateSet = new Set(candidateWords);
+        const shared = words.filter((w) => candidateSet.has(w));
+        const unionCount = new Set([...words, ...candidateWords]).size;
+        const jaccard = unionCount > 0 ? shared.length / unionCount : 0;
+
+        if (shared.length >= 3 && jaccard >= 0.65) {
+          existingTargetId = Number(row.id);
+          break;
+        }
       }
     }
   }
@@ -450,12 +481,62 @@ async function smartUpsertUserProfile(db, fact, category = "fakta", importance =
   return { action: "inserted", fact: cleanFact, category: validCategory };
 }
 
+function safeTimingMatch(a, b) {
+  const ba = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (!ba.length || ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
+function resolveApiAuthSecret() {
+  const configured = (process.env.AUTH_SECRET || "").trim();
+  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return null;
+  return "celyn-secret-session-key-2026";
+}
+
+function verifyAdminPassword(rawPass) {
+  const trimmed = String(rawPass || "").trim();
+  if (!trimmed) return false;
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const expectedPassword = (process.env.ADMIN_PASSWORD || "").trim();
+  if (expectedPassword) {
+    return safeTimingMatch(trimmed, expectedPassword);
+  }
+  return !isProd && safeTimingMatch(trimmed.toLowerCase(), "admin");
+}
+
+function applyCors(req, res, methods = "POST, OPTIONS") {
+  const origin = typeof req.headers?.origin === "string" ? req.headers.origin.trim() : "";
+  const allowed = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const host = typeof req.headers?.host === "string" ? req.headers.host.trim() : "";
+  const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
+  const isVercelUrl = Boolean(
+    origin &&
+      ((process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) ||
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL &&
+          origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`))
+  );
+  const isLocalDev =
+    process.env.NODE_ENV !== "production" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+  if (origin && (allowed.includes(origin) || isSameHost || isVercelUrl || isLocalDev)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", methods);
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-password, x-gemini-key");
+}
+
 function verifyAdminAuth(req, body) {
-  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin";
+  const secret = resolveApiAuthSecret();
 
   const authHeader = req.headers["authorization"] || "";
-  if (authHeader.startsWith("Bearer ")) {
+  if (secret && authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice(7).trim();
     const parts = token.split(".");
     if (parts.length === 2) {
@@ -477,20 +558,11 @@ function verifyAdminAuth(req, body) {
     req.headers["x-admin-password"] ||
     req.query?.password ||
     (body && body.password);
-  if (authPass) {
-    const trimmed = String(authPass).trim();
-    if (trimmed === expectedPassword || trimmed === "admin") {
-      return true;
-    }
-  }
-
-  return false;
+  return verifyAdminPassword(authPass);
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-admin-password, x-gemini-key");
+  applyCors(req, res, "POST, OPTIONS");
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });

@@ -156,10 +156,70 @@ function isRateLimited(ip) {
  * Membuat Ephemeral Auth Token berumur pendek (30 menit) untuk koneksi
  * langsung ke Gemini Live API dari browser secara aman tanpa mengekspos GEMINI_API_KEY.
  */
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+function safeTimingMatch(a, b) {
+  const ba = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (!ba.length || ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
+function resolveApiAuthSecret() {
+  const configured = (process.env.AUTH_SECRET || "").trim();
+  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return null;
+  return "celyn-secret-session-key-2026";
+}
+
+function verifyEnvPassword(rawPass) {
+  const trimmed = String(rawPass || "").trim();
+  if (!trimmed) return null;
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const adminPass = (process.env.ADMIN_PASSWORD || "").trim();
+  const userPass = (process.env.USER_PASSWORD || "").trim();
+
+  if (adminPass) {
+    if (safeTimingMatch(trimmed, adminPass)) return "jocelyn";
+  } else if (!isProd && safeTimingMatch(trimmed.toLowerCase(), "admin")) {
+    return "jocelyn";
+  }
+
+  if (userPass) {
+    if (safeTimingMatch(trimmed, userPass)) return "default";
+  } else if (!isProd && safeTimingMatch(trimmed.toLowerCase(), "login")) {
+    return "default";
+  }
+
+  return null;
+}
+
+function applyCors(req, res, methods = "GET, POST, OPTIONS") {
+  const origin = typeof req.headers?.origin === "string" ? req.headers.origin.trim() : "";
+  const allowed = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const host = typeof req.headers?.host === "string" ? req.headers.host.trim() : "";
+  const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
+  const isVercelUrl = Boolean(
+    origin &&
+      ((process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) ||
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL &&
+          origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`))
+  );
+  const isLocalDev =
+    process.env.NODE_ENV !== "production" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+  if (origin && (allowed.includes(origin) || isSameHost || isVercelUrl || isLocalDev)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", methods);
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-password, authorization, x-gemini-key");
+}
+
+export default async function handler(req, res) {
+  applyCors(req, res, "GET, POST, OPTIONS");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
   if (req.method === "OPTIONS") {
@@ -171,36 +231,28 @@ export default async function handler(req, res) {
   }
 
   // Verifikasi Autentikasi (Token HMAC atau Kata Sandi)
-  const secret = process.env.AUTH_SECRET || "celyn-secret-session-key-2026";
-  const expectedPassword = (process.env.ADMIN_PASSWORD || "admin").trim().toLowerCase();
-  const expectedUserPassword = (process.env.USER_PASSWORD || "login").trim().toLowerCase();
+  const secret = resolveApiAuthSecret();
   let authMode = null;
 
   // 1. Cek Header Authorization (Bearer token)
   const authHeader = req.headers["authorization"] || "";
-  if (authHeader.startsWith("Bearer ")) {
+  if (secret && authHeader.startsWith("Bearer ")) {
     authMode = verifyToken(authHeader.slice(7).trim(), secret);
   }
 
   // 2. Cek Header / Query sandi langsung
   if (!authMode) {
-    const directPass = (
+    const directPass =
       req.headers["x-admin-password"] ||
       req.query?.password ||
       req.query?.key ||
-      ""
-    ).trim().toLowerCase();
-
-    if (directPass === "admin" || directPass === expectedPassword) {
-      authMode = "jocelyn";
-    } else if (directPass === "login" || directPass === expectedUserPassword) {
-      authMode = "default";
-    }
+      "";
+    authMode = verifyEnvPassword(directPass);
   }
 
   if (!authMode) {
     return res.status(401).json({
-      error: "Akses ditolak: Kata sandi valid ('admin' atau 'login') atau token sesi diperlukan.",
+      error: "Akses ditolak: Autentikasi atau token sesi yang valid diperlukan.",
     });
   }
 

@@ -110,6 +110,9 @@ export class MemoryService {
           content TEXT NOT NULL,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_logs_session_created ON chat_logs(session_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_user_profile_category_importance ON user_profile(category, importance DESC, updated_at DESC);
       `);
 
       this.isInitialized = true;
@@ -274,7 +277,11 @@ export class MemoryService {
     if (!content || !content.trim()) return;
     const cleanContent = content.trim();
 
-    // Catat ke buffer memori sesi aktif
+    // Catat ke buffer memori sesi aktif (dengan batas kapasitas agar tidak bocor di memori)
+    if (!this.sessionBuffers.has(sessionId) && this.sessionBuffers.size >= 50) {
+      const oldestKey = this.sessionBuffers.keys().next().value;
+      if (oldestKey) this.sessionBuffers.delete(oldestKey);
+    }
     const buffer = this.sessionBuffers.get(sessionId) || [];
     buffer.push({ role, content: cleanContent });
     this.sessionBuffers.set(sessionId, buffer);
@@ -471,14 +478,34 @@ export class MemoryService {
         }
       }
 
-      // Domain C: Proyek & Pekerjaan yang Sedang Digarap
+      // Domain C: Proyek & Pekerjaan yang Sedang Digarap (hanya perbarui jika entitas proyek beririsan)
       const isProject = validCategory === "proyek" || /mengerjakan|proyek|project|pekerjaan|ngoding|garap/i.test(cleanFact);
       if (!existingTargetId && isProject) {
-        const candidate = await db.execute(
-          "SELECT id, fact FROM user_profile WHERE category = 'proyek' OR fact LIKE '%mengerjakan%' OR fact LIKE '%proyek%' OR fact LIKE '%pekerjaan%' LIMIT 1"
-        );
-        if (candidate.rows.length > 0) {
-          existingTargetId = Number(candidate.rows[0].id);
+        const projStop = new Set(["sedang", "mengerjakan", "membuat", "bikin", "menggarap", "ngoding", "proyek", "project", "pekerjaan", "aplikasi", "sistem", "website", "baru", "rafli", "pengguna"]);
+        const projTokens = cleanFact
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter((w) => w.length >= 3 && !projStop.has(w));
+        if (projTokens.length > 0) {
+          const candidates = await db.execute(
+            "SELECT id, fact FROM user_profile WHERE category = 'proyek' ORDER BY updated_at DESC LIMIT 15"
+          );
+          for (const row of candidates.rows) {
+            const rowTokens = new Set(
+              String(row.fact || "")
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, " ")
+                .split(/\s+/)
+                .filter((w) => w.length >= 3 && !projStop.has(w))
+            );
+            const shared = projTokens.filter((w) => rowTokens.has(w));
+            const unionCount = new Set([...projTokens, ...rowTokens]).size;
+            if (shared.length >= 2 || (shared.length >= 1 && unionCount > 0 && shared.length / unionCount >= 0.45)) {
+              existingTargetId = Number(row.id);
+              break;
+            }
+          }
         }
       }
 
@@ -508,25 +535,24 @@ export class MemoryService {
         }
       }
 
-      // Domain F: Jadwal & Pengingat Waktu
+      // Domain F: Jadwal & Pengingat Waktu (cocokkan berdasarkan jam DAN konteks waktu/kegiatan yang sama)
       const isSchedule = validCategory === "jadwal" || /jadwal|pengingat|agenda/i.test(cleanFact);
       if (!existingTargetId && isSchedule) {
         const timeMatch = cleanFact.match(/(?:jam|pukul)\s*(\d+(?::\d+)?)/i);
         if (timeMatch && timeMatch[1]) {
-          const candidate = await db.execute({
-            sql: "SELECT id, fact FROM user_profile WHERE (category = 'jadwal' OR fact LIKE '%jadwal%' OR fact LIKE '%pengingat%') AND fact LIKE ? LIMIT 1",
+          const candidates = await db.execute({
+            sql: "SELECT id, fact FROM user_profile WHERE (category = 'jadwal' OR fact LIKE '%jadwal%' OR fact LIKE '%pengingat%') AND fact LIKE ? LIMIT 10",
             args: [`%${timeMatch[1]}%`],
           });
-          if (candidate.rows.length > 0) {
-            existingTargetId = Number(candidate.rows[0].id);
-          }
-        }
-        if (!existingTargetId) {
-          const candidate = await db.execute(
-            "SELECT id, fact FROM user_profile WHERE category = 'jadwal' OR fact LIKE '%Pengingat kegiatan%' LIMIT 1"
-          );
-          if (candidate.rows.length > 0) {
-            existingTargetId = Number(candidate.rows[0].id);
+          const schedStop = new Set(["jadwal", "pengingat", "agenda", "kegiatan", "jam", "pukul", "pada", "hari", "besok", "nanti", "minggu", "rafli", "pengguna", "untuk", "dengan"]);
+          const newWords = new Set(cleanFact.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !schedStop.has(w)));
+          for (const row of candidates.rows) {
+            const oldWords = new Set(String(row.fact || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !schedStop.has(w)));
+            const overlap = [...newWords].filter((w) => oldWords.has(w)).length;
+            if (overlap >= 1) {
+              existingTargetId = Number(row.id);
+              break;
+            }
           }
         }
       }
@@ -542,34 +568,46 @@ export class MemoryService {
         }
       }
 
-      // Domain H: Pencocokan Kata Kunci Entitas Non-Stopwords
+      // Domain H: Jaccard Similarity Overlap pada Kategori yang Sama (mencegah penimpaan kata tunggal)
       if (!existingTargetId) {
         const stopwords = new Set([
           "suka", "minum", "makan", "adalah", "kopi", "kesukaan", "favorit", "utamanya",
           "orang", "terkasih", "pengguna", "bernama", "seorang", "celyn", "rafli", "minuman", "makanan",
           "saya", "aku", "gue", "gw", "kamu", "dia", "itu", "ini", "pada", "yang", "juga", "dari", "banget", "paling",
           "sedang", "mengerjakan", "membuat", "bikin", "rencana", "topik", "dibahas", "bersama", "cerita", "pengalaman",
-          "catatan", "fakta", "informasi", "kegiatan", "penting", "karena", "untuk", "dengan", "dan"
+          "catatan", "fakta", "informasi", "kegiatan", "penting", "karena", "untuk", "dengan", "dan", "atau", "tidak", "bukan",
+          "hari", "besok", "rumah", "kantor", "waktu", "punya", "sudah", "akan", "bisa", "hobi", "kerja"
         ]);
-        const words = cleanFact
-          .toLowerCase()
-          .replace(/[^a-z0-9\s]/g, " ")
-          .split(/\s+/)
-          .filter((w) => w.length >= 3 && !stopwords.has(w));
+        const extractTokens = (txt: string) =>
+          Array.from(
+            new Set(
+              txt
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, " ")
+                .split(/\s+/)
+                .filter((w) => w.length >= 3 && !stopwords.has(w))
+            )
+          );
 
-        for (const kw of words) {
-          const candidate = isCelyn
-            ? await db.execute({
-                sql: "SELECT id, fact FROM user_profile WHERE fact LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
-                args: [`%${kw}%`],
-              })
-            : await db.execute({
-                sql: "SELECT id, fact FROM user_profile WHERE fact NOT LIKE 'Celyn%' AND fact LIKE ? LIMIT 1",
-                args: [`%${kw}%`],
-              });
-          if (candidate.rows.length > 0) {
-            existingTargetId = Number(candidate.rows[0].id);
-            break;
+        const words = extractTokens(cleanFact);
+        if (words.length > 0) {
+          const scopeSql = isCelyn
+            ? "SELECT id, fact FROM user_profile WHERE category = ? AND fact LIKE 'Celyn%' ORDER BY updated_at DESC LIMIT 30"
+            : "SELECT id, fact FROM user_profile WHERE category = ? AND fact NOT LIKE 'Celyn%' ORDER BY updated_at DESC LIMIT 30";
+          const candidates = await db.execute({ sql: scopeSql, args: [validCategory] });
+
+          for (const row of candidates.rows) {
+            const candidateWords = extractTokens(String(row.fact || ""));
+            if (candidateWords.length === 0) continue;
+            const candidateSet = new Set(candidateWords);
+            const shared = words.filter((w) => candidateSet.has(w));
+            const unionCount = new Set([...words, ...candidateWords]).size;
+            const jaccard = unionCount > 0 ? shared.length / unionCount : 0;
+
+            if (shared.length >= 3 && jaccard >= 0.65) {
+              existingTargetId = Number(row.id);
+              break;
+            }
           }
         }
       }
@@ -616,8 +654,9 @@ export class MemoryService {
     if (!db) return 0;
 
     try {
+      // Sesuaikan batas waktu retensi ke zona waktu WIB (Asia/Jakarta, UTC+7)
       const res = await db.execute(
-        "DELETE FROM chat_logs WHERE created_at < datetime('now', '-30 days')"
+        "DELETE FROM chat_logs WHERE created_at < datetime('now', '+7 hours', '-30 days')"
       );
       const affected = res.rowsAffected || 0;
       if (affected > 0) {
@@ -628,6 +667,14 @@ export class MemoryService {
       console.warn("[MEMORY] ⚠️ Gagal melakukan auto-prune chat_logs:", err);
       return 0;
     }
+  }
+
+  /**
+   * Menghapus buffer percakapan sementara di RAM saat sesi WebSocket terputus.
+   */
+  cleanupSessionBuffer(sessionId?: string): void {
+    if (!sessionId) return;
+    this.sessionBuffers.delete(sessionId);
   }
 
   /**

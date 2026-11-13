@@ -95,6 +95,8 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   }, [emotion, mouthOpen, intonation, isSpeaking, lookAt, rigConfig]);
 
   // Mouse & Touch gaze tracking (Dukungan Sentuh Jari di Layar HP tanpa re-render)
+  const lastMouseMoveTimeRef = useRef<number>(0);
+
   useEffect(() => {
     const handleMove = (clientX: number, clientY: number) => {
       if (!containerRef.current) return;
@@ -102,6 +104,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
       const normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
       mousePosRef.current = { x: normX, y: normY };
+      lastMouseMoveTimeRef.current = performance.now();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -168,6 +171,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
   useEffect(() => {
     let animId: number;
     const startTime = performance.now();
+    let lastRenderTime = 0;
 
     // State lerp kinematika 2.5D volumetrik & intonasi vokal
     let currPitch = 0;
@@ -178,7 +182,16 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
     let currShiftX = 0;
 
     const loop = (now: number) => {
-      if (document.visibilityState !== "hidden") {
+      const snapshot = propsRef.current;
+      const isIdle =
+        !snapshot.isSpeaking &&
+        snapshot.mouthOpen < 0.02 &&
+        (snapshot.intonation || 0) < 0.02 &&
+        now - lastMouseMoveTimeRef.current > 800;
+
+      // Throttle adaptif ~24 FPS saat idle untuk menghemat CPU/baterai, naik ke 60 FPS saat aktif
+      if (document.visibilityState !== "hidden" && (!isIdle || now - lastRenderTime >= 42)) {
+        lastRenderTime = now;
         const {
           emotion: curEmotion,
           mouthOpen: curMouthOpen,
@@ -186,7 +199,7 @@ export const AvatarCanvas2D: React.FC<AvatarCanvas2DProps> = ({
           isSpeaking: curIsSpeaking,
           lookAt: curLookAt,
           rigConfig: curRig,
-        } = propsRef.current;
+        } = snapshot;
 
         const tSec = (now - startTime) / 1000;
 

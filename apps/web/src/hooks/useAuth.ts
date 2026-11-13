@@ -5,33 +5,27 @@ export type { AuthMode };
 
 const AUTH_STORAGE_KEY = "celyn_auth_token";
 const AUTH_MODE_KEY = "celyn_auth_mode";
-const AUTH_PASSWORD_KEY = "celyn_auth_pass";
+const LEGACY_AUTH_PASSWORD_KEY = "celyn_auth_pass";
 const AUTH_REMEMBER_KEY = "celyn_auth_remember";
 const FAILED_ATTEMPTS_KEY = "celyn_auth_failed_attempts";
 const LOCKOUT_KEY = "celyn_auth_lockout_until";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 30 * 1000; // 30 detik
-const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 jam TTL
+
+// Bersihkan sisa penyimpanan password plaintext lama jika masih tersisa di browser
+try {
+  sessionStorage.removeItem(LEGACY_AUTH_PASSWORD_KEY);
+  localStorage.removeItem(LEGACY_AUTH_PASSWORD_KEY);
+} catch {}
 
 export function isTokenValid(token: string | null): boolean {
   if (!token) return false;
   try {
-    if (token.includes(".")) {
-      const [payloadB64] = token.split(".");
-      const jsonStr = atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/"));
-      const payload = JSON.parse(jsonStr);
-      return Boolean(payload.exp && payload.exp > Math.floor(Date.now() / 1000));
-    }
-    const decoded = atob(token);
-    if (!decoded.startsWith("celyn_auth:")) return false;
-    const parts = decoded.split(":");
-    const timestamp = parseInt(parts[1], 10);
-    if (isNaN(timestamp)) return false;
-    // Cek apakah token telah melebihi masa aktif (12 jam)
-    if (Date.now() - timestamp > TOKEN_TTL_MS) {
-      return false;
-    }
-    return true;
+    if (!token.includes(".")) return false;
+    const [payloadB64] = token.split(".");
+    const jsonStr = atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(jsonStr);
+    return Boolean(payload.exp && payload.exp > Math.floor(Date.now() / 1000));
   } catch {
     return false;
   }
@@ -46,36 +40,37 @@ export function getStoredAuthToken(): string | null {
 }
 
 export function getStoredAuthMode(): AuthMode {
-  const sessionPass = sessionStorage.getItem(AUTH_PASSWORD_KEY);
-  const localPass = localStorage.getItem(AUTH_PASSWORD_KEY);
-  if (sessionPass === "admin" || localPass === "admin") return "jocelyn";
+  const token = getStoredAuthToken();
+  if (token && token.includes(".")) {
+    try {
+      const [payloadB64] = token.split(".");
+      const jsonStr = atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/"));
+      const payload = JSON.parse(jsonStr);
+      if (payload.m === "jocelyn" || payload.m === "default") {
+        return payload.m as AuthMode;
+      }
+    } catch {}
+  }
 
   const sessionMode = sessionStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;
   if (sessionMode === "jocelyn" || sessionMode === "default") return sessionMode;
   const localMode = localStorage.getItem(AUTH_MODE_KEY) as AuthMode | null;
   if (localMode === "jocelyn" || localMode === "default") return localMode;
 
-  // Fallback pengaman: Periksa token auth yang tersimpan jika key mode belum sinkron
-  const token = sessionStorage.getItem(AUTH_STORAGE_KEY) || localStorage.getItem(AUTH_STORAGE_KEY);
-  if (token) {
-    try {
-      const decoded = atob(token);
-      const parts = decoded.split(":");
-      if (parts[2] === "jocelyn" || parts[2] === "default") {
-        return parts[2] as AuthMode;
-      }
-    } catch {}
-  }
-
   return "default";
 }
 
-export function getStoredAuthPassword(): string {
-  const sessionPass = sessionStorage.getItem(AUTH_PASSWORD_KEY);
-  if (sessionPass) return sessionPass;
-  const localPass = localStorage.getItem(AUTH_PASSWORD_KEY);
-  if (localPass) return localPass;
-  return getStoredAuthMode() === "jocelyn" ? "admin" : "login";
+export function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra || {}) };
+  const token = getStoredAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+  if (customKey) {
+    headers["x-gemini-key"] = customKey;
+  }
+  return headers;
 }
 
 export function useAuth() {
@@ -141,45 +136,47 @@ export function useAuth() {
         return false;
       }
 
-      const trimmed = inputPassword.trim().toLowerCase();
+      const rawPassword = inputPassword.trim();
+      if (!rawPassword) {
+        setError("Kata sandi tidak boleh kosong.");
+        return false;
+      }
 
-      // Coba verifikasi server-side (HMAC signed token)
+      // Wajib verifikasi server-side (HMAC signed token) — tanpa bypass client-side
       let verifiedMode: AuthMode | null = null;
       let sessionToken: string | null = null;
+      let serverError: string | null = null;
 
       try {
         const resp = await fetch("/api/auth/verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: trimmed }),
+          body: JSON.stringify({ password: rawPassword }),
         });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.valid && data.mode) {
-            verifiedMode = data.mode;
-            sessionToken = data.token || null;
-          }
+        const data = await resp.json().catch(() => null);
+        if (resp.ok && data?.valid && data?.mode && data?.token) {
+          verifiedMode = data.mode;
+          sessionToken = data.token;
+        } else if (resp.status >= 500) {
+          serverError = data?.error || "Server autentikasi mengalami gangguan konfigurasi.";
         }
       } catch {
-        // Fallback jika server lokal/offline belum siap
+        serverError = "Tidak dapat menjangkau server autentikasi. Pastikan backend berjalan.";
       }
 
-      // Kredensial mandatori: 'admin' (mode jocelyn) dan 'login' (mode default)
-      if (!verifiedMode && (trimmed === "admin" || trimmed === "login")) {
-        verifiedMode = trimmed === "admin" ? "jocelyn" : "default";
+      if (serverError) {
+        setError(serverError);
+        return false;
       }
 
-      if (verifiedMode) {
-        const token = sessionToken || btoa(`celyn_auth:${Date.now()}:${verifiedMode}`);
+      if (verifiedMode && sessionToken) {
         if (rememberMe) {
-          localStorage.setItem(AUTH_STORAGE_KEY, token);
+          localStorage.setItem(AUTH_STORAGE_KEY, sessionToken);
           localStorage.setItem(AUTH_MODE_KEY, verifiedMode);
-          localStorage.setItem(AUTH_PASSWORD_KEY, trimmed);
           localStorage.setItem(AUTH_REMEMBER_KEY, "true");
         } else {
-          sessionStorage.setItem(AUTH_STORAGE_KEY, token);
+          sessionStorage.setItem(AUTH_STORAGE_KEY, sessionToken);
           sessionStorage.setItem(AUTH_MODE_KEY, verifiedMode);
-          sessionStorage.setItem(AUTH_PASSWORD_KEY, trimmed);
         }
 
         localStorage.removeItem(FAILED_ATTEMPTS_KEY);
@@ -213,10 +210,10 @@ export function useAuth() {
   const logout = useCallback(() => {
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
     sessionStorage.removeItem(AUTH_MODE_KEY);
-    sessionStorage.removeItem(AUTH_PASSWORD_KEY);
+    sessionStorage.removeItem(LEGACY_AUTH_PASSWORD_KEY);
     localStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(AUTH_MODE_KEY);
-    localStorage.removeItem(AUTH_PASSWORD_KEY);
+    localStorage.removeItem(LEGACY_AUTH_PASSWORD_KEY);
     localStorage.removeItem(AUTH_REMEMBER_KEY);
     setIsAuthenticated(false);
     setError(null);

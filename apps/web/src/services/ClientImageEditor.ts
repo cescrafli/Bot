@@ -45,8 +45,11 @@ export interface CompositePhotoOptions {
   aspectRatio?: "original" | "1:1" | "16:9" | "4:3";
   brightness?: number; // -50 s.d 50
   contrast?: number; // -50 s.d 50
+  saturation?: number; // -50 s.d 50
   grayscale?: boolean;
+  invert?: boolean;
   watermarkText?: string;
+  watermarkColor?: string;
   outputFormat?: "png" | "jpeg" | "webp";
 }
 
@@ -161,9 +164,9 @@ export class ClientImageEditor {
   }
 
   /**
-   * Ekstraksi Alpha Mask Subjek Utama menggunakan Perimeter Color Sampling + Bounding Box Guidance.
-   * Menjamin orang/subjek di tengah foto terisolasi dengan tepi halus (alpha feathering)
-   * tanpa merusak wajah atau pakaian.
+   * Mengekstrak mask subjek depan (foreground) menggunakan Multi-Cluster Border Palette
+   * flood-fill dan Connected-Component Retention agar ornamen latar (bunga/daun/tekstur)
+   * ikut terklasifikasi sebagai background tanpa memotong kaki atau siluet karakter.
    */
   static extractForegroundSubjectMask(
     img: HTMLImageElement,
@@ -172,7 +175,6 @@ export class ClientImageEditor {
     const width = img.naturalWidth || img.width;
     const height = img.naturalHeight || img.height;
 
-    // Canvas untuk memproses piksel
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -182,87 +184,348 @@ export class ClientImageEditor {
     ctx.drawImage(img, 0, 0, width, height);
     const imgData = ctx.getImageData(0, 0, width, height);
     const data = imgData.data;
+    const total = width * height;
+    const isBg = new Uint8Array(total);
 
-    // Hitung area batas subjek (jika ada, atau asumsikan 60% area tengah)
+    const colorDist = (
+      r1: number,
+      g1: number,
+      b1: number,
+      r2: number,
+      g2: number,
+      b2: number
+    ): number => {
+      const dr = r1 - r2;
+      const dg = g1 - g2;
+      const db = b1 - b2;
+      return Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11);
+    };
+
+    // 1. Kumpulkan palet warna tepi terkuantisasi (deduplikasi jarak <= 14 agar BFS sangat cepat)
+    const borderSamples: Array<[number, number, number]> = [];
+    const stepX = Math.max(1, Math.floor(width / 60));
+    const stepY = Math.max(1, Math.floor(height / 60));
+
+    const pushSample = (x: number, y: number) => {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      for (let i = 0; i < borderSamples.length; i++) {
+        const s = borderSamples[i];
+        if (colorDist(r, g, b, s[0], s[1], s[2]) <= 14) return;
+      }
+      borderSamples.push([r, g, b]);
+    };
+
+    for (let x = 0; x < width; x += stepX) {
+      pushSample(x, 2);
+      pushSample(x, Math.min(height - 1, Math.floor(height * 0.08)));
+      // Sudut bawah kiri/kanan saja agar bagian tengah-bawah (kaki/baju subjek) tidak dijadikan sampel latar
+      if (x < width * 0.22 || x > width * 0.78) {
+        pushSample(x, Math.max(0, height - 3));
+      }
+    }
+    for (let y = 0; y < height; y += stepY) {
+      pushSample(2, y);
+      pushSample(Math.max(0, width - 3), y);
+    }
+
+    const matchesBorderPalette = (r: number, g: number, b: number, threshold: number): boolean => {
+      for (let i = 0; i < borderSamples.length; i++) {
+        const s = borderSamples[i];
+        if (colorDist(r, g, b, s[0], s[1], s[2]) <= threshold) return true;
+      }
+      return false;
+    };
+
+    // 2. Flood-fill BFS dari tepi luar, berhenti pada outline tinta gelap (maxCh < 26)
+    const queue = new Int32Array(total);
+    let head = 0;
+    let tail = 0;
+
+    const trySeed = (x: number, y: number) => {
+      const p = y * width + x;
+      if (isBg[p]) return;
+      const idx = p * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      if (Math.max(r, g, b) < 26) return;
+      isBg[p] = 1;
+      queue[tail++] = p;
+    };
+
+    for (let x = 0; x < width; x++) {
+      trySeed(x, 0);
+      if (x < width * 0.22 || x > width * 0.78) {
+        trySeed(x, height - 1);
+      }
+    }
+    for (let y = 0; y < height; y++) {
+      trySeed(0, y);
+      trySeed(width - 1, y);
+    }
+
+    while (head < tail) {
+      const curr = queue[head++];
+      const cx = curr % width;
+      const cy = (curr - cx) / width;
+      const cIdx = curr * 4;
+      const cr = data[cIdx];
+      const cg = data[cIdx + 1];
+      const cb = data[cIdx + 2];
+
+      const n0 = cx > 0 ? curr - 1 : -1;
+      const n1 = cx < width - 1 ? curr + 1 : -1;
+      const n2 = cy > 0 ? curr - width : -1;
+      const n3 = cy < height - 1 ? curr + width : -1;
+
+      for (let ni = 0; ni < 4; ni++) {
+        const np = ni === 0 ? n0 : ni === 1 ? n1 : ni === 2 ? n2 : n3;
+        if (np < 0 || isBg[np]) continue;
+        const nIdx = np * 4;
+        const nr = data[nIdx];
+        const ng = data[nIdx + 1];
+        const nb = data[nIdx + 2];
+
+        // Jangan menembus garis tinta hitam karakter
+        if (Math.max(nr, ng, nb) < 26) continue;
+
+        const localStepDist = colorDist(cr, cg, cb, nr, ng, nb);
+        if (localStepDist <= 30 && matchesBorderPalette(nr, ng, nb, 58)) {
+          isBg[np] = 1;
+          queue[tail++] = np;
+        }
+      }
+    }
+
+    // 3. Connected-Component Foreground Retention: pertahankan siluet utama & komponen bermakna dalam subjectBox
     const boxLeft = subjectBox ? Math.floor((subjectBox.xmin / 1000) * width) : Math.floor(width * 0.18);
     const boxTop = subjectBox ? Math.floor((subjectBox.ymin / 1000) * height) : Math.floor(height * 0.12);
     const boxRight = subjectBox ? Math.ceil((subjectBox.xmax / 1000) * width) : Math.ceil(width * 0.82);
     const boxBottom = subjectBox ? Math.ceil((subjectBox.ymax / 1000) * height) : Math.ceil(height * 0.95);
 
-    // Ambil sampel warna tepi luar (top, left, right)
-    const borderSamples: Array<[number, number, number]> = [];
-    const stepX = Math.max(1, Math.floor(width / 40));
-    const stepY = Math.max(1, Math.floor(height / 40));
+    const visited = new Uint8Array(total);
+    const components: Array<{ pixels: number[]; boxOverlap: number }> = [];
+    let largestLen = 0;
 
-    // Sampel tepi atas
-    for (let x = 0; x < width; x += stepX) {
-      const idx = (0 * width + x) * 4;
-      borderSamples.push([data[idx], data[idx + 1], data[idx + 2]]);
+    for (let i = 0; i < total; i++) {
+      if (isBg[i] || visited[i]) continue;
+      const comp: number[] = [i];
+      let boxOverlap = 0;
+      let qHead = 0;
+      visited[i] = 1;
+
+      while (qHead < comp.length) {
+        const p = comp[qHead++];
+        const px = p % width;
+        const py = (p - px) / width;
+        if (px >= boxLeft && px <= boxRight && py >= boxTop && py <= boxBottom) {
+          boxOverlap++;
+        }
+
+        if (px > 0 && !isBg[p - 1] && !visited[p - 1]) {
+          visited[p - 1] = 1;
+          comp.push(p - 1);
+        }
+        if (px < width - 1 && !isBg[p + 1] && !visited[p + 1]) {
+          visited[p + 1] = 1;
+          comp.push(p + 1);
+        }
+        if (py > 0 && !isBg[p - width] && !visited[p - width]) {
+          visited[p - width] = 1;
+          comp.push(p - width);
+        }
+        if (py < height - 1 && !isBg[p + width] && !visited[p + width]) {
+          visited[p + width] = 1;
+          comp.push(p + width);
+        }
+      }
+
+      if (comp.length > largestLen) largestLen = comp.length;
+      components.push({ pixels: comp, boxOverlap });
     }
-    // Sampel tepi kiri dan kanan
-    for (let y = 0; y < height; y += stepY) {
-      const idxL = (y * width + 0) * 4;
-      borderSamples.push([data[idxL], data[idxL + 1], data[idxL + 2]]);
-      const idxR = (y * width + (width - 1)) * 4;
-      borderSamples.push([data[idxR], data[idxR + 1], data[idxR + 2]]);
+
+    const finalSubjectMask = new Uint8Array(total);
+    for (const c of components) {
+      const isPrimary = c.pixels.length === largestLen;
+      const isSignificantInsideBox =
+        c.pixels.length >= Math.max(120, Math.round(largestLen * 0.08)) &&
+        c.boxOverlap >= c.pixels.length * 0.5;
+      if (isPrimary || isSignificantInsideBox) {
+        for (let k = 0; k < c.pixels.length; k++) {
+          finalSubjectMask[c.pixels[k]] = 1;
+        }
+      }
     }
 
-    // Fungsi menghitung jarak Euclidean warna
-    const colorDist = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) => {
-      const dr = r1 - r2;
-      const dg = g1 - g2;
-      const db = b1 - b2;
-      return Math.sqrt(dr * dr + dg * dg + db * db);
-    };
-
-    // Threshold jarak warna (semakin mirip dengan tepi, semakin dianggap latar)
-    const threshold = 48;
-    const featherRange = 22;
-
+    // 4. Terapkan alpha mask dengan feathering 1px pada batas siluet
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-
-        // Jika berada di zona aman inti subjek (elips lembut di wajah & dada), pertahankan 100% utuh
-        const centerX = (boxLeft + boxRight) / 2;
-        const centerY = (boxTop + boxBottom) / 2;
-        const radiusX = Math.max(1, (boxRight - boxLeft) * 0.42);
-        const radiusY = Math.max(1, (boxBottom - boxTop) * 0.45);
-        const normDx = (x - centerX) / radiusX;
-        const normDy = (y - centerY) / radiusY;
-        const ellipDist = normDx * normDx + normDy * normDy;
-
-        if (ellipDist <= 0.65) {
-          // Subjek inti pasti terlihat (alpha = 255)
-          data[idx + 3] = 255;
+        const p = y * width + x;
+        const idx = p * 4;
+        if (!finalSubjectMask[p]) {
+          data[idx + 3] = 0;
           continue;
         }
-
-        // Cari jarak terkecil ke sampel latar belakang tepi
-        let minDist = 999;
-        for (let s = 0; s < borderSamples.length; s += 2) {
-          const sample = borderSamples[s];
-          const d = colorDist(r, g, b, sample[0], sample[1], sample[2]);
-          if (d < minDist) minDist = d;
-          if (minDist < threshold) break;
-        }
-
-        if (minDist <= threshold) {
-          // Latar belakang murni -> transparan
-          data[idx + 3] = 0;
-        } else if (minDist < threshold + featherRange) {
-          // Tepi transisi (feathering halus untuk rambut/bahu)
-          const factor = (minDist - threshold) / featherRange;
-          data[idx + 3] = Math.round(factor * 255);
-        }
+        const touchesBg =
+          (x > 0 && !finalSubjectMask[p - 1]) ||
+          (x < width - 1 && !finalSubjectMask[p + 1]) ||
+          (y > 0 && !finalSubjectMask[p - width]) ||
+          (y < height - 1 && !finalSubjectMask[p + width]);
+        data[idx + 3] = touchesBg ? 185 : 255;
       }
     }
 
     ctx.putImageData(imgData, 0, 0);
     return canvas;
+  }
+
+  /**
+   * Estimasi kotak batas anatomi secara lokal berbasis deteksi cluster warna kulit (skin-tone)
+   * sehingga mode offline / fallback tetap akurat untuk potret mana pun tanpa koordinat hardcoded.
+   */
+  private static detectAnatomyBoxesLocally(
+    data: Uint8ClampedArray,
+    width: number,
+    height: number,
+    targetPart: string
+  ): { targetBoxes: BoundingBox01000[]; excludeBoxes: BoundingBox01000[] } {
+    const stride = Math.max(2, Math.round(Math.min(width, height) / 180));
+    const maxFaceScanY = Math.floor(height * 0.72);
+    const xs: number[] = [];
+    const ys: number[] = [];
+
+    for (let y = Math.floor(height * 0.06); y < maxFaceScanY; y += stride) {
+      for (let x = Math.floor(width * 0.05); x < Math.floor(width * 0.95); x += stride) {
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const a = data[idx + 3];
+        if (a < 128) continue;
+
+        const maxCh = Math.max(r, g, b);
+        const minCh = Math.min(r, g, b);
+        if (
+          r > 95 &&
+          g > 40 &&
+          b > 20 &&
+          r > g &&
+          r > b &&
+          r - b > 15 &&
+          Math.abs(r - g) < 115 &&
+          maxCh - minCh > 15
+        ) {
+          xs.push((x / width) * 1000);
+          ys.push((y / height) * 1000);
+        }
+      }
+    }
+
+    let faceBox: BoundingBox01000 | null = null;
+    if (xs.length >= 25) {
+      const sortedX = [...xs].sort((a, b) => a - b);
+      const sortedY = [...ys].sort((a, b) => a - b);
+      const medX = sortedX[Math.floor(sortedX.length * 0.5)];
+      const medY = sortedY[Math.floor(sortedY.length * 0.5)];
+
+      // Saring outlier (misal tangan di tepi) agar hanya mengambil klaster wajah utama
+      const clusterX = sortedX.filter((vx) => Math.abs(vx - medX) <= 180);
+      const clusterY = sortedY.filter((vy) => Math.abs(vy - medY) <= 180);
+
+      if (clusterX.length >= 15 && clusterY.length >= 15) {
+        const xmin = clusterX[Math.floor(clusterX.length * 0.08)];
+        const xmax = clusterX[Math.floor(clusterX.length * 0.92)];
+        const ymin = clusterY[Math.floor(clusterY.length * 0.08)];
+        const ymax = clusterY[Math.floor(clusterY.length * 0.92)];
+        faceBox = {
+          ymin: Math.max(40, Math.round(ymin)),
+          xmin: Math.max(40, Math.round(xmin)),
+          ymax: Math.min(900, Math.round(Math.max(ymin + 85, ymax))),
+          xmax: Math.min(960, Math.round(Math.max(xmin + 85, xmax))),
+        };
+      }
+    }
+
+    if (faceBox) {
+      const fW = Math.max(90, faceBox.xmax - faceBox.xmin);
+      const fH = Math.max(90, faceBox.ymax - faceBox.ymin);
+
+      if (targetPart === "hair") {
+        return {
+          targetBoxes: [
+            {
+              ymin: Math.max(0, Math.round(faceBox.ymin - fH * 0.65)),
+              xmin: Math.max(0, Math.round(faceBox.xmin - fW * 0.5)),
+              ymax: Math.min(1000, Math.round(faceBox.ymin + fH * 0.85)),
+              xmax: Math.min(1000, Math.round(faceBox.xmax + fW * 0.5)),
+            },
+          ],
+          excludeBoxes: [
+            {
+              ymin: Math.round(faceBox.ymin + fH * 0.16),
+              xmin: Math.round(faceBox.xmin + fW * 0.12),
+              ymax: Math.round(faceBox.ymax),
+              xmax: Math.round(faceBox.xmax - fW * 0.12),
+            },
+            {
+              ymin: Math.min(990, Math.round(faceBox.ymax + fH * 0.05)),
+              xmin: Math.max(0, Math.round(faceBox.xmin - fW * 0.9)),
+              ymax: 1000,
+              xmax: Math.min(1000, Math.round(faceBox.xmax + fW * 0.9)),
+            },
+          ],
+        };
+      }
+
+      if (targetPart === "face" || targetPart === "skin") {
+        return { targetBoxes: [faceBox], excludeBoxes: [] };
+      }
+
+      if (
+        targetPart === "clothes" ||
+        targetPart === "suit" ||
+        targetPart === "shirt" ||
+        targetPart === "baju"
+      ) {
+        return {
+          targetBoxes: [
+            {
+              ymin: Math.min(980, Math.round(faceBox.ymax - fH * 0.05)),
+              xmin: Math.max(0, Math.round(faceBox.xmin - fW * 1.1)),
+              ymax: Math.min(1000, Math.round(faceBox.ymax + fH * 3.0)),
+              xmax: Math.min(1000, Math.round(faceBox.xmax + fW * 1.1)),
+            },
+          ],
+          excludeBoxes: [faceBox],
+        };
+      }
+    }
+
+    // Fallback anatomi simetris netral (jika potret tidak terdeteksi cluster kulitnya)
+    if (targetPart === "hair") {
+      return {
+        targetBoxes: [{ ymin: 70, xmin: 220, ymax: 480, xmax: 780 }],
+        excludeBoxes: [
+          { ymin: 220, xmin: 340, ymax: 460, xmax: 660 },
+          { ymin: 480, xmin: 180, ymax: 980, xmax: 820 },
+        ],
+      };
+    }
+
+    if (targetPart === "clothes" || targetPart === "suit" || targetPart === "shirt" || targetPart === "baju") {
+      return {
+        targetBoxes: [{ ymin: 420, xmin: 200, ymax: 960, xmax: 800 }],
+        excludeBoxes: [{ ymin: 150, xmin: 320, ymax: 440, xmax: 680 }],
+      };
+    }
+
+    return {
+      targetBoxes: [{ ymin: 120, xmin: 120, ymax: 880, xmax: 880 }],
+      excludeBoxes: [],
+    };
   }
 
   /**
@@ -337,11 +600,16 @@ export class ClientImageEditor {
     const targetRgb = parseHexToRgb(resolvedTargetHex) || [255, 255, 255];
     const isTargetWhite = targetRgb[0] >= 220 && targetRgb[1] >= 220 && targetRgb[2] >= 220;
 
-    // Normalisasi Target Boxes (skala 0..1000 -> koordinat piksel)
+    // Normalisasi Target & Exclude Boxes secara dinamis berbasis anatomi lokal bila belum dipasok AI
+    const localAnatomy =
+      !targetBoxes || targetBoxes.length === 0 || (targetPart === "hair" && (!excludeBoxes || excludeBoxes.length === 0))
+        ? this.detectAnatomyBoxesLocally(data, width, height, targetPart)
+        : null;
+
     const rawTargetBoxes =
       targetBoxes && targetBoxes.length > 0
         ? targetBoxes
-        : [{ ymin: 160, xmin: 180, ymax: 470, xmax: 510 }];
+        : localAnatomy!.targetBoxes;
 
     // Untuk target "hair", berikan auto-expansion ke atas dan samping agar mahkota & ujung rambut tidak terpotong
     const activeBoxes = rawTargetBoxes.map((b) => {
@@ -369,12 +637,7 @@ export class ClientImageEditor {
     const rawExcludeBoxes =
       excludeBoxes && excludeBoxes.length > 0
         ? excludeBoxes
-        : targetPart === "hair"
-        ? [
-            { ymin: 250, xmin: 280, ymax: 445, xmax: 440 },
-            { ymin: 450, xmin: 220, ymax: 950, xmax: 580 },
-          ]
-        : [];
+        : localAnatomy?.excludeBoxes || [];
 
     const pixelExcludeBoxes = rawExcludeBoxes.map((b) => ({
       minX: Math.max(0, Math.floor((b.xmin / 1000) * width)),
@@ -459,7 +722,9 @@ export class ClientImageEditor {
           if (a < 30) continue;
 
           const maxVal = Math.max(r, g, b);
-          if (maxVal < 22) continue;
+          const lumCheck = 0.299 * r + 0.587 * g + 0.114 * b;
+          // Pertahankan garis tinta hitam (ink outline) dan bayangan lipatan terdalam
+          if (maxVal < 36 && lumCheck < 32) continue;
 
           let minSourceDist = 9999;
           for (const sc of sourceClusters) {
@@ -505,11 +770,15 @@ export class ClientImageEditor {
           newG = Math.round(236 + normalizedLum * 19);
           newB = Math.round(244 + normalizedLum * 11);
         } else {
-          // Transfer warna dengan preservasi kontras pencahayaan
-          const lumFactor = Math.max(0.25, lum / 128);
-          newR = Math.min(255, Math.round(targetRgb[0] * (0.35 + 0.65 * lumFactor)));
-          newG = Math.min(255, Math.round(targetRgb[1] * (0.35 + 0.65 * lumFactor)));
-          newB = Math.min(255, Math.round(targetRgb[2] * (0.35 + 0.65 * lumFactor)));
+          // Kurva Soft-Shadow Luminance Preservation: bayangan gelap meredup proporsional tanpa menjadi stiker datar
+          const normalizedLum = lum / 255;
+          const shadowPreservingScale =
+            normalizedLum < 0.25
+              ? Math.pow(normalizedLum / 0.25, 1.35) * 0.45
+              : 0.45 + ((normalizedLum - 0.25) / 0.75) * 0.75;
+          newR = Math.min(255, Math.round(targetRgb[0] * shadowPreservingScale));
+          newG = Math.min(255, Math.round(targetRgb[1] * shadowPreservingScale));
+          newB = Math.min(255, Math.round(targetRgb[2] * shadowPreservingScale));
         }
 
         data[idx] = Math.round(r * (1 - weight) + newR * weight);
@@ -562,8 +831,11 @@ export class ClientImageEditor {
       aspectRatio = "original",
       brightness = 0,
       contrast = 0,
+      saturation = 0,
       grayscale = false,
+      invert = false,
       watermarkText = "",
+      watermarkColor = "#ffffff",
       outputFormat = "png",
     } = options;
 
@@ -619,13 +891,18 @@ export class ClientImageEditor {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Gagal menginisialisasi context canvas 2D");
 
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     ctx.save();
 
-    // Terapkan filter visual global (brightness, contrast, grayscale)
+    // Terapkan filter visual global (brightness, contrast, saturation, grayscale, invert)
     const filters = [
       `brightness(${100 + brightness}%)`,
       `contrast(${100 + contrast}%)`,
+      saturation !== 0 ? `saturate(${100 + saturation}%)` : "",
       grayscale ? "grayscale(100%)" : "",
+      invert ? "invert(100%)" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -732,7 +1009,7 @@ export class ClientImageEditor {
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect((canvas.width - textW) / 2 - pad, bannerY - pad, textW + pad * 2, fontSize + pad * 2);
 
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = watermarkColor || "#ffffff";
       ctx.fillText(text, canvas.width / 2, canvas.height - 24);
       ctx.restore();
     }

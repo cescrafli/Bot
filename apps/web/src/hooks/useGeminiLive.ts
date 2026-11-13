@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { ActiveDocJob } from "../components/controls/DocumentActionPill";
-import { getStoredAuthPassword, getStoredAuthMode, getStoredAuthToken } from "./useAuth";
+import { buildAuthHeaders, getStoredAuthMode, getStoredAuthToken } from "./useAuth";
 import {
   ClientMessage,
   ServerMessage,
@@ -121,6 +121,8 @@ export function useGeminiLive({
     );
   }, [activeDocuments]);
 
+  const canUndoPhoto = Boolean(activePhotoDoc?.editHistory && activePhotoDoc.editHistory.length > 0);
+
   const resetActivePhoto = useCallback(() => {
     setActiveDocuments((prev) =>
       prev.map((d) => {
@@ -129,6 +131,7 @@ export function useGeminiLive({
             ...d,
             previewDataUrl: d.originalPreviewDataUrl,
             transformedPreviewDataUrl: undefined,
+            editHistory: [],
           };
         }
         return d;
@@ -136,6 +139,53 @@ export function useGeminiLive({
     );
     setLastPhotoEditSummary("Foto dikembalikan ke versi asli.");
   }, []);
+
+  const undoActivePhoto = useCallback(() => {
+    setActiveDocuments((prev) =>
+      prev.map((d) => {
+        if (d.fileName === activePhotoDoc?.fileName && d.editHistory && d.editHistory.length > 0) {
+          const nextHistory = [...d.editHistory];
+          const previousPreview = nextHistory.pop()!;
+          const isBackToOriginal = previousPreview === d.originalPreviewDataUrl;
+          return {
+            ...d,
+            previewDataUrl: previousPreview,
+            transformedPreviewDataUrl: isBackToOriginal ? undefined : previousPreview,
+            editHistory: nextHistory,
+          };
+        }
+        return d;
+      })
+    );
+    setLastPhotoEditSummary("Langkah edit terakhir dibatalkan (Undo).");
+  }, [activePhotoDoc?.fileName]);
+
+  const applyEditedDocumentInPlace = useCallback(
+    (fileName: string, editedDataUrl: string, summary = "Hasil edit studio diterapkan.") => {
+      setActiveDocuments((prev) =>
+        prev.map((d) => {
+          if (d.fileName === fileName) {
+            const history = [...(d.editHistory || [])];
+            const prevUrl = d.previewDataUrl || d.originalPreviewDataUrl;
+            if (prevUrl && history[history.length - 1] !== prevUrl) {
+              history.push(prevUrl);
+            }
+            return {
+              ...d,
+              originalPreviewDataUrl: d.originalPreviewDataUrl || prevUrl,
+              previewDataUrl: editedDataUrl,
+              transformedPreviewDataUrl: editedDataUrl,
+              editHistory: history.slice(-15),
+            };
+          }
+          return d;
+        })
+      );
+      setIsPhotoStageVisible(true);
+      setLastPhotoEditSummary(summary);
+    },
+    []
+  );
 
   const wsRef = useRef<WebSocket | null>(null);
   const directSessionRef = useRef<any>(null);
@@ -163,6 +213,10 @@ export function useGeminiLive({
   const autoGreetingTimerRef = useRef<number | null>(null);
   const hasSentAutoGreetingRef = useRef<boolean>(false);
   const hasUserInitiatedTurnRef = useRef<boolean>(false);
+  const lastAiAudioEndTimeRef = useRef<number>(0);
+  const isInitialGreetingTurnRef = useRef<boolean>(true);
+  const directRawOutputBufferRef = useRef<string>("");
+  const directLastSentCleanLenRef = useRef<number>(0);
   const sessionWarningTimerRef = useRef<number | null>(null);
   const sessionMaxDurationTimerRef = useRef<number | null>(null);
   const disconnectRef = useRef<() => void>(() => {});
@@ -203,15 +257,14 @@ export function useGeminiLive({
   const sessionIdRef = useRef<string>(
     `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
   );
+  const connectionGenerationRef = useRef<number>(0);
   const directTurnCelynTextRef = useRef<string>("");
   const directUserTurnBufferRef = useRef<string>("");
   const lastRecordedTurnRef = useRef<{ role: string; content: string; time: number } | null>(null);
 
   const recordTurnToServer = useCallback((role: "user" | "assistant", content: string) => {
     const authMode = getStoredAuthMode();
-    const authPass = getStoredAuthPassword();
-    const isJocelynOrAdmin = authMode === "jocelyn" || authPass === "admin";
-    if (!isJocelynOrAdmin) return;
+    if (authMode !== "jocelyn") return;
     const clean = content.trim();
     if (!clean) return;
 
@@ -227,14 +280,7 @@ export function useGeminiLive({
     }
     lastRecordedTurnRef.current = { role, content: clean, time: now };
 
-    const token = getStoredAuthToken();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-admin-password": getStoredAuthPassword() || "admin",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+    const headers = buildAuthHeaders({ "Content-Type": "application/json" });
     const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
     if (customKey) {
       headers["x-gemini-key"] = customKey;
@@ -247,7 +293,6 @@ export function useGeminiLive({
         sessionId: sessionIdRef.current,
         role,
         content: clean,
-        password: getStoredAuthPassword() || "admin",
       }),
     })
       .then(async (res) => {
@@ -351,21 +396,12 @@ export function useGeminiLive({
     setLastPhotoEditSummary("Sedang memproses perubahan foto...");
 
     try {
-      const password = getStoredAuthPassword() || "admin";
-      const token = getStoredAuthToken();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-admin-password": password,
-      };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
-      if (customKey) headers["x-gemini-key"] = customKey;
+      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
-      const isRecolorOrReset =
-        action === "recolor_part" ||
+      const isExplicitReset =
         action === "reset" ||
-        /rambut|baju|jas|celana|kaos|dasi|sepatu|kupu|warna/i.test(instruction);
-      const sourceDataUrl = isRecolorOrReset
+        /\b(?:reset|asli|awal|original|semula|ulang dari awal|kembalikan)\b/i.test(instruction);
+      const sourceDataUrl = isExplicitReset
         ? (targetDoc.originalPreviewDataUrl || targetDoc.previewDataUrl || "")
         : (targetDoc.previewDataUrl || targetDoc.originalPreviewDataUrl || "");
       const thumb = await ClientImageEditor.createVisionThumbnail(sourceDataUrl, 800, 0.78);
@@ -397,6 +433,29 @@ export function useGeminiLive({
         editApiResult?.backgroundColorHex ||
         resolveIndonesianColor(args.backgroundColor) ||
         args.backgroundColor;
+      const fallbackTargetPart =
+        editApiResult?.targetPart ||
+        args.targetPart ||
+        (/\b(?:baju|jas|kemeja|kaos|pakaian|jacket|suit|shirt|clothes)\b/i.test(instruction)
+          ? "clothes"
+          : /\b(?:rambut|hair)\b/i.test(instruction)
+          ? "hair"
+          : undefined);
+      const colorMatch = instruction.match(
+        /\b(biru tua|biru muda|merah muda|abu-abu|putih|hitam|merah|biru|kuning|hijau|ungu|pink|oranye|jingga|coklat|cokelat|abu|silver|perak|emas|gold|pirang|blonde|cyan|navy)\b/i
+      );
+      const fallbackTargetColorHex =
+        editApiResult?.targetColorHex ||
+        resolveIndonesianColor(args.targetColor) ||
+        resolveIndonesianColor(colorMatch?.[1]) ||
+        undefined;
+      const fallbackEditMode =
+        editApiResult?.editMode ||
+        (action === "recolor_part"
+          ? "recolor_part"
+          : action === "replace_background" || action === "background_color"
+          ? "replace_background"
+          : undefined);
       const bgImageDataUrl = editApiResult?.backgroundImageDataUrl || undefined;
       const svgSceneMarkup = editApiResult?.svgSceneMarkup || undefined;
       const explanation =
@@ -406,13 +465,13 @@ export function useGeminiLive({
       const compositeResult = await ClientImageEditor.compositeEditedPhoto({
         sourceDataUrl,
         action: action as any,
-        editMode: editApiResult?.editMode,
-        targetPart: editApiResult?.targetPart,
+        editMode: fallbackEditMode,
+        targetPart: fallbackTargetPart,
         targetBoxes: editApiResult?.targetBoxes,
         excludeBoxes: editApiResult?.excludeBoxes,
         samplePoints: editApiResult?.samplePoints,
         sourceColorsHex: editApiResult?.sourceColorsHex,
-        targetColorHex: editApiResult?.targetColorHex,
+        targetColorHex: fallbackTargetColorHex,
         backgroundColor: resolvedBgHex,
         backgroundImageDataUrl: bgImageDataUrl,
         svgSceneMarkup,
@@ -424,6 +483,14 @@ export function useGeminiLive({
       });
 
       const newPreviewDataUrl = compositeResult.dataUrl;
+      const previousPreview = targetDoc.previewDataUrl || targetDoc.originalPreviewDataUrl;
+      if (previousPreview && previousPreview !== newPreviewDataUrl) {
+        const nextHistory = [...(targetDoc.editHistory || [])];
+        if (nextHistory[nextHistory.length - 1] !== previousPreview) {
+          nextHistory.push(previousPreview);
+        }
+        targetDoc.editHistory = nextHistory.slice(-15);
+      }
       targetDoc.previewDataUrl = newPreviewDataUrl;
       targetDoc.transformedPreviewDataUrl = newPreviewDataUrl;
       if (subjectBox) targetDoc.subjectBox = subjectBox;
@@ -474,6 +541,8 @@ export function useGeminiLive({
         bargeInMutedRef.current = false;
         directTurnHasOutputTranscriptionRef.current = false;
         directFallbackPartTextBufferRef.current = "";
+        directRawOutputBufferRef.current = "";
+        directLastSentCleanLenRef.current = 0;
         if (autoGreetingTimerRef.current) {
           clearTimeout(autoGreetingTimerRef.current);
           autoGreetingTimerRef.current = null;
@@ -613,28 +682,23 @@ export function useGeminiLive({
    * langsung dari browser tanpa perlu server WebSocket persisten port 3001.
    */
   const connectViaServerlessToken = useCallback(async (voicePreference?: string) => {
+    const directGen = ++connectionGenerationRef.current;
     try {
       setStatus("connecting");
-      setStatusMessage("Meminta token sesi aman dari Vercel Serverless...");
-
-      const authPass = getStoredAuthPassword() || "admin";
-      const token = getStoredAuthToken();
-      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
+      setStatusMessage("Meminta token sesi aman dari layanan Celyn...");
 
       const queryParams = new URLSearchParams();
-      if (voicePreference) queryParams.set("voice", voicePreference);
+      if (voicePreference) {
+        queryParams.set("voice", voicePreference);
+      }
       if (shouldRotateKeyRef.current) {
         queryParams.set("rotate", "1");
         shouldRotateKeyRef.current = false;
       }
       const queryStr = queryParams.toString() ? `?${queryParams.toString()}` : "";
 
-      const headers: Record<string, string> = {
-        "x-admin-password": authPass,
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+      const headers = buildAuthHeaders();
+      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
       if (customKey) {
         headers["x-gemini-key"] = customKey;
       }
@@ -677,7 +741,7 @@ export function useGeminiLive({
         // Pipelined parallel prefetch synthesis via /api/tts
         const fetchPromise = fetch("/api/tts", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildAuthHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             text: sentence,
             voice: activeVoice,
@@ -1008,6 +1072,8 @@ export function useGeminiLive({
             if (msg.serverContent?.interrupted) {
               bargeInMutedRef.current = false;
               directTurnCelynTextRef.current = "";
+              directRawOutputBufferRef.current = "";
+              directLastSentCleanLenRef.current = 0;
               if (directUserTurnBufferRef.current.trim()) {
                 recordTurnToServer("user", directUserTurnBufferRef.current.trim());
                 directUserTurnBufferRef.current = "";
@@ -1021,18 +1087,38 @@ export function useGeminiLive({
               backupPcmChunksRef.current = [];
               const userText = msg.serverContent.inputTranscription.text.trim();
 
-              // Filter noise gema mikrofon / artefak non-Latin 1-suku kata (misal: "से", "。", atau noise ketukan)
-              const isSpuriousNoise =
-                !userText ||
-                /^[\u0900-\u097F\u0400-\u04FF\u0E00-\u0E7F\s.,!?-]+$/.test(userText) ||
-                (userText.length <= 2 && !/[a-zA-Z0-9]/.test(userText));
+              const msSinceAiSpoke = Date.now() - lastAiAudioEndTimeRef.current;
+              const isPostSpeechEchoWindow =
+                statusRef.current === "speaking" || msSinceAiSpoke < 1400;
 
+              // Tolak hanya filler 1-2 huruf tanpa alfanumerik, filler suara singkat, atau gema speaker sapaan awal
+              const isShortFillerNoise =
+                !userText ||
+                (userText.length <= 2 &&
+                  !/[a-zA-Z0-9\u0900-\u097F\u0400-\u04FF\u0E00-\u0E7F\u3040-\u30FF\u4E00-\u9FFF]/.test(
+                    userText
+                  )) ||
+                /^(?:hm+|uh+|eh+|ah+|oh+|um+|uh-huh|से|है|कि|तो|ना|哈+|嗯+|呃+|[.,!?-]+)$/i.test(
+                  userText
+                );
+
+              const isGreetingEchoLeak =
+                isInitialGreetingTurnRef.current &&
+                isPostSpeechEchoWindow &&
+                userText.length <= 12 &&
+                /^(?:se|nih|ya|celyn|rafli|halo|hai)$/i.test(userText);
+
+              const isSpuriousNoise =
+                isShortFillerNoise ||
+                isGreetingEchoLeak ||
+                (isPostSpeechEchoWindow && userText.length <= 4);
+
+              // PENTING: Jangan gunakan `return;` di sini agar outputTranscription/modelTurn/turnComplete
+              // di frame WebSocket yang sama tetap diproses dan stream tidak membeku.
               if (isSpuriousNoise) {
                 console.log("🛡️ [Noise Filter] Mengabaikan inputTranscription noise/echo:", userText);
-                return;
-              }
-
-              if (userText) {
+              } else {
+                isInitialGreetingTurnRef.current = false;
                 directUserTurnBufferRef.current += (directUserTurnBufferRef.current ? " " : "") + userText;
                 handleServerMessage({
                   type: "transcript",
@@ -1074,8 +1160,12 @@ export function useGeminiLive({
               }
 
               if (!bargeInMutedRef.current) {
+                lastAiAudioEndTimeRef.current = Date.now();
                 const rawCelynText = msg.serverContent.outputTranscription.text;
-                const emotionMatch = rawCelynText.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
+                directRawOutputBufferRef.current += rawCelynText;
+
+                const tailForEmotion = directRawOutputBufferRef.current.slice(-120);
+                const emotionMatch = tailForEmotion.match(/[\{\[\(]\s*(?:emotion|expression)\s*:\s*([a-zA-Z_-]+)\s*[\}\]\)]/i);
                 if (emotionMatch) {
                   const detectedEmotion = normalizeEmotion(emotionMatch[1]);
                   if (detectedEmotion && detectedEmotion !== "neutral") {
@@ -1085,8 +1175,19 @@ export function useGeminiLive({
                     setEmotion(detectedEmotion);
                   }
                 }
-                const celynText = stripVoiceMetadataTags(rawCelynText);
+
+                // Jalankan stripVoiceMetadataTags pada akumulasi buffer dan tahan potongan awalan tag menggantung
+                const fullClean = stripVoiceMetadataTags(directRawOutputBufferRef.current);
+                const safeClean = fullClean.replace(
+                  /(?:\bset(?:_[a-z0-9_]*)?|\[\s*(?:emotion|expression|mood)[^\]]*|\(\s*(?:emotion|expression|mood)[^\)]*|<\s*(?:emotion|expression)[^>]*)$/i,
+                  ""
+                );
+                if (directLastSentCleanLenRef.current > safeClean.length) {
+                  directLastSentCleanLenRef.current = safeClean.length;
+                }
+                const celynText = safeClean.slice(directLastSentCleanLenRef.current);
                 if (celynText) {
+                  directLastSentCleanLenRef.current = safeClean.length;
                   directTurnCelynTextRef.current += celynText;
                   handleServerMessage({
                     type: "transcript",
@@ -1127,6 +1228,7 @@ export function useGeminiLive({
                   part.inlineData &&
                   part.inlineData.mimeType?.startsWith("audio/")
                 ) {
+                  lastAiAudioEndTimeRef.current = Date.now();
                   if (!bargeInMutedRef.current) {
                     backupPcmChunksRef.current.push(part.inlineData.data);
                   }
@@ -1170,6 +1272,28 @@ export function useGeminiLive({
 
             if (msg.serverContent?.turnComplete) {
               bargeInMutedRef.current = false;
+              lastAiAudioEndTimeRef.current = Date.now();
+
+              // Flush sisa ekor transkrip streaming yang sempat ditahan di batas chunk
+              if (directRawOutputBufferRef.current) {
+                const finalClean = stripVoiceMetadataTags(directRawOutputBufferRef.current);
+                if (finalClean.length > directLastSentCleanLenRef.current) {
+                  const remainder = finalClean.slice(directLastSentCleanLenRef.current);
+                  if (remainder.trim()) {
+                    directTurnCelynTextRef.current += remainder;
+                    handleServerMessage({
+                      type: "transcript",
+                      speaker: "celyn",
+                      text: remainder,
+                    });
+                    if (useEdgeTts) {
+                      directTtsBufferRef.current += remainder;
+                    }
+                  }
+                }
+                directRawOutputBufferRef.current = "";
+                directLastSentCleanLenRef.current = 0;
+              }
 
               // Jika dalam satu turn penuh tidak ada outputTranscription sama sekali (misal model fallback text-only),
               // flush buffer cadangan teks part agar respon Celyn tetap tersampaikan
@@ -1301,13 +1425,7 @@ export function useGeminiLive({
                   if (fact) {
                     try {
                       const token = getStoredAuthToken();
-                      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-                      const headers: Record<string, string> = {
-                        "Content-Type": "application/json",
-                        "x-admin-password": getStoredAuthPassword() || "admin",
-                      };
-                      if (token) headers["Authorization"] = `Bearer ${token}`;
-                      if (customKey) headers["x-gemini-key"] = customKey;
+                      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
                       const res = await fetch("/api/remember", {
                         method: "POST",
@@ -1316,7 +1434,6 @@ export function useGeminiLive({
                           fact,
                           category,
                           importance,
-                          password: getStoredAuthPassword() || "admin",
                           token,
                         }),
                       });
@@ -1418,15 +1535,7 @@ export function useGeminiLive({
 
                     if (query) {
                       try {
-                        const password = getStoredAuthPassword() || "admin";
-                        const token = getStoredAuthToken();
-                        const headers: Record<string, string> = {
-                          "Content-Type": "application/json",
-                          "x-admin-password": password,
-                        };
-                        if (token) headers["Authorization"] = `Bearer ${token}`;
-                        const customKey = localStorage.getItem("celyn_custom_gemini_key") || "";
-                        if (customKey) headers["x-gemini-key"] = customKey;
+                        const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
                         const res = await fetch("/api/research", {
                           method: "POST",
@@ -1554,6 +1663,7 @@ export function useGeminiLive({
             }
           },
           onclose: (event: any) => {
+            if (connectionGenerationRef.current !== directGen) return;
             console.warn("🔌 [Celyn Live Direct] Sesi WebSocket ditutup:", {
               code: event?.code,
               reason: event?.reason,
@@ -1638,6 +1748,7 @@ export function useGeminiLive({
       autoGreetingTimerRef.current = window.setTimeout(async () => {
         if (!hasUserInitiatedTurnRef.current && !hasSentAutoGreetingRef.current && directSessionRef.current) {
           hasSentAutoGreetingRef.current = true;
+          isInitialGreetingTurnRef.current = true;
           try {
             await directSessionRef.current.sendClientContent({
               turns: [
@@ -1674,6 +1785,7 @@ export function useGeminiLive({
       return;
     }
 
+    const activeGen = ++connectionGenerationRef.current;
     sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     directTurnCelynTextRef.current = "";
 
@@ -1692,14 +1804,13 @@ export function useGeminiLive({
     setStatusMessage("Menghubungkan ke server backend...");
 
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const authPass = getStoredAuthPassword() || "admin";
     const authMode = getStoredAuthMode();
     const token = getStoredAuthToken();
     const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
     const voiceQuery = selectedVoice ? `&voice=${encodeURIComponent(selectedVoice)}` : "";
     const wsUrl =
       envWs ||
-      `${wsProtocol}//${window.location.hostname}:3001?password=${encodeURIComponent(authPass)}&authMode=${authMode}&sessionId=${encodeURIComponent(sessionIdRef.current)}${voiceQuery}${tokenQuery}`;
+      `${wsProtocol}//${window.location.hostname}:3001?authMode=${authMode}&sessionId=${encodeURIComponent(sessionIdRef.current)}${voiceQuery}${tokenQuery}`;
 
     let opened = false;
     const ws = new WebSocket(wsUrl);
@@ -1707,6 +1818,7 @@ export function useGeminiLive({
 
     // Timeout 6.5 detik untuk fallback ke Serverless jika server lokal lambat merespons
     const wsTimeout = window.setTimeout(() => {
+      if (connectionGenerationRef.current !== activeGen) return;
       if (!opened && wsRef.current === ws) {
         console.warn("⏱️ WebSocket local timeout (6.5s), beralih otomatis ke Serverless Ephemeral Token...");
         try {
@@ -1719,6 +1831,12 @@ export function useGeminiLive({
 
     ws.onopen = () => {
       clearTimeout(wsTimeout);
+      if (connectionGenerationRef.current !== activeGen) {
+        try {
+          ws.close();
+        } catch {}
+        return;
+      }
       opened = true;
       setConnectionLabel(wsUrl);
       setIsConnected(true);
@@ -1728,6 +1846,7 @@ export function useGeminiLive({
     };
 
     ws.onmessage = (event) => {
+      if (connectionGenerationRef.current !== activeGen) return;
       try {
         const msg = JSON.parse(event.data) as ServerMessage;
         handleServerMessage(msg);
@@ -1738,6 +1857,7 @@ export function useGeminiLive({
 
     ws.onerror = (err) => {
       clearTimeout(wsTimeout);
+      if (connectionGenerationRef.current !== activeGen) return;
       console.warn("WebSocket error, memeriksa fallback Serverless...", err);
       if (!opened) {
         wsRef.current = null;
@@ -1750,6 +1870,8 @@ export function useGeminiLive({
 
     ws.onclose = () => {
       clearTimeout(wsTimeout);
+      // Lindungi sesi baru agar socket lama yang terlambat menutup tidak menimpa status aktif
+      if (connectionGenerationRef.current !== activeGen) return;
       clearSessionTimers();
       if (opened) {
         setIsConnected(false);
@@ -1760,14 +1882,18 @@ export function useGeminiLive({
   }, [handleServerMessage, connectViaServerlessToken, flushPendingQueue, clearSessionTimers]);
 
   const disconnect = useCallback(() => {
+    connectionGenerationRef.current++;
     clearSessionTimers();
     if (autoGreetingTimerRef.current) {
       clearTimeout(autoGreetingTimerRef.current);
       autoGreetingTimerRef.current = null;
     }
     hasSentAutoGreetingRef.current = false;
+    isInitialGreetingTurnRef.current = true;
     directTurnHasOutputTranscriptionRef.current = false;
     directFallbackPartTextBufferRef.current = "";
+    directRawOutputBufferRef.current = "";
+    directLastSentCleanLenRef.current = 0;
     hasUserInitiatedTurnRef.current = false;
     bargeInMutedRef.current = false;
     pendingQueueRef.current = [];
@@ -1791,14 +1917,7 @@ export function useGeminiLive({
     setStatusMessage("Sesi dihentikan.");
 
     if (wasDirect && getStoredAuthMode() === "jocelyn") {
-      const token = getStoredAuthToken();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-admin-password": getStoredAuthPassword() || "admin",
-      };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-      if (customKey) headers["x-gemini-key"] = customKey;
+      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
       fetch("/api/summarize", {
         method: "POST",
@@ -1952,6 +2071,8 @@ export function useGeminiLive({
     bargeInMutedRef.current = true;
     directTtsTurnIdRef.current++;
     directTtsBufferRef.current = "";
+    directRawOutputBufferRef.current = "";
+    directLastSentCleanLenRef.current = 0;
     backupPcmChunksRef.current = [];
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "barge_in" }));
@@ -1983,6 +2104,7 @@ export function useGeminiLive({
   const sendText = useCallback(
     (text: string) => {
       hasUserInitiatedTurnRef.current = true;
+      isInitialGreetingTurnRef.current = false;
       bargeInMutedRef.current = false;
       directHasPendingToolCallRef.current = false;
       activeTurnSpeakerRef.current = "user";
@@ -2056,19 +2178,7 @@ export function useGeminiLive({
       };
 
       try {
-        const password = getStoredAuthPassword() || "admin";
-        const token = getStoredAuthToken();
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "x-admin-password": password,
-        };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-        }
-        const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-        if (customKey) {
-          headers["x-gemini-key"] = customKey;
-        }
+        const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
         const docsForContext = activeDocumentsRef.current;
         const fullText =
@@ -2107,7 +2217,6 @@ export function useGeminiLive({
                 instruction: instruction || `Buat dokumen berjudul '${title}' dari isi dokumen ini.`,
                 chunkIndex: i,
                 totalChunks: chunks.length,
-                password,
               },
               waitNote
             );
@@ -2137,7 +2246,6 @@ export function useGeminiLive({
                 instruction,
                 chunkIndex: 0,
                 totalChunks: 1,
-                password,
               },
               waitNote
             );
@@ -2159,7 +2267,6 @@ export function useGeminiLive({
               fileName: fileNameForRender,
               operation,
               sections: finalSections,
-              password,
             },
             waitNote
           );
@@ -2175,7 +2282,6 @@ export function useGeminiLive({
               title,
               instruction,
               context: fullText || undefined,
-              password,
             },
             waitNote
           );
@@ -2260,19 +2366,7 @@ export function useGeminiLive({
       };
 
       try {
-        const password = getStoredAuthPassword() || "admin";
-        const token = getStoredAuthToken();
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "x-admin-password": password,
-        };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-        }
-        const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-        if (customKey) {
-          headers["x-gemini-key"] = customKey;
-        }
+        const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
         // Cari dokumen di activeDocumentsRef (menggunakan teks utuh 100%)
         let targetDoc = activeDocumentsRef.current.find(
@@ -2314,7 +2408,7 @@ export function useGeminiLive({
             const r = await fetch("/api/documents/process", {
               method: "POST",
               headers,
-              body: JSON.stringify({ ...payload, password }),
+              body: JSON.stringify(payload),
             });
             if (r.status !== 429) return r;
             lastStatus = r.status;
@@ -2480,15 +2574,7 @@ export function useGeminiLive({
       const fileSizeMb = (file.size / (1024 * 1024)).toFixed(1);
 
       try {
-        const password = getStoredAuthPassword() || "admin";
-        const token = getStoredAuthToken();
-        const headers: Record<string, string> = {
-          "x-admin-password": password,
-          "Content-Type": "application/json",
-        };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-        }
+        const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
         let doc: ParsedDocument | null = null;
         const isImage =
@@ -2570,12 +2656,7 @@ export function useGeminiLive({
               const formData = new FormData();
               formData.append("file", thumb.blob, file.name);
 
-              const uploadHeaders: Record<string, string> = {
-                "x-admin-password": password,
-              };
-              if (token) uploadHeaders["Authorization"] = `Bearer ${token}`;
-              const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-              if (customKey) uploadHeaders["x-gemini-key"] = customKey;
+              const uploadHeaders = buildAuthHeaders();
 
               const controller = new AbortController();
               const timer = setTimeout(() => controller.abort(), 8500);
@@ -2632,7 +2713,7 @@ export function useGeminiLive({
 
             if (!doc.characterCount || doc.characterCount < 10) {
               throw new Error(
-                `Dokumen PDF '${file.name}' (${fileSizeMb} MB) adalah dokumen hasil scan murni tanpa teks digital. Untuk dokumen scan gambar, silakan perkecil atau kompres di bawah 4.5 MB agar dapat diproses oleh AI Vision OCR.`
+                `Dokumen PDF '${file.name}' (${fileSizeMb} MB) adalah dokumen hasil scan murni tanpa teks digital. Untuk dokumen scan gambar, silakan perkecil atau kompres di bawah 4.5 MB agar dapat diproses oleh sistem pemindaian visual cerdas.`
               );
             }
           } else if (file.name.match(/\.(csv|tsv|txt|md)$/i)) {
@@ -2658,16 +2739,7 @@ export function useGeminiLive({
           const formData = new FormData();
           formData.append("file", file);
 
-          const uploadHeaders: Record<string, string> = {
-            "x-admin-password": password,
-          };
-          if (token) {
-            uploadHeaders["Authorization"] = `Bearer ${token}`;
-          }
-          const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-          if (customKey) {
-            uploadHeaders["x-gemini-key"] = customKey;
-          }
+          const uploadHeaders = buildAuthHeaders();
 
           let res: Response | null = null;
           try {
@@ -2803,7 +2875,10 @@ export function useGeminiLive({
     setIsPhotoStageVisible,
     activePhotoDoc,
     lastPhotoEditSummary,
+    canUndoPhoto,
     resetActivePhoto,
+    undoActivePhoto,
+    applyEditedDocumentInPlace,
     handleExecutePhotoEdit,
     connect,
     disconnect,

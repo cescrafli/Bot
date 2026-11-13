@@ -85,6 +85,7 @@ export interface ParsedDocument {
   previewDataUrl?: string; // Data URL untuk pratinjau gambar & pemrosesan kanvas sisi klien
   originalPreviewDataUrl?: string; // Data URL foto asli sebelum diedit (untuk perbandingan & reset)
   transformedPreviewDataUrl?: string; // Data URL hasil manipulasi visual terkini
+  editHistory?: string[]; // Riwayat langkah edit foto sebelumnya untuk fitur Undo bertahap
   subjectBox?: { ymin: number; xmin: number; ymax: number; xmax: number }; // Koordinat bounding box subjek utama hasil AI Vision
 }
 

@@ -50,7 +50,12 @@ export const RigCalibrationPanel: React.FC<RigCalibrationPanelProps> = ({
   };
 
   return (
-    <div className="fixed inset-x-2.5 bottom-2.5 z-50 max-h-[55dvh] overflow-y-auto glass-panel border border-rose-500/30 rounded-2xl p-4 shadow-2xl text-xs text-slate-200 animate-in fade-in slide-in-from-bottom-4 sm:slide-in-from-right-4 backdrop-blur-xl sm:fixed sm:inset-auto sm:top-16 sm:right-6 sm:bottom-auto sm:left-auto sm:w-80 sm:max-h-[82vh]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Kalibrasi Rig 2D Celyn"
+      className="fixed inset-x-2.5 bottom-2.5 z-50 max-h-[55dvh] overflow-y-auto glass-panel border border-rose-500/30 rounded-2xl p-4 shadow-2xl text-xs text-slate-200 animate-in fade-in slide-in-from-bottom-4 sm:slide-in-from-right-4 backdrop-blur-xl sm:fixed sm:inset-auto sm:top-16 sm:right-6 sm:bottom-auto sm:left-auto sm:w-80 sm:max-h-[82vh]"
+    >
       {/* Header */}
       <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
         <div className="flex items-center gap-2">
@@ -58,8 +63,10 @@ export const RigCalibrationPanel: React.FC<RigCalibrationPanelProps> = ({
           <span className="font-semibold text-white">Kalibrasi Rig 2D Celyn</span>
         </div>
         <button
+          type="button"
           onClick={onClose}
-          className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+          aria-label="Tutup panel kalibrasi"
+          className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>

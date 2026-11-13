@@ -488,10 +488,16 @@ export function stripVoiceMetadataTags(raw: string): string {
     // 3. Token aksi atau emosi kata tunggal dalam kurung kurawal, misal: {happy}, {smile}, {tertawa}
     .replace(/\{[a-zA-Z0-9_-]+\}/g, "")
     // 4. Bersihkan kebocoran nama tool / function calls internal yang tidak sengaja terucap/tertulis
-    .replace(/\b(?:set_?expression|point_at_screen|remember_fact|create_document|process_document|research|edit_image)\s*(?:\([^)]*\)|:[^\s]*|\{[^}]*\})?\s*/gi, "")
-    // 5. Normalisasi spasi tanda baca: pastikan ada spasi setelah tanda baca jika langsung diikuti huruf
-    .replace(/([!?;:])([a-zA-Z0-9\u00C0-\u024F])/g, "$1 $2")
-    .replace(/([.,])([a-zA-Z\u00C0-\u024F])/g, "$1 $2")
+    .replace(/\b(?:set_?expression|set_avatar_pose|set_listening_state)(?:\s*\([^)]*\)|\s*\{[^}]*\}|\s*[:=]\s*[a-zA-Z0-9_-]+|\b)\s*/gi, "")
+    .replace(/\b(?:point_at_screen|remember_fact|create_document|generate_document|read_document|process_document|edit_image|edit_photo|web_search)(?:\s*\([^)]*\)|\s*\{[^}]*\}|\s*[:=]\s*[^\s,.!?]+)?\s*/gi, "")
+    .replace(/\bresearch\s*(?:\([^)]*\)|\{[^}]*\})\s*/gi, "")
+    // 5. Normalisasi spasi tanda baca tanpa merusak ekstensi file, domain URL, atau jam (12:30)
+    .replace(/([!?;])([a-zA-Z0-9\u00C0-\u024F])/g, "$1 $2")
+    .replace(/(:)(?!\/\/|\d)([a-zA-Z\u00C0-\u024F])/g, "$1 $2")
+    .replace(
+      /([.,])(?!(?:jpg|jpeg|png|webp|gif|svg|pdf|docx?|xlsx?|pptx?|txt|csv|json|js|ts|tsx|jsx|md|html|css|zip|mp3|mp4|wav|com|id|org|net|io|ai|co|dev|app|edu|gov)\b)([a-zA-Z\u00C0-\u024F])/gi,
+      "$1 $2"
+    )
     // 6. Bersihkan spasi berlebih atau baris kosong yang tercipta akibat penghapusan tag
     .replace(/^[ \t]+|[ \t]+$/gm, "")
     .replace(/[ \t]{2,}/g, " ")

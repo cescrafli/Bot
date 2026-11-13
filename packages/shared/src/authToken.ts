@@ -112,15 +112,53 @@ export function verifyPassword(provided: string, expected: string): boolean {
   return crypto.timingSafeEqual(provBuf, expBuf);
 }
 
+export interface PasswordEnvConfig {
+  ADMIN_PASSWORD?: string;
+  USER_PASSWORD?: string;
+  NODE_ENV?: string;
+}
+
 /**
- * High-level authentication check against supported passwords ("admin" or "login")
+ * Verifies user-supplied password against configured environment secrets.
+ * Fallback to hardcoded dev credentials ("admin" / "login") is restricted strictly
+ * to non-production environments when explicit env passwords are not set.
  */
-export function authenticateWithPassword(password: string): { valid: boolean; mode?: AuthMode } {
-  if (verifyPassword(password, "admin")) {
+export function verifyPasswordCredentials(
+  rawPass: string,
+  env: PasswordEnvConfig = typeof process !== "undefined" ? process.env : {}
+): { valid: boolean; mode?: AuthMode } {
+  const trimmed = String(rawPass || "").trim();
+  if (!trimmed) return { valid: false };
+
+  const adminPass = env.ADMIN_PASSWORD?.trim();
+  const userPass = env.USER_PASSWORD?.trim();
+  const isProd = env.NODE_ENV === "production";
+
+  if (adminPass) {
+    if (verifyPassword(trimmed, adminPass)) {
+      return { valid: true, mode: "jocelyn" };
+    }
+  } else if (!isProd && verifyPassword(trimmed.toLowerCase(), "admin")) {
     return { valid: true, mode: "jocelyn" };
   }
-  if (verifyPassword(password, "login")) {
+
+  if (userPass) {
+    if (verifyPassword(trimmed, userPass)) {
+      return { valid: true, mode: "default" };
+    }
+  } else if (!isProd && verifyPassword(trimmed.toLowerCase(), "login")) {
     return { valid: true, mode: "default" };
   }
+
   return { valid: false };
+}
+
+/**
+ * High-level authentication check against environment-configured passwords
+ */
+export function authenticateWithPassword(
+  password: string,
+  env?: PasswordEnvConfig
+): { valid: boolean; mode?: AuthMode } {
+  return verifyPasswordCredentials(password, env);
 }

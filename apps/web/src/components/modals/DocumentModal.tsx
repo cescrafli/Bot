@@ -23,7 +23,8 @@ import {
   Sliders,
 } from "lucide-react";
 import { ParsedDocument, DocumentKind } from "@celyn/shared";
-import { getStoredAuthPassword, getStoredAuthToken } from "../../hooks/useAuth.js";
+import { buildAuthHeaders } from "../../hooks/useAuth.js";
+import { ClientImageEditor } from "../../services/ClientImageEditor";
 
 interface DocumentModalProps {
   isOpen: boolean;
@@ -31,6 +32,12 @@ interface DocumentModalProps {
   activeDocuments: ParsedDocument[];
   onUploadDocument: (file: File) => Promise<any>;
   onRemoveDocument: (fileName: string) => void;
+  onApplyEditedInPlace?: (
+    fileName: string,
+    editedDataUrl: string,
+    mimeType: string,
+    summary?: string
+  ) => void;
   onGenerateDocument: (
     kind: DocumentKind,
     title: string,
@@ -47,6 +54,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   activeDocuments,
   onUploadDocument,
   onRemoveDocument,
+  onApplyEditedInPlace,
   onGenerateDocument,
   isUploading,
   isGenerating,
@@ -90,187 +98,83 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
 
   const [isApplyingEditedImage, setIsApplyingEditedImage] = useState(false);
 
-  const renderEditedImageToBlob = async (doc: ParsedDocument): Promise<Blob | null> => {
-    return new Promise((resolve) => {
-      const mime = `image/${imgOutputFormat === "jpeg" ? "jpeg" : imgOutputFormat}`;
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        resolve(null);
-        return;
+  const renderEditedImageResult = async (
+    doc: ParsedDocument
+  ): Promise<{ dataUrl: string; blob: Blob; mime: string }> => {
+    const mime = `image/${imgOutputFormat === "jpeg" ? "jpeg" : imgOutputFormat}`;
+    let fallbackSource = doc.previewDataUrl;
+
+    if (!fallbackSource) {
+      const placeholderCanvas = document.createElement("canvas");
+      placeholderCanvas.width = 800;
+      placeholderCanvas.height = 600;
+      const pCtx = placeholderCanvas.getContext("2d");
+      if (pCtx) {
+        pCtx.fillStyle = "#1e293b";
+        pCtx.fillRect(0, 0, 800, 600);
+        pCtx.fillStyle = "#e2e8f0";
+        pCtx.font = "bold 24px sans-serif";
+        pCtx.textAlign = "center";
+        pCtx.fillText(`[${doc.fileName}]`, 400, 300);
       }
+      fallbackSource = placeholderCanvas.toDataURL("image/png");
+    }
 
-      const applyFiltersAndTransforms = (
-        targetW: number,
-        targetH: number,
-        drawCallback: () => void
-      ) => {
-        const isRotatedQuarter = Math.abs(imgRotation) % 180 === 90;
-        canvas.width = isRotatedQuarter ? targetH : targetW;
-        canvas.height = isRotatedQuarter ? targetW : targetH;
-
-        ctx.save();
-        ctx.fillStyle = "#0f172a";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const filters = [
-          `brightness(${100 + imgBrightness}%)`,
-          `contrast(${100 + imgContrast}%)`,
-          `saturate(${100 + imgSaturation}%)`,
-          imgGrayscale ? "grayscale(100%)" : "",
-          imgInvert ? "invert(100%)" : "",
-        ].filter(Boolean).join(" ");
-        if (filters) ctx.filter = filters;
-
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((imgRotation * Math.PI) / 180);
-        ctx.scale(imgFlipH ? -1 : 1, imgFlipV ? -1 : 1);
-
-        drawCallback();
-        ctx.restore();
-
-        // Watermark & text annotation
-        if (imgAnnotationText.trim()) {
-          ctx.save();
-          const fontSize = Math.max(18, Math.round(canvas.width / 32));
-          ctx.font = `bold ${fontSize}px sans-serif`;
-          ctx.fillStyle = imgAnnotationColor || "#f43f5e";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "bottom";
-
-          const textMetrics = ctx.measureText(imgAnnotationText.trim());
-          const textW = textMetrics.width;
-          const bgPadding = 12;
-          const bannerY = canvas.height - fontSize - 24;
-
-          ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-          ctx.fillRect(
-            (canvas.width - textW) / 2 - bgPadding,
-            bannerY - bgPadding,
-            textW + bgPadding * 2,
-            fontSize + bgPadding * 2
-          );
-
-          ctx.fillStyle = imgAnnotationColor || "#f43f5e";
-          ctx.fillText(imgAnnotationText.trim(), canvas.width / 2, canvas.height - 24);
-          ctx.restore();
-        }
-
-        canvas.toBlob((blob) => resolve(blob), mime, 0.95);
-      };
-
-      if (doc.previewDataUrl) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          let srcX = 0;
-          let srcY = 0;
-          let srcW = img.naturalWidth || img.width || 800;
-          let srcH = img.naturalHeight || img.height || 600;
-
-          let targetW = srcW;
-          let targetH = srcH;
-
-          if (imgAspectRatio === "1:1") {
-            const size = Math.min(srcW, srcH);
-            srcX = (srcW - size) / 2;
-            srcY = (srcH - size) / 2;
-            srcW = size;
-            srcH = size;
-            targetW = 1000;
-            targetH = 1000;
-          } else if (imgAspectRatio === "16:9") {
-            let cropW = srcW;
-            let cropH = Math.round((srcW * 9) / 16);
-            if (cropH > srcH) {
-              cropH = srcH;
-              cropW = Math.round((srcH * 16) / 9);
-            }
-            srcX = (srcW - cropW) / 2;
-            srcY = (srcH - cropH) / 2;
-            srcW = cropW;
-            srcH = cropH;
-            targetW = 1600;
-            targetH = 900;
-          } else if (imgAspectRatio === "4:3") {
-            let cropW = srcW;
-            let cropH = Math.round((srcW * 3) / 4);
-            if (cropH > srcH) {
-              cropH = srcH;
-              cropW = Math.round((srcH * 4) / 3);
-            }
-            srcX = (srcW - cropW) / 2;
-            srcY = (srcH - cropH) / 2;
-            srcW = cropW;
-            srcH = cropH;
-            targetW = 1200;
-            targetH = 900;
-          }
-
-          applyFiltersAndTransforms(targetW, targetH, () => {
-            ctx.drawImage(img, srcX, srcY, srcW, srcH, -targetW / 2, -targetH / 2, targetW, targetH);
-          });
-        };
-        img.onerror = () => {
-          applyFiltersAndTransforms(800, 600, () => {
-            ctx.fillStyle = "#1e293b";
-            ctx.fillRect(-400, -300, 800, 600);
-            ctx.fillStyle = "#e2e8f0";
-            ctx.font = "bold 24px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText(`[${doc.fileName}]`, 0, 0);
-          });
-        };
-        img.src = doc.previewDataUrl;
-      } else {
-        let width = 800;
-        let height = 600;
-        if (imgAspectRatio === "1:1") {
-          width = 600;
-          height = 600;
-        } else if (imgAspectRatio === "16:9") {
-          width = 960;
-          height = 540;
-        } else if (imgAspectRatio === "4:3") {
-          width = 800;
-          height = 600;
-        }
-        applyFiltersAndTransforms(width, height, () => {
-          ctx.fillStyle = "#1e293b";
-          ctx.fillRect(-width / 2, -height / 2, width, height);
-          ctx.fillStyle = "#e2e8f0";
-          ctx.font = "bold 24px sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText(`[${doc.fileName}]`, 0, 0);
-        });
-      }
+    const { dataUrl, blob } = await ClientImageEditor.compositeEditedPhoto({
+      sourceDataUrl: fallbackSource,
+      action: "transform",
+      editMode: "filter_adjust",
+      rotation: imgRotation,
+      flipHorizontal: imgFlipH,
+      flipVertical: imgFlipV,
+      aspectRatio: imgAspectRatio,
+      brightness: imgBrightness,
+      contrast: imgContrast,
+      saturation: imgSaturation,
+      grayscale: imgGrayscale,
+      invert: imgInvert,
+      watermarkText: imgAnnotationText,
+      watermarkColor: imgAnnotationColor,
+      outputFormat: imgOutputFormat,
     });
+
+    return { dataUrl, blob, mime };
   };
 
   const handleDownloadEditedImage = async (doc: ParsedDocument) => {
-    const blob = await renderEditedImageToBlob(doc);
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const baseName = doc.fileName.replace(/\.[^/.]+$/, "");
-    a.href = url;
-    a.download = `${baseName}_edited.${imgOutputFormat}`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    try {
+      const { blob } = await renderEditedImageResult(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const baseName = doc.fileName.replace(/\.[^/.]+$/, "");
+      a.href = url;
+      a.download = `${baseName}_edited.${imgOutputFormat}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Gagal mengunduh hasil olahan gambar.");
+    }
   };
 
   const handleApplyAndAnalyzeWithCelyn = async (doc: ParsedDocument) => {
     setIsApplyingEditedImage(true);
     setErrorMessage(null);
     try {
-      const blob = await renderEditedImageToBlob(doc);
-      if (!blob) throw new Error("Gagal merender hasil olahan gambar.");
-      const mime = `image/${imgOutputFormat === "jpeg" ? "jpeg" : imgOutputFormat}`;
-      const baseName = doc.fileName.replace(/\.[^/.]+$/, "");
-      const newFile = new File([blob], `${baseName}_edited.${imgOutputFormat}`, { type: mime });
-      await onUploadDocument(newFile);
+      const { dataUrl, blob, mime } = await renderEditedImageResult(doc);
+      if (onApplyEditedInPlace) {
+        onApplyEditedInPlace(
+          doc.fileName,
+          dataUrl,
+          mime,
+          "Edit manual Studio Foto (Filter / Transformasi)"
+        );
+      } else {
+        const baseName = doc.fileName.replace(/\.[^/.]+$/, "");
+        const newFile = new File([blob], `${baseName}_edited.${imgOutputFormat}`, { type: mime });
+        await onUploadDocument(newFile);
+      }
       setEditingDoc(null);
     } catch (err: any) {
       setErrorMessage(err?.message || "Gagal menerapkan hasil edit gambar.");
@@ -315,7 +219,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
         setErrorMessage(
           msg.includes("melebihi batas")
             ? msg
-            : "Ukuran file terlalu besar untuk diproses serverless (maksimal 4.5 MB per file). Harap gunakan file dokumen di bawah 4.5 MB."
+            : "Ukuran file melebihi batas unggahan server (maksimal 4.5 MB). Gunakan PDF (diproses langsung di perangkat) atau perkecil ukuran file."
         );
       } else {
         setErrorMessage(msg);
@@ -329,15 +233,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setIsProcessingInPlace(true);
     setErrorMessage(null);
     try {
-      const password = getStoredAuthPassword() || "admin";
-      const token = getStoredAuthToken();
-      const customKey = (localStorage.getItem("celyn_custom_gemini_key") || "").trim();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-admin-password": password,
-      };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (customKey) headers["x-gemini-key"] = customKey;
+      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
       const res = await fetch("/api/documents/process", {
         method: "POST",
@@ -418,11 +314,18 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="w-full max-w-xl max-h-[90dvh] overflow-y-auto glass-panel rounded-2xl border border-white/10 shadow-2xl p-4 sm:p-6 relative no-scrollbar">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Manajemen Dokumen Celyn"
+        className="w-full max-w-xl max-h-[90dvh] overflow-y-auto glass-panel rounded-2xl border border-white/10 shadow-2xl p-4 sm:p-6 relative no-scrollbar"
+      >
         {/* Tombol Tutup */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 sm:top-5 sm:right-5 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+          aria-label="Tutup modal dokumen"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -533,10 +436,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                 )}
               </div>
               <p className="text-xs sm:text-sm font-semibold text-white mb-1">
-                {isUploading ? "Memproses Dokumen/Foto (Vision OCR)..." : "Klik untuk pilih file foto atau dokumen (Bisa banyak file)"}
+                {isUploading ? "Memproses Dokumen/Foto (Pemindaian Teks & Visual Cerdas)..." : "Klik untuk pilih file foto atau dokumen (Bisa banyak file)"}
               </p>
               <p className="text-[11px] text-slate-400">
-                Mendukung Foto (PNG, JPG, WEBP, GIF), PDF, Excel (.xlsx, .xls, .csv), Word (.docx, .doc), dan Teks (.txt) — hingga 500 MB/file
+                Mendukung PDF hingga 500 MB (diproses lokal) • Foto, Word, Excel, dan Teks hingga 4.5 MB/file
               </p>
             </div>
 
@@ -606,7 +509,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                                 ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
                                 : "text-slate-400 hover:text-white hover:bg-slate-800"
                             }`}
-                            title="Lihat isi hasil ekstraksi / Vision OCR"
+                            title="Lihat isi hasil ekstraksi & pemindaian teks"
                           >
                             <Eye className="w-3.5 h-3.5" />
                             <span className="hidden sm:inline">Lihat Isi</span>
@@ -627,10 +530,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                                 ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
                                 : "text-slate-400 hover:text-white hover:bg-slate-800"
                             }`}
-                            title={isImageDoc(doc) ? "Studio Olah Gambar" : "Edit / Proses dokumen in-place"}
+                            title={isImageDoc(doc) ? "Studio Olah Gambar" : "Edit / proses dokumen langsung"}
                           >
                             <Edit3 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">{isImageDoc(doc) ? "Studio Foto" : "Edit In-Place"}</span>
+                            <span className="hidden sm:inline">{isImageDoc(doc) ? "Studio Foto" : "Studio Edit Langsung"}</span>
                           </button>
 
                           <button
@@ -920,7 +823,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5">
                               <Sparkles className="w-3.5 h-3.5" />
-                              <span>Proses & Edit Dokumen In-Place</span>
+                              <span>Proses & Edit Dokumen Langsung</span>
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">
                               Format: {doc.fileName.split(".").pop()?.toUpperCase()}
