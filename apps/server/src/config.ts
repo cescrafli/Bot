@@ -31,19 +31,27 @@ const primaryGeminiApiKey = geminiApiKeys[0] || "";
 
 const isProductionEnv = process.env.NODE_ENV === "production";
 const configuredAuthSecret = (process.env.AUTH_SECRET || "").trim();
+const envAuthSeed = (
+  process.env.TURSO_AUTH_TOKEN ||
+  primaryGeminiApiKey ||
+  process.env.ADMIN_PASSWORD ||
+  ""
+).trim();
 if (!configuredAuthSecret && isProductionEnv) {
   console.warn(
-    "[SECURITY] ⚠️ AUTH_SECRET belum disetel di production! Menggunakan secret sementara per proses — harap konfigurasi AUTH_SECRET di environment."
+    "[SECURITY] ⚠️ AUTH_SECRET belum disetel di production! Menggunakan derived session secret — harap konfigurasi AUTH_SECRET di environment."
   );
 }
 
 export const config = {
   port: parseInt(process.env.PORT || "3001", 10),
-  adminPassword: process.env.ADMIN_PASSWORD || (isProductionEnv ? "" : "admin"),
-  userPassword: process.env.USER_PASSWORD || (isProductionEnv ? "" : "login"),
+  adminPassword: process.env.ADMIN_PASSWORD || "admin",
+  userPassword: process.env.USER_PASSWORD || "login",
   authSecret:
     configuredAuthSecret ||
-    (isProductionEnv ? crypto.randomBytes(32).toString("hex") : "celyn-secret-session-key-2026"),
+    (envAuthSeed
+      ? crypto.createHmac("sha256", "celyn-session-signing-salt-2026").update(envAuthSeed).digest("hex")
+      : "celyn-secret-session-key-2026"),
   geminiApiKey: primaryGeminiApiKey,
   geminiApiKeys,
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-live",

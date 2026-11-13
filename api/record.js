@@ -851,20 +851,28 @@ function safeTimingMatch(a, b) {
 
 function resolveApiAuthSecret() {
   const configured = (process.env.AUTH_SECRET || "").trim();
-  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
-  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return null;
+  if (configured) return configured;
+  const envSeed = (
+    process.env.TURSO_AUTH_TOKEN ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEYS ||
+    process.env.ADMIN_PASSWORD ||
+    ""
+  ).trim();
+  if (envSeed) {
+    return createHmac("sha256", "celyn-session-signing-salt-2026").update(envSeed).digest("hex");
+  }
   return "celyn-secret-session-key-2026";
 }
 
 function verifyAdminPassword(rawPass) {
   const trimmed = String(rawPass || "").trim();
   if (!trimmed) return false;
-  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
   const expectedPassword = (process.env.ADMIN_PASSWORD || "").trim();
   if (expectedPassword) {
     return safeTimingMatch(trimmed, expectedPassword);
   }
-  return !isProd && safeTimingMatch(trimmed.toLowerCase(), "admin");
+  return safeTimingMatch(trimmed.toLowerCase(), "admin");
 }
 
 function applyCors(req, res, methods = "POST, OPTIONS") {

@@ -815,8 +815,17 @@ function safeTimingMatch(a, b) {
 
 function resolveApiAuthSecret() {
   const configured = (process.env.AUTH_SECRET || "").trim();
-  if (configured && configured !== "celyn-secret-session-key-2026") return configured;
-  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return null;
+  if (configured) return configured;
+  const envSeed = (
+    process.env.TURSO_AUTH_TOKEN ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEYS ||
+    process.env.ADMIN_PASSWORD ||
+    ""
+  ).trim();
+  if (envSeed) {
+    return crypto.createHmac("sha256", "celyn-session-signing-salt-2026").update(envSeed).digest("hex");
+  }
   return "celyn-secret-session-key-2026";
 }
 
@@ -849,14 +858,13 @@ function verifyTtsAuth(req) {
   ).trim();
   if (!directPass) return false;
 
-  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
   const adminPass = (process.env.ADMIN_PASSWORD || "").trim();
   const userPass = (process.env.USER_PASSWORD || "").trim();
 
-  if (adminPass ? safeTimingMatch(directPass, adminPass) : (!isProd && safeTimingMatch(directPass.toLowerCase(), "admin"))) {
+  if (adminPass ? safeTimingMatch(directPass, adminPass) : safeTimingMatch(directPass.toLowerCase(), "admin")) {
     return true;
   }
-  if (userPass ? safeTimingMatch(directPass, userPass) : (!isProd && safeTimingMatch(directPass.toLowerCase(), "login"))) {
+  if (userPass ? safeTimingMatch(directPass, userPass) : safeTimingMatch(directPass.toLowerCase(), "login")) {
     return true;
   }
   return false;

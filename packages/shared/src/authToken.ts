@@ -120,8 +120,8 @@ export interface PasswordEnvConfig {
 
 /**
  * Verifies user-supplied password against configured environment secrets.
- * Fallback to hardcoded dev credentials ("admin" / "login") is restricted strictly
- * to non-production environments when explicit env passwords are not set.
+ * Defaults to "admin" (jocelyn mode) and "login" (default user mode) unless
+ * ADMIN_PASSWORD / USER_PASSWORD are explicitly customized in the environment.
  */
 export function verifyPasswordCredentials(
   rawPass: string,
@@ -132,13 +132,12 @@ export function verifyPasswordCredentials(
 
   const adminPass = env.ADMIN_PASSWORD?.trim();
   const userPass = env.USER_PASSWORD?.trim();
-  const isProd = env.NODE_ENV === "production";
 
   if (adminPass) {
     if (verifyPassword(trimmed, adminPass)) {
       return { valid: true, mode: "jocelyn" };
     }
-  } else if (!isProd && verifyPassword(trimmed.toLowerCase(), "admin")) {
+  } else if (verifyPassword(trimmed.toLowerCase(), "admin")) {
     return { valid: true, mode: "jocelyn" };
   }
 
@@ -146,7 +145,7 @@ export function verifyPasswordCredentials(
     if (verifyPassword(trimmed, userPass)) {
       return { valid: true, mode: "default" };
     }
-  } else if (!isProd && verifyPassword(trimmed.toLowerCase(), "login")) {
+  } else if (verifyPassword(trimmed.toLowerCase(), "login")) {
     return { valid: true, mode: "default" };
   }
 
